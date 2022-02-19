@@ -8,7 +8,9 @@
         <posx>0</posx>
         <posy>0</posy>
         <description>Background !Playing</description>
-        <visible>!Player.HasVideo + !Player.Playing + !Player.Paused</visible>
+        
+        <visible>true</visible>
+        <!-- <visible>!Player.HasVideo + !Player.Playing + !Player.Paused</visible> -->
         <control type="group">
           <description>Background Dynamic</description>
           <control type="image"> 
@@ -21,12 +23,12 @@
             <colordiffuse>black</colordiffuse>
             <texture>colors/white.png</texture>
           </control>
-          <!-- <control type="image">  -->
-            <!-- <width>auto</width> -->
-            <!-- <height>auto</height> -->
-            <!-- <texture>backgrounds/background.gif</texture> -->
-            <!-- <aspectratio scalediffuse="false" align="center" aligny="center">keep</aspectratio> -->
-          <!-- </control> -->
+          <control type="image"> 
+            <width>auto</width>
+            <height>auto</height>
+            <texture>backgrounds/giphy.gif</texture>
+            <aspectratio scalediffuse="false" align="center" aligny="center">scale</aspectratio>
+          </control>
           <control type="grouplist">
             <posx>1440</posx>
             <posy>850</posy>
@@ -100,7 +102,8 @@
         <posx>0</posx>
         <posy>0</posy>
         <description>Background Playing</description>
-        <visible>Player.HasVideo + Player.Playing</visible>
+        <!-- <visible>Player.HasVideo + Player.Playing</visible> -->
+        <visible>false</visible>
         <control type="image"> 
           <description>Hide Background</description>
           <width>auto</width>
@@ -111,15 +114,15 @@
           <colordiffuse>black</colordiffuse>
           <texture>colors/white.png</texture>
         </control>
-        <control type="videowindow" id="41000">
-          <description>Video Overlay</description>
-          <posx>0</posx>
-          <posy>0</posy>
-          <width>auto</width>
-          <height>auto</height>
-          <align>center</align>
-          <aligny>center</aligny>
-        </control>
+        <!-- <control type="videowindow" id="41000"> -->
+          <!-- <description>Video Overlay</description> -->
+          <!-- <posx>0</posx> -->
+          <!-- <posy>0</posy> -->
+          <!-- <width>auto</width> -->
+          <!-- <height>auto</height> -->
+          <!-- <align>center</align> -->
+          <!-- <aligny>center</aligny> -->
+        <!-- </control> -->
                 
         <control type="group">
           <description>Skip/Startover</description>
