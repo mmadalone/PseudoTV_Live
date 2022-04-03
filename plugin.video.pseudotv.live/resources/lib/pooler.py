@@ -1,5 +1,4 @@
-  # Copyright (C) 2022 Lunatixz
-
+# Copyright (C) 2022 Lunatixz
 
 # This file is part of PseudoTV Live.
 
@@ -25,26 +24,13 @@ from itertools                 import repeat, count
 from functools                 import partial, wraps
 from resources.lib.cache       import Cache, cacheit
 
-try:
-    if (xbmc.getCondVisibility('System.Platform.Android') or xbmc.getCondVisibility('System.Platform.Windows')):
-        from multiprocessing.dummy import Pool as ThreadPool
-        USING_THREAD = True
-    else:
-        from multiprocessing.pool  import ThreadPool
-        USING_THREAD = False
-    from multiprocessing  import Process
-    from _multiprocessing import SemLock, sem_unlink #hack to raise two python issues. _multiprocessing import error, sem_unlink missing from native python (android).
-except Exception as e:
-    from resources.lib._threadpool import ThreadPool 
-    USING_THREAD = True
-    
 ADDON_ID      = 'plugin.video.pseudotv.live'
 REAL_SETTINGS = xbmcaddon.Addon(id=ADDON_ID)
 ADDON_NAME    = REAL_SETTINGS.getAddonInfo('name')
 ADDON_PATH    = REAL_SETTINGS.getAddonInfo('path')
 ADDON_VERSION = REAL_SETTINGS.getAddonInfo('version')
 PAGE_LIMIT    = REAL_SETTINGS.getSettingInt('Page_Limit')
-
+        
 def timeit(method):
     @wraps(method)
     def wrapper(*args, **kwargs):
@@ -65,11 +51,9 @@ def killit(timeout=15.0, default={}):
                     threading.Thread.__init__(self)
                     self.result = None
                     self.error  = None
-                
                 def run(self):
                     try:    self.result = method(*args, **kwargs)
                     except: self.error  = sys.exc_info()[0]
-            
             timer = waiter()
             timer.start()
             timer.join(timeout)
@@ -82,24 +66,33 @@ def killit(timeout=15.0, default={}):
             return timer.result
         return wrapper
     return internal
-    
-def roundupDIV(p, q):
-    try:
-        d, r = divmod(p, q)
-        if r: d += 1
-        return d
-    except ZeroDivisionError: 
-        return 1
-    
+
+def threadit(method):
+    @wraps(method)
+    def wrapper(items=[], args=None, kwargs=None):
+        results  = []
+        cpucount = Cores().CPUcount()
+        size     = len(list(chunkLst(items,cpucount)))
+        pool     = Concurrent(size)
+        if cpucount > 1: results = pool.executors(method, items, args, kwargs, chunksize=size)
+        if not results:  results = pool.generator(method, items, args, kwargs)
+        log('%s, %s return %s'%(method.__qualname__.replace('.',': '),pool.__class__.__name__,len(results)))
+        return results
+    return wrapper
+
+def chunkLst(lst, n):
+    for i in range(0, len(lst), n):
+        yield lst[i:i + n]
+        
 def log(msg, level=xbmc.LOGDEBUG):
     if not REAL_SETTINGS.getSetting('Enable_Debugging') == "true" and level != xbmc.LOGERROR: return
     if level == xbmc.LOGERROR: msg = '%s\n%s'%(msg,traceback.format_exc())
     xbmc.log('%s-%s-%s'%(ADDON_ID,ADDON_VERSION,msg),level)
-    
    
 class Concurrent:
-    def __init__(self):
-        self.cpuCount = Cores().CPUcount() * 2
+    def __init__(self, cpuCount=None):
+        if cpuCount is None: cpuCount = Cores().CPUcount()
+        self.cpuCount = cpuCount
         # https://pythonhosted.org/futures/
         # https://docs.python.org/3/library/concurrent.futures.html#concurrent.futures
         
@@ -120,9 +113,9 @@ class Concurrent:
     @timeit
     def executors(self, func, items=[], args=None, kwargs=None, chunksize=None, timeout=300):
         results = []
-        if chunksize is None: chunksize = roundupDIV(len(items), Cores().CPUcount())
+        if chunksize is None: chunksize = len(list(chunkLst(items,self.cpuCount)))
         if len(items) == 0 or chunksize < 1: chunksize = 1 #set min. size
-        self.log("executors, chunksize = %s, items = %s"%(chunksize,len(items)))
+        self.log("ThreadPoolExecutor executors, chunksize = %s, items = %s, threads = %s"%(chunksize,len(items),self.cpuCount))
         
         with concurrent.futures.ThreadPoolExecutor(self.cpuCount) as executor:
             if kwargs and isinstance(kwargs,dict):
@@ -133,14 +126,26 @@ class Concurrent:
                     results = executor.map(func, items, timeout, chunksize)
                 except Exception as e:
                     for item in items: results.append(self.executor(func, item))
-                    # self.log("executors, Failed! %s"%(e), xbmc.LOGERROR)
             try:    return list(filter(None,results))
             except: return list(results)
+
+
+    @timeit
+    def generator(self, func, items=[], args=None, kwargs=None):
+        results = []
+        self.log("generator, items = %s"%(len(items)))
+        if kwargs and isinstance(kwargs,dict): 
+            results = [results.append(partial(method, **kwargs)(i)) for i in items]
+        elif args: 
+            results = [results.append(method(i)) for i in zip(items,repeat(args))]
+        try:    return list(filter(None,results))
+        except: return list(results)
 
 
 class Parallel:
-    def __init__(self):
-        self.cpuCount = Cores().CPUcount()
+    def __init__(self, cpuCount=None):
+        if cpuCount is None: cpuCount = Cores().CPUcount()
+        self.cpuCount = cpuCount
         # https://pythonhosted.org/futures/
         # https://docs.python.org/3/library/concurrent.futures.html#concurrent.futures
         
@@ -157,13 +162,13 @@ class Parallel:
             if call: future.add_done_callback(call)
             return future.result()
             
-            
+
     @timeit
     def executors(self, func, items=[], args=None, kwargs=None, chunksize=None, timeout=300):
         results = []
-        if chunksize is None: chunksize = roundupDIV(len(items), Cores().CPUcount())
+        if chunksize is None: chunksize = len(list(chunkLst(items,self.cpuCount)))
         if len(items) == 0 or chunksize < 1: chunksize = 1 #set min. size
-        self.log("executors, chunksize = %s, items = %s"%(chunksize,len(items)))
+        self.log("ProcessPoolExecutor executors, chunksize = %s, items = %s, cores = %s"%(chunksize,len(items),self.cpuCount))
         
         with concurrent.futures.ProcessPoolExecutor(self.cpuCount) as executor:
             if kwargs and isinstance(kwargs,dict):
@@ -174,46 +179,18 @@ class Parallel:
                     results = executor.map(func, items, timeout, chunksize)
                 except Exception as e:
                     for item in items: results.append(self.executor(func, item))
-                    # self.log("executors, Failed! %s"%(e), xbmc.LOGERROR)
             try:    return list(filter(None,results))
             except: return list(results)
-                
-                
-class PoolHelper:
-    def __init__(self):
-        self.cpuCount = Cores().CPUcount()
-        if USING_THREAD: self.pool = Concurrent()
-        else:            self.pool = Parallel()
-        
-        
-    def log(self, msg, level=xbmc.LOGDEBUG):
-        return log('%s: %s'%(self.__class__.__name__,msg),level)
- 
- 
-    def executor(self, func, args=None, kwargs=None, call=None):
-        return self.pool.executor(func, args, kwargs, call)
-            
-        
-    @timeit
-    def poolList(self, func, items=[], args=None, kwargs=None, timeout=300, chunksize=None): 
-        if chunksize is None: chunksize = roundupDIV(len(items), self.cpuCount)
-        if len(items) == 0 or chunksize < 1: chunksize = 1 #set min. size
-        self.log("poolList, chunksize = %s, items = %s"%(chunksize,len(items)))
-        
-        if kwargs and isinstance(kwargs,dict): 
-            func = partial(func, **kwargs)
-        elif args: 
-            items = zip(items,repeat(args))
-            
-        try:    
-            pool = ThreadPool(processes=self.cpuCount)
-            results = pool.imap(func, items, chunksize)
-            pool.close()
-            pool.join()
-        except Exception as e: 
-            self.log("poolList, threadPool Failed! %s"%(e), xbmc.LOGERROR)
-            results = [results.append(func(i)) for i in items]
 
+
+    @timeit
+    def generator(self, func, items=[], args=None, kwargs=None):
+        results = []
+        self.log("generator, items = %s"%(len(items)))
+        if kwargs and isinstance(kwargs,dict): 
+            results = [results.append(partial(method, **kwargs)(i)) for i in items]
+        elif args: 
+            results = [results.append(method(i)) for i in zip(items,repeat(args))]
         try:    return list(filter(None,results))
         except: return list(results)
 
