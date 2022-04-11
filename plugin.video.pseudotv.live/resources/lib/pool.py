@@ -16,13 +16,15 @@
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 
 # -*- coding: utf-8 -*-
-import threading, concurrent.futures
-import sys, time, re, os, subprocess, traceback
+import threading, sys, time, re, os, subprocess, traceback
 
+from concurrent.futures        import ThreadPoolExecutor, ProcessPoolExecutor
+from threading                 import Event, Thread, Timer
 from kodi_six                  import xbmc, xbmcaddon
 from itertools                 import repeat, count
 from functools                 import partial, wraps
 from resources.lib.cache       import Cache, cacheit
+
 
 ADDON_ID      = 'plugin.video.pseudotv.live'
 REAL_SETTINGS = xbmcaddon.Addon(id=ADDON_ID)
@@ -46,9 +48,9 @@ def killit(timeout=15.0, default={}):
     def internal(method):
         @wraps(method)
         def wrapper(*args, **kwargs):
-            class waiter(threading.Thread):
+            class waiter(Thread):
                 def __init__(self):
-                    threading.Thread.__init__(self)
+                    Thread.__init__(self)
                     self.result = None
                     self.error  = None
                 def run(self):
@@ -67,18 +69,55 @@ def killit(timeout=15.0, default={}):
         return wrapper
     return internal
 
-def threadit(method):
+def poolit(method):
     @wraps(method)
     def wrapper(items=[], args=None, kwargs=None):
         results  = []
         cpucount = Cores().CPUcount()
-        size     = len(list(chunkLst(items,cpucount)))
-        pool     = Concurrent(size)
+        size = len(list(chunkLst(items,cpucount)))
+        pool = Concurrent(cpucount)
         if cpucount > 1: results = pool.executors(method, items, args, kwargs, chunksize=size)
         if not results:  results = pool.generator(method, items, args, kwargs)
         log('%s, %s'%(method.__qualname__.replace('.',': '),pool.__class__.__name__))
         try:    return list(filter(None,results))
         except: return list(results)
+    return wrapper
+         
+def timerit(method):
+    @wraps(method)
+    def wrapper(wait, *args, **kwargs):
+        thread_name = '%s.%s'%('timerit',method.__qualname__.replace('.',': '))
+        for thread in threading.enumerate():
+            if thread.name == thread_name:
+                try: 
+                    thread.cancel()
+                    thread.join()
+                    log('%s, timerit canceling %s'%(method.__qualname__.replace('.',': '),thread_name))
+                except: pass
+        timer = Timer(wait, method, *args, **kwargs)
+        timer.name = thread_name
+        timer.start()
+        log('%s, timerit starting @ wait = %s'%(method.__qualname__.replace('.',': '),wait))
+        return timer
+    return wrapper  
+    
+def threadit(method):
+    @wraps(method)
+    def wrapper(*args, **kwargs):
+        thread_name = '%s.%s'%('threadit',method.__qualname__.replace('.',': '))
+        for thread in threading.enumerate():
+            if thread.name == thread_name:
+                try: 
+                    thread.cancel()
+                    thread.join()
+                    log('%s, threadit canceling %s'%(method.__qualname__.replace('.',': '),thread_name))
+                except: pass
+        thread = Thread(target=method, *args, **kwargs)
+        thread.daemon = True
+        thread.name = thread_name
+        thread.start()
+        log('%s, threadit starting'%(method.__qualname__.replace('.',': ')))
+        return thread
     return wrapper
 
 def chunkLst(lst, n):
@@ -103,7 +142,7 @@ class Concurrent:
 
 
     def executor(self, func, args=None, kwargs=None, call=None):
-        with concurrent.futures.ThreadPoolExecutor(self.cpuCount) as executor:
+        with ThreadPoolExecutor(self.cpuCount) as executor:
             if   args:   future = executor.submit(func, args)
             elif kwargs: future = executor.submit(func, kwargs)
             else:        future = executor.submit(func)
@@ -118,7 +157,7 @@ class Concurrent:
         if len(items) == 0 or chunksize < 1: chunksize = 1 #set min. size
         self.log("ThreadPoolExecutor executors, chunksize = %s, items = %s, threads = %s"%(chunksize,len(items),self.cpuCount))
         
-        with concurrent.futures.ThreadPoolExecutor(self.cpuCount) as executor:
+        with ThreadPoolExecutor(self.cpuCount) as executor:
             if kwargs and isinstance(kwargs,dict):
                 results = executor.map(partial(func, **kwargs), items, timeout, chunksize)
             else:
@@ -154,7 +193,7 @@ class Parallel:
 
 
     def executor(self, func, args=None, kwargs=None, call=None):
-        with concurrent.futures.ProcessPoolExecutor(self.cpuCount) as executor:
+        with ProcessPoolExecutor(self.cpuCount) as executor:
             if   args:   future = executor.submit(func, args)
             elif kwargs: future = executor.submit(func, kwargs)
             else:        future = executor.submit(func)
@@ -169,7 +208,7 @@ class Parallel:
         if len(items) == 0 or chunksize < 1: chunksize = 1 #set min. size
         self.log("ProcessPoolExecutor executors, chunksize = %s, items = %s, cores = %s"%(chunksize,len(items),self.cpuCount))
         
-        with concurrent.futures.ProcessPoolExecutor(self.cpuCount) as executor:
+        with ProcessPoolExecutor(self.cpuCount) as executor:
             if kwargs and isinstance(kwargs,dict):
                 results = executor.map(partial(func, **kwargs), items, timeout, chunksize)
             else:
