@@ -1,4 +1,4 @@
-#   Copyright (C) 2022 Lunatixz
+#   Copyright (C) 2023 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -17,9 +17,9 @@
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 
 # -*- coding: utf-8 -*-
-# -entry point-
-from resources.lib.globals   import *
-from resources.lib.plugin    import Plugin
+
+from globals   import *
+from plugin    import Plugin
 
 def run(sysARG):  
     params  = dict(urllib.parse.parse_qsl(sysARG[2][1:].replace('.pvr','')))
@@ -32,15 +32,14 @@ def run(sysARG):
     log("Default: run, params = %s"%(params))
 
     if mode == 'guide':
-        loadGuide()
+        BUILTIN.executebuiltin("Dialog.Close(all)")
+        BUILTIN.executebuiltin("ActivateWindow(TVGuide,pvr://channels/tv/%s,return)"%(quoteString(ADDON_NAME)))
     elif mode == 'settings': 
-        openAddonSettings()
-    elif mode == 'vod':      
-        Plugin(sysARG).playVOD(name, id)
+        BUILTIN.executebuiltin('Addon.OpenSettings(%s)'%ADDON_ID)
+    elif mode == 'vod': 
+        timerit(Plugin(sysARG).playVOD)(.001,(name,id))
     elif mode == 'play':
-        if radio: Plugin(sysARG).playRadio(name, id)
-        else:     Plugin(sysARG).playChannel(name, id, isPlaylist=bool(SETTINGS.getSettingInt('Playback_Method')))
+        if radio: timerit(Plugin(sysARG).playRadio)(.001,(name,id))
+        else:     timerit(Plugin(sysARG).playChannel)(.001,(name,id,bool(SETTINGS.getSettingInt('Playback_Method'))))
 
-if __name__ == '__main__': 
-    if not addonEnabled(ADDON_ID): toggleADDON(ADDON_ID)
-    run(sys.argv)
+if __name__ == '__main__': run(sys.argv)

@@ -1,4 +1,4 @@
-#   Copyright (C) 2022 Lunatixz
+#   Copyright (C) 2023 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -17,10 +17,13 @@
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 
 # -*- coding: utf-8 -*-
-# -entry point-
-from resources.lib.globals import *
-from resources.lib.plugin  import Plugin
+from globals import *
 
-if __name__ == '__main__':
-    if not addonEnabled(ADDON_ID): toggleADDON(ADDON_ID)
-    Plugin(sys.argv)
+class Context:
+    def __init__(self, sysARG, writer):
+        with busy_dialog():
+            log('Context: __init__, sysARG = %s'%(sysARG))
+            DIALOG.infoDialog(LISTITEMS.buildItemListItem(writer))
+            
+if __name__ == '__main__': 
+    Context(sys.argv,writer=decodeWriter(BUILTIN.getInfoLabel('Writer')))

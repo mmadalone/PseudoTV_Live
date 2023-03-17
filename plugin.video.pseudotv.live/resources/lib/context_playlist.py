@@ -1,4 +1,4 @@
-#   Copyright (C) 2022 Lunatixz
+#   Copyright (C) 2023 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -15,20 +15,17 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
-
 # -*- coding: utf-8 -*-
-from resources.lib.globals import *
+from globals import *
+from plugin  import Plugin
 
-class Browse:
+class Context:
     def __init__(self, sysARG, writer):
-        log('Browse: __init__, sysARG = %s'%(sysARG))
-        #todo create blank container control skin.
-        # 'RunPlugin(plugin://script.embuary.helper/?info=getseasonepisodes&title=%s&dbid=%s&season=%s)'%(writer.get('showtitle'),writer.get('tvshowid'),writer.get('season'))
+        with busy_dialog():
+            log('Context: __init__, sysARG = %s'%(sysARG))
+            Plugin(sysARG).contextPlay(writer,isPlaylist=True)
+            
 if __name__ == '__main__': 
-    if not addonEnabled(ADDON_ID): toggleADDON(ADDON_ID)
-    Browse(sys.argv,writer=getWriterfromString())
+    Context(sys.argv,writer=decodeWriter(BUILTIN.getInfoLabel('Writer')))
     
-
-
-
-
+    
