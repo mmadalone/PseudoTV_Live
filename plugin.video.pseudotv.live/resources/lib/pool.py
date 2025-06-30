@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -26,9 +26,9 @@ from functools          import partial, wraps, reduce, update_wrapper
 try:
     import multiprocessing
     cpu_count   = multiprocessing.cpu_count()
-    ENABLE_POOL = False #True force disable multiproc. until monkeypatch/wrapper to fix pickling error. 
+    POOL_ENABLED = False #True force disable multiproc. until monkeypatch/wrapper to fix pickling error. 
 except:
-    ENABLE_POOL = False
+    POOL_ENABLED = False
     cpu_count   = os.cpu_count()
 
 def wrapped_partial(func, *args, **kwargs):
@@ -90,9 +90,9 @@ def threadit(method):
         thread_name = 'threadit.%s'%(method.__qualname__.replace('.',': '))
         for thread in thread_enumerate():
             if thread.name == thread_name and thread.is_alive():
-                if hasattr(thread, 'cancel'):
+                if hasattr(thread, 'cancel'): 
                     thread.cancel()
-                    log('%s, canceling %s'%(method.__qualname__.replace('.',': '),thread_name))        
+                    log('%s, canceling existing thread %s'%(method.__qualname__.replace('.',': '),thread_name))        
         thread = Thread(None, method, None, args, kwargs)
         thread.name = thread_name
         thread.daemon=True
@@ -103,16 +103,14 @@ def threadit(method):
 
 def timerit(method):
     @wraps(method)
-    def wrapper(wait, *args, **kwargs):
+    def wrapper(wait=0.1, *args, **kwargs):
         thread_name = 'timerit.%s'%(method.__qualname__.replace('.',': '))
         for timer in thread_enumerate():
             if timer.name == thread_name and timer.is_alive():
                 if hasattr(timer, 'cancel'): 
                     timer.cancel()
-                    log('%s, canceling %s'%(method.__qualname__.replace('.',': '),thread_name))    
-                try: 
-                    timer.join()
-                    log('%s, joining %s'%(method.__qualname__.replace('.',': '),thread_name))    
+                    log('%s, canceling existing timer %s'%(method.__qualname__.replace('.',': '),thread_name))    
+                try: timer.join()    
                 except: pass
         timer = Timer(float(wait), method, *args, **kwargs)
         timer.name = thread_name
@@ -132,13 +130,13 @@ def executeit(method):
 class ExecutorPool:
     def __init__(self):
         self.CPUCount = cpu_count
-        if ENABLE_POOL: self.pool = ProcessPoolExecutor
+        if POOL_ENABLED: self.pool = ProcessPoolExecutor
         else:           self.pool = ThreadPoolExecutor
-        self.log(f"__init__, multiprocessing = {ENABLE_POOL}, CORES = {self.CPUCount}, THREADS = {self._calculate_thread_count()}")
+        self.log(f"__init__, multiprocessing = {POOL_ENABLED}, CORES = {self.CPUCount}, THREADS = {self._calculate_thread_count()}")
 
 
     def _calculate_thread_count(self):
-        if ENABLE_POOL: return self.CPUCount
+        if POOL_ENABLED: return self.CPUCount
         else:           return int(os.getenv('THREAD_COUNT', self.CPUCount * 2))
             
             
@@ -156,7 +154,7 @@ class ExecutorPool:
     def executors(self, func, items=[], *args, **kwargs):
         self.log("executors, func = %s, items = %s"%(func.__name__,len(items)))
         with self.pool(self._calculate_thread_count()) as executor:
-            try: return executor.map(wrapped_partial(func, *args, **kwargs), items)
+            try: return list(executor.map(wrapped_partial(func, *args, **kwargs), items))
             except Exception as e: self.log("executors, func = %s, items = %s failed! %s\nargs = %s, kwargs = %s"%(func.__name__,len(items),e,args,kwargs), xbmc.LOGERROR)
 
 

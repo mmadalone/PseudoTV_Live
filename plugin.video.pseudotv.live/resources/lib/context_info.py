@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -54,14 +54,14 @@ class Match:
             dbid   = (fitem.get('tvshowid') or fitem.get('movieid'))
             log('Match: __init__, sysARG = %s, title = %s, dbtype = %s, dbid = %s'%(sysARG,'%s - %s'%(title,name),dbtype,dbid))
 
-            if hasAddon(self.SIMILAR_SCRIPT,install=True) and dbid:
+            if SETTINGS.hasAddon(self.SIMILAR_SCRIPT,install=True) and dbid:
                 self.SEARCH_SCRIPT = self.SIMILAR_SCRIPT
-            elif hasAddon(self.GLOBAL_SCRIPT,install=True):
+            elif SETTINGS.hasAddon(self.GLOBAL_SCRIPT,install=True):
                 self.SEARCH_SCRIPT = self.GLOBAL_SCRIPT
             else: 
                 DIALOG.notificationDialog(LANGUAGE(32000))
             log('Match: SEARCH_SCRIPT = %s'%(self.SEARCH_SCRIPT))
-            hasAddon(self.SEARCH_SCRIPT,enable=True)
+            SETTINGS.hasAddon(self.SEARCH_SCRIPT,enable=True)
 
         if self.SEARCH_SCRIPT == self.SIMILAR_SCRIPT:
             # plugin://script.embuary.helper/?info=getsimilar&dbid=$INFO[ListItem.DBID]&type=tvshow&tag=HDR

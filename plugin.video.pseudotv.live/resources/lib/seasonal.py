@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -34,12 +34,10 @@ TV_QUERY    = {"path":"videodb://tvshows/titles/", "method":"VideoLibrary.GetEpi
 MOVIE_QUERY = {"path":"videodb://movies/titles/" , "method":"VideoLibrary.GetMovies"  ,"enum":"Video.Fields.Movie"  ,"key":"movies"  ,"limits":LIMITS,"sort":SORT,"filter":FILTER}
 
 class Seasonal:
+    cache = SETTINGS.cacheDB
+    
     def __init__(self):
-        """
-        Initializes the Seasonal class. Sets up logging and caching.
-        """
         self.log('__init__')
-        self.cache = SETTINGS.cacheDB
 
 
     def log(self, msg, level=xbmc.LOGDEBUG):

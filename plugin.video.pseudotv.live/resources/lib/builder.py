@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -40,14 +40,17 @@ class Service:
         
         
 class Builder:
-    loopback = {}
+    xsp      = XSP()
+    xmltv    = XMLTVS()
+    m3u      = M3U()
+    channels = Channels()
     
     def __init__(self, service=None):
+        self.log('__init__')    
         if service is None: service = Service()
         self.service    = service        
         self.jsonRPC    = service.jsonRPC
         self.cache      = service.jsonRPC.cache
-        self.channels   = Channels()
 
         #global dialog
         self.pDialog    = None
@@ -55,11 +58,13 @@ class Builder:
         self.pMSG       = ''
         self.pName      = ''
         self.pErrors    = []
+        self.loopback = {}
         
         #global rules
         self.accurateDuration = bool(SETTINGS.getSettingInt('Duration_Type'))
         self.enableEven       = bool(SETTINGS.getSettingInt('Enable_Even'))
-        self.interleaveValue  = SETTINGS.getSettingInt('Interleave_Value')
+        self.interleaveSet    = SETTINGS.getSettingInt('Interleave_Set')
+        self.interleaveRepeat = SETTINGS.getSettingBool('Interleave_Repeat')
         self.incStrms         = SETTINGS.getSettingBool('Enable_Strms')
         self.inc3D            = SETTINGS.getSettingBool('Enable_3D')
         self.incExtras        = SETTINGS.getSettingBool('Enable_Extras') 
@@ -88,9 +93,6 @@ class Builder:
                                  "trailers":{"min":SETTINGS.getSettingInt('Enable_Postroll'), "max":PAGE_LIMIT, "auto":SETTINGS.getSettingInt('Enable_Postroll') == -1, "enabled":bool(SETTINGS.getSettingInt('Enable_Postroll')), "chance":SETTINGS.getSettingInt('Random_Post_Chance'),
                                              "sources" :{"ids":SETTINGS.getSetting('Resource_Trailers').split('|'),"paths":[os.path.join(FILLER_LOC,'Trailers','')]},"items":{}, "incKODI":SETTINGS.getSettingBool('Include_Trailers_KODI')}}
 
-        self.xsp              = XSP()
-        self.xmltv            = XMLTVS()
-        self.m3u              = M3U()
         self.resources        = Resources(service=self.service)
         self.runActions       = RulesList(self.channels.getChannels()).runActions
 
@@ -311,7 +313,7 @@ class Builder:
         def _injectRules(citem):
             def __chkEvenDistro(citem):
                 if self.enableEven and not citem.get('rules',{}).get("1000"):
-                    nrules = {"1000":{"values":{"0":SETTINGS.getSettingInt('Enable_Even'),"1":SETTINGS.getSettingInt('Page_Limit'),"2":SETTINGS.getSettingBool('Enable_Force_Episode')}}}
+                    nrules = {"1000":{"values":{"0":SETTINGS.getSettingInt('Enable_Even')}}}
                     self.log(" [%s] buildChannel: _injectRules, __chkEvenDistro, new rules = %s"%(citem['id'],nrules))
                     citem.setdefault('rules',{}).update(nrules)
                 return citem
@@ -342,7 +344,7 @@ class Builder:
                 self.log("[%s] buildChannel, channel fileArray In-Valid!"%(citem['id']),xbmc.LOGINFO)
                 return False
             self.log("[%s] buildChannel, fileArray = %s"%(citem['id'],','.join(['[%s]'%(len(fileList)) for fileList in fileArray])))
-            fileList = self.runActions(RULES_ACTION_CHANNEL_BUILD_FILELIST_PRE, citem, interleave(fileArray, self.interleaveValue), inherited=self)
+            fileList = self.runActions(RULES_ACTION_CHANNEL_BUILD_FILELIST_PRE, citem, interleave(fileArray, self.interleaveSet, self.interleaveRepeat), inherited=self)
             self.log('[%s] buildChannel, pre fileList items = %s'%(citem['id'],len(fileList)),xbmc.LOGINFO)
             fileList = self.runActions(RULES_ACTION_CHANNEL_BUILD_FILELIST_POST, citem, _injectFillers(citem, fileList, self.fillBCTs), inherited=self)
             self.log('[%s] buildChannel, post fileList items = %s'%(citem['id'],len(fileList)),xbmc.LOGINFO)
@@ -368,7 +370,7 @@ class Builder:
                 for idx, npath in enumerate(paths):
                     self.pName = '%s %s/%s'%(citem['name'],idx+1,len(paths))
                     fileArray.append(self.buildFileList(citem, npath, media, page, sort, limits))
-                return interleave(fileArray, self.interleaveValue)
+                return interleave(fileArray, self.interleaveSet, self.interleaveRepeat)
         
         elif 'db://' in path and '?xsp=' in path: #dynamicplaylist - parse xsp for path, filter and sort info
             path, media, sort, filter = self.xsp.parseDXSP(citem.get('id',''), path, sort, {}, self.incExtras) #todo filter adv. rules

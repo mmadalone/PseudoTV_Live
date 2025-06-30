@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -41,7 +41,7 @@ class Discovery:
             return log('%s: %s'%(self.__class__.__name__,msg),level)
 
         def removeService(self, zeroconf, type, name):
-            self.log("getService, type = %s, name = %s"%(type,name))
+            self.log("removeService, type = %s, name = %s"%(type,name))
              
         def addService(self, zeroconf, type, name):
             info = self.zeroconf.getServiceInfo(type, name)
@@ -57,23 +57,24 @@ class Discovery:
     def __init__(self, service=None, multiroom=None):
         self.service   = service
         self.multiroom = multiroom
-        self._start()
+        self._run()
                    
 
     def log(self, msg, level=xbmc.LOGDEBUG):
         return log('%s: %s'%(self.__class__.__name__,msg),level)
 
 
-    def _start(self):
+    def _run(self):
         if not PROPERTIES.isRunning('Discovery'):
             with PROPERTIES.chkRunning('Discovery'):
                 zconf = Zeroconf()
                 zcons = self.multiroom._getStatus()
-                self.log("_start, Multicast DNS Service Discovery (%s)"%(ZEROCONF_SERVICE))
+                self.log("_run, Multicast DNS Service waiting for (%s)"%(ZEROCONF_SERVICE))
                 SETTINGS.setSetting('ZeroConf_Status','[COLOR=yellow][B]%s[/B][/COLOR]'%(LANGUAGE(32252)))
                 ServiceBrowser(zconf, ZEROCONF_SERVICE, self.MyListener(multiroom=self.multiroom))
                 self.service.monitor.waitForAbort(DISCOVER_INTERVAL)
                 SETTINGS.setSetting('ZeroConf_Status',LANGUAGE(32211)%({True:'green',False:'red'}[zcons],{True:LANGUAGE(32158),False:LANGUAGE(32253)}[zcons]))
+                self.log("_run, Multicast DNS Service stopping search for (%s)"%(ZEROCONF_SERVICE))
                 zconf.close()
                         
             
@@ -81,7 +82,6 @@ class RequestHandler(BaseHTTPRequestHandler):
     
     def __init__(self, request, client_address, server, monitor):
         self.monitor = monitor
-        self.cache   = SETTINGS.cache
         try: BaseHTTPRequestHandler.__init__(self, request, client_address, server)
         except: pass
         
@@ -111,13 +111,13 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 
     def do_POST(self):
-        def _verifyUUID(uuid):
+        def _verifyUUID(uuid):#lazy security check
             if uuid == SETTINGS.getMYUUID(): return True
             else:
                 from multiroom  import Multiroom
                 for server in list(Multiroom().getDiscovery().values()):
                     if server.get('uuid') == uuid: return True
-            
+
         self.log('do_POST, incoming path = %s'%(self.path))
         if not PROPERTIES.isRunning('do_POST'):
             with PROPERTIES.chkRunning('do_POST'), PROPERTIES.interruptActivity():
@@ -140,8 +140,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                         else: self.send_error(401, "Path Not found")
                     else: return self.send_error(401, "UUID Not verified!")
                 else: return self.do_GET()
-        
-        
+                    
+                
     def do_GET(self):
         def _sendChunk(path, content, chunk):
             self.log('do_GET, outgoing path = %s, content = %s'%(path, content))
@@ -217,51 +217,57 @@ class RequestHandler(BaseHTTPRequestHandler):
                 elif self.path.lower() == '/%s'%(XMLTVFLE.lower()):
                     _sendZip(XMLTVFLEPATH, "text/xml")
                 #Images - image server
-                elif self.path.lower().startswith("/images/"):
-                    _sendImage(os.path.join(LOGO_LOC,unquoteString(self.path.replace('/images/',''))), mimetypes.guess_type(self.path[1:])[0])
+                elif self.path.lower().startswith(("/images/","/logos/")):
+                    _sendImage(os.path.join(LOGO_LOC,unquoteString(self.path.replace('/images/','').replace('/logos/',''))), mimetypes.guess_type(self.path[1:])[0])
                 else: self.send_error(404, "Path Not found")
         
+        
 class HTTP:
-    isRunning = False
-
+    isRunning      = False
+    pendingStop    = False
+    pendingRestart = False
+    
     def __init__(self, service=None):
         self.log('__init__')
         self.service = service
-        timerit(self._start)(0.1)
+        self.monitor = service.monitor
         
                     
     def log(self, msg, level=xbmc.LOGDEBUG):
         return log('%s: %s'%(self.__class__.__name__,msg),level)
 
 
-    def chkPort(self, port=0, redirect=False):
+    def _chkPort(self, port=0, redirect=False):
         try:
             state = False
             with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
                 s.bind(("127.0.0.1", port))
                 state = True
         except Exception as e:
-            self.log("chkPort, port = %s, failed! = %s"%(port,e))
+            self.log("_chkPort, port = %s, failed! = %s"%(port,e))
+            try:
+                with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+                    s.bind(("127.0.0.1", 0))
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    nport = s.getsockname()[1]
+            except Exception as e: self.log("_chkPort, port = %s, failed! = %s"%(port,e))
             if redirect:
-                try:
-                    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
-                        s.bind(("127.0.0.1", 0))
-                        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                        port  = s.getsockname()[1]
-                        state = True
-                except Exception as e: self.log("chkPort, port = %s, failed! = %s"%(port,e))
-            else: port = None
-        self.log("chkPort, port = %s, available = %s"%(port,state))
+                port  = nport
+                state = True
+            else: DIALOG.notificationDialog(LANGUAGE(30097)%(port,nport))
+        self.log("_chkPort, port = %s, available = %s"%(port,state))
         return port
 
 
-    def _start(self, wait=900):
-        while not self.service.monitor.abortRequested():
+    def _start(self, silent=True):
+        while not self.monitor.abortRequested():
             if not self.isRunning:
                 try:
-                    IP  = SETTINGS.getIP()
-                    TCP = SETTINGS.getSettingInt('TCP_PORT')
-                    PORT= self.chkPort(TCP,redirect=True)
+                    self.log('_start, silent = %s'%(silent))
+                    self.isRunning = True
+                    IP   = SETTINGS.getIP()
+                    TCP  = SETTINGS.getSettingInt('TCP_PORT')
+                    PORT = self._chkPort(TCP)
                     if   PORT is None: raise Exception('Port: %s In-Use!'%(PORT))
                     elif PORT != TCP: SETTINGS.setSettingInt('TCP_PORT',PORT)
                     LOCAL_HOST = PROPERTIES.setRemoteHost('%s:%s'%(IP,PORT))
@@ -272,36 +278,47 @@ class HTTP:
                     SETTINGS.setSetting('Remote_XMLTV','http://%s/%s'%(LOCAL_HOST,XMLTVFLE))
                     SETTINGS.setSetting('Remote_GENRE','http://%s/%s'%(LOCAL_HOST,GENREFLE))
                     
-                    self.isRunning = True
                     self._server = ThreadedHTTPServer((IP, PORT), partial(RequestHandler,monitor=self.service.monitor))
                     self._server.allow_reuse_address = True
                     self._httpd_thread = Thread(target=self._server.serve_forever)
                     self._httpd_thread.daemon=True
                     self._httpd_thread.start()
-                except Exception as e: self.log("_start, Failed! %s"%(e), xbmc.LOGERROR)
-                self._update()
-            if self.service.monitor.waitForAbort(wait): break
-        self._stop()
-        
-        
-    def _stop(self):
+                    self._update(silent)
+                except Exception as e: self.log("_start, startup Failed! %s"%(e), xbmc.LOGERROR)
+            elif self.service._shutdown(FIFTEEN) or self.pendingStop: break
+        return self._stop(self.pendingRestart)
+    
+    
+    def _stop(self, pendingRestart: bool=False):
         try:
-            if self.isRunning:
-                self.log('_stop, shutting server down',xbmc.LOGINFO)
-                self._server.shutdown()
-                self._server.server_close()
-                self._server.socket.close()
-                if self._httpd_thread.is_alive():
-                    try: self._httpd_thread.join(5)
-                    except: pass
-        except Exception as e: self.log("_stop, Failed! %s"%(e), xbmc.LOGERROR)
-        self.isRunning = False
-        self._update()
-        
+            self._server.shutdown()
+            self._server.server_close()
+            self._server.socket.close()
+            if self._httpd_thread.is_alive():
+                if hasattr(self._httpd_thread, 'cancel'): self._httpd_thread.cancel()
+                try: self._httpd_thread.join(5)
+                except: pass
+            self.isRunning = False
+            self.log('_start, shutting server down, pendingRestart = %s'%(pendingRestart), xbmc.LOGINFO)
+        except Exception as e: self.log("_start, shutdown Failed! %s"%(e), xbmc.LOGERROR)
+        if pendingRestart:
+            self.pendingStop = False
+            self.pendingRestart = False
+            self.service._que(self.service.tasks.chkHTTP,1)
+        else:
+            self._update(pendingRestart)
+
+
+    def _restart(self):
+        self.pendingRestart = True
+        self.pendingStop = True
        
-    def _update(self):
-        DIALOG.notificationDialog('%s: %s'%(SETTINGS.getSetting('Remote_NAME'),LANGUAGE(32211)%({True:'green',False:'red'}[self.isRunning],{True:LANGUAGE(32158),False:LANGUAGE(32253)}[self.isRunning])))
-        SETTINGS.setSetting('Remote_Status',LANGUAGE(32211)%({True:'green',False:'red'}[self.isRunning],{True:LANGUAGE(32158),False:LANGUAGE(32253)}[self.isRunning]))
+       
+    def _update(self, silent=False):
+        self.log('_update')
+        isRunning = self._httpd_thread.is_alive()
+        if not silent: DIALOG.notificationDialog('%s: %s'%(SETTINGS.getSetting('Remote_NAME'),LANGUAGE(32211)%({True:'green',False:'red'}[isRunning],{True:LANGUAGE(32158),False:LANGUAGE(32253)}[isRunning])))
+        SETTINGS.setSetting('Remote_Status',LANGUAGE(32211)%({True:'green',False:'red'}[isRunning],{True:LANGUAGE(32158),False:LANGUAGE(32253)}[isRunning]))
 
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):

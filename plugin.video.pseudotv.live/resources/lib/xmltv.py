@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV.
@@ -252,9 +252,8 @@ def read_error(msg, fp, e):
         line   = int(e.args[0].split(':')[0].split('line ')[1])
         column = int(e.args[0].split(':')[1].split('column ')[1])
         log(f"{msg}, Error at line: {line}, column: {column}")
-        if   hasattr(fp, 'readlines'): lines = fp.readlines()
-        elif hasattr(fp, 'readlines'): lines = fp.read().split('\n')
-        else: lines = []
+        try:    lines = fp.readlines()
+        except: lines = []
         if len(lines) >= line: log(f"{msg}, Line {line}: {lines[line-1].strip()}")
     except: log(f"{msg}, {e}")
 

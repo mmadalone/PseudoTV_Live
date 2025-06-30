@@ -5,13 +5,13 @@ Language IDS w\empty strings: {
 
 
 Language IDS w\duplicate strings: {
-    "Disabled": [
-        "30021",
-        "30079"
-    ],
     "Show Channel Bug": [
         "30043",
         "30145"
+    ],
+    "Channels": [
+        "30108",
+        "32023"
     ],
     "Browse": [
         "30087",
@@ -60,6 +60,10 @@ Language IDS w\duplicate strings: {
     "Vignette Non-Linear Stretch": [
         "30186",
         "33186"
+    ],
+    "Notifications During Playback": [
+        "30212",
+        "33212"
     ]
 }
 
@@ -76,10 +80,11 @@ Language IDS not found in py files, possibly only in xml: {
     "30008": "Install Log Uploader",
     "30009": "Submit Log",
     "30010": "Options",
-    "30011": "[COLOR=red][B]Warning!! [/B]It's Recommend Flash/SSD users change path to a HDD or RAMDISK.[/COLOR]",
+    "30011": "[COLOR=red][B]Warning!! [/B]It's Recommend Flash/SSD users change path to a HDD or PMem.[/COLOR]",
     "30012": "Centralized file location",
     "30013": "Tweaks",
     "30016": "Fillers",
+    "30023": "Unable to reload %s",
     "30027": "Logo Resource",
     "30032": "Resources",
     "30036": "Minimum Guide Days",
@@ -103,11 +108,10 @@ Language IDS not found in py files, possibly only in xml: {
     "30069": "Third-Party",
     "30071": "IPTV Simple Settings",
     "30072": "Debugging",
-    "30074": "Enable Automatic PVR Configurations",
+    "30074": "Enable Access to Kodi Settings",
     "30075": "More Info",
     "30076": "Play from here",
     "30077": "Play programme",
-    "30079": "Disabled",
     "30080": "3 Hours",
     "30081": "6 Hours",
     "30082": "12 Hours",
@@ -121,7 +125,6 @@ Language IDS not found in py files, possibly only in xml: {
     "30091": "Find More",
     "30092": "Multi-room",
     "30093": "Server Information",
-    "30097": "UDP Port:",
     "30098": "TCP Port:",
     "30101": "Remote Server",
     "30102": "Centralized Folder",
@@ -173,12 +176,15 @@ Language IDS not found in py files, possibly only in xml: {
     "30183": "Interleave TV & Movies after Ordering",
     "30189": "Last Position",
     "30198": "Enable Threaded Queue Executor",
-    "30201": "JSONRPC Timer",
+    "30201": "JSONRPC Wait",
     "30203": "Name:",
     "30204": "Enable CPU Benchmark",
     "30206": "Install I/O Benchmark",
     "30207": "Enable I/O Benchmark",
     "30209": "Select Transparency",
+    "30210": "Auto tuning",
+    "30212": "Notifications During Playback",
+    "30213": "Client Only",
     "32004": "TV Networks",
     "32005": "TV Shows",
     "32006": "TV Genres",
@@ -193,7 +199,6 @@ Language IDS not found in py files, possibly only in xml: {
     "32048": "Select Servers",
     "32049": "Restarting...",
     "32053": "Settings",
-    "32058": "No Channels Configured!",
     "32063": "OK",
     "32074": "Adding Channel",
     "32075": "Saving...",
@@ -226,6 +231,7 @@ Language IDS not found in py files, possibly only in xml: {
     "32177": "Finish Configuring channel first",
     "32182": "ZeroConf Status:",
     "32184": "Restart Percentage (%s)",
+    "32186": "Unable to automatically configure IPTV-Simple, Please check user configurations.",
     "32197": "Currently Supported!",
     "32208": "Parsing Trailer",
     "32210": "Parsing Details",
@@ -244,6 +250,7 @@ Language IDS not found in py files, possibly only in xml: {
     "32242": "PVR Search",
     "32246": "Loading",
     "32247": "Starting",
+    "32258": "Parser",
     "33001": "Only enable for short DEBUGGING sessions. The Kodi log will be spammed; You may experience poor system performance while enabled.",
     "33002": "AutoTune Video/Mixed/Music SmartPlaylists.",
     "33003": "AutoTune from Recommended (Supported) plugins installed on Kodi.\\nSupport does not imply a relation between projects, PseudoTV is not responsible for the content provided by third-party plugins.",
@@ -260,7 +267,7 @@ Language IDS not found in py files, possibly only in xml: {
     "33016": "Global Filler rules apply to all channels, Advanced channel manager rules apply per channel. *see wiki for details.\\nChanges will propagate slowly over time and may not be instantaneous.",
     "33023": "Artwork changes will propagate slowly over time and are not instantaneous.",
     "33036": "Set in Kodi PVR & LiveTV Settings",
-    "33038": "If a selection is [COLOR=dimgray][B]dim[/B][/COLOR] either the background task is running or no media found!\\nClose settings to resume background tasks and try again later...",
+    "33038": "Run AutoTuning in Channels Tab",
     "33039": "Clear Plugin Blacklist. Blacklisted plugins are ignored in Recommended list.",
     "33040": "Clear all Pre-defined selections and remove their channels.",
     "33041": "Global rules set the default for all channels, Advanced Channel Rules apply per channel. *see wiki for details.\\nGlobals are the default setting for every channel.",
@@ -274,7 +281,7 @@ Language IDS not found in py files, possibly only in xml: {
     "33068": "Allow the Seasonal Holiday Channel to advance to the nearest holiday within its given month.",
     "33070": "Allow PseudoTV Live to configure Third-Party plugins (IPTV Simple/IPTV Manager) for optimal usage.\\nOptimal changes will be reinforced automatically without a user prompt!",
     "33071": "Open IPTV Simple's settings",
-    "33074": "Automatically configure IPTV-Simple for use with PseudoTV Live [Minimal risk of overriding existing user configurations].",
+    "33074": "Allow Access to configure aspects of Kodi for use with PseudoTV Live [Minimal risk of overriding existing user configurations].",
     "33078": "Stop Playback when Idle for x Hours.\\nCancelable with prompt and countdown.",
     "33084": "Not recommend!! Only disable if you understand the impact of theses changes.",
     "33086": "Interval between channel Bug appearances (Minutes). [-1 Indefinitely, 0 Random]",
@@ -314,6 +321,8 @@ Language IDS not found in py files, possibly only in xml: {
     "33198": "Boost Background Processing through Multi-Threading. [Disabled Default]\\nDisable if you experience system instability.",
     "33201": "How long to wait for JSONRPC response in minutes [0 Disabled, 3 Default]\\nPervent system hangs while waiting for a lengthy response.",
     "33202": "Minimum Debugging Level [LOGERROR - Default]\\nIf submit is [COLOR=dimgray][B]dim[/B][/COLOR] no debugging information logged, change to [B]LOGDEBUG[/B] and reproduce error.",
+    "33212": "Notifications During Playback",
+    "33213": "This Instance of PseudoTV only runs as a client, with no channels configured locally.",
     "33214": "Default Sort Method for all channels, overridden per channel by SmartPlaylist, DynamicPlaylist and Adv. Channel rules.",
     "33308": "Install Log Uploader.",
     "33309": "Submit debugging log for review to http://paste.kodi.tv."

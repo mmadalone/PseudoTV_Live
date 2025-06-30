@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -102,16 +102,18 @@ class RulesList:
             if not append and len(chrules) == 0: return None
             for rule in tmpruleList:
                 try:
-                    if not incRez and rule.ignore: continue
                     try:    chrule = chrules.get(str(rule.myId)) #temp fix.issue after converting list to dict in channels.json
                     except: chrule = {}
-                    if chrule:
+                    if not incRez and rule.ignore: continue
+                    elif chrule:
                         ruleInstance = rule.copy()
                         for key, value in list(chrule.get('values',{}).items()):
                             ruleInstance.optionValues[int(key)] = value
                         ruleList.update({str(rule.myId):ruleInstance})
                     elif append: ruleList.update({str(rule.myId):rule.copy()})
-                except Exception as e: log('[%s] loadRules: _load failed! %s\nchrule = %s'%(citem.get('id'), e, chrule), xbmc.LOGERROR)
+                except Exception as e:
+                    # if SETTINGS.getSettingBool('Debug_Enable'): DIALOG.notificationDialog('%s Error!\nRule %s Failed, Check Configuration'%(citem.get('name'),rule.myId))
+                    log('[%s] loadRules: _load failed! %s\nrule id = %s, rules = %s'%(citem.get('id'), e, rule.myId, chrule), xbmc.LOGERROR)
             self.log('[%s] loadRules: append = %s, incRez = %s, rule myIds = %s'%(citem.get('id'), append, incRez,list(ruleList.keys())))
             rules.update({citem.get('id'):ruleList})
             
@@ -1210,12 +1212,12 @@ class InterleaveValue(BaseRule):
         self.exclude            = False
         self.name               = LANGUAGE(30192)
         self.description        = LANGUAGE(33215)
-        self.optionLabels       = [LANGUAGE(30179)]
-        self.optionValues       = [SETTINGS.getSettingInt('Interleave_Value')]
-        self.optionDescriptions = [LANGUAGE(33215)]
+        self.optionLabels       = [LANGUAGE(30179),LANGUAGE(30211)]
+        self.optionValues       = [SETTINGS.getSettingInt('Interleave_Set'), SETTINGS.getSettingBool('Interleave_Repeat')]
+        self.optionDescriptions = [LANGUAGE(33215),LANGUAGE(33211)]
         self.actions            = [RULES_ACTION_CHANNEL_START,RULES_ACTION_CHANNEL_STOP]
         self.selectBoxOptions   = [list(range(0,26,1))]
-        self.storedValues       = [[]]
+        self.storedValues       = [[],[]]
 
 
     def log(self, msg, level=xbmc.LOGDEBUG):
@@ -1228,26 +1230,25 @@ class InterleaveValue(BaseRule):
 
     def getTitle(self):
         return '%s (%s)'%(self.name,self.optionValues[0])
-        
-        return '%s (%s)'%(LANGUAGE(30192),self.optionValues[0])
-        if bool(self.optionValues[0]): return '%s %s'%(LANGUAGE(30192),LANGUAGE(30184))
-        else:                          return '%s %s'%(LANGUAGE(30192),LANGUAGE(30021))
-
 
     def onAction(self, optionindex):
-        self.onActionSelect(optionindex)
+        if optionindex == 0: self.onActionSelect(optionindex)
+        else:                self.onActionToggleBool(optionindex)
         return self.optionValues[optionindex]
 
 
     def runAction(self, actionid, citem, parameter, builder):
         if actionid == RULES_ACTION_CHANNEL_START:
-            self.storedValues[0] = builder.interleaveValue
-            builder.interleaveValue = self.optionValues[0]
-            self.log("runAction, setting interleaveValue = %s"%(builder.interleaveValue))
+            self.storedValues[0] = builder.interleaveSet
+            self.storedValues[1] = builder.interleaveRepeat
+            builder.interleaveSet    = self.optionValues[0]
+            builder.interleaveRepeat = self.optionValues[1]
+            self.log("runAction, setting interleaveSet = %s, interleaveRepeat = %s"%(builder.interleaveSet, builder.interleaveRepeat))
             
         elif actionid == RULES_ACTION_CHANNEL_STOP:
-            builder.interleaveValue = self.storedValues[0]
-            self.log("runAction, restoring interleaveValue = %s"%(builder.interleaveValue))
+            builder.interleaveSet    = self.storedValues[0]
+            builder.interleaveRepeat = self.storedValues[1]
+            self.log("runAction, setting interleaveSet = %s, interleaveRepeat = %s"%(builder.interleaveSet, builder.interleaveRepeat))
         return parameter
 
 
@@ -1395,7 +1396,7 @@ class ForceEpisode(BaseRule):
         self.optionDescriptions = [LANGUAGE(33230)]
         self.actions            = [RULES_ACTION_CHANNEL_BUILD_FILEARRAY_PRE,RULES_ACTION_CHANNEL_BUILD_PATH,RULES_ACTION_CHANNEL_BUILD_FILELIST_PRE]
         self.storedValues       = [{},{},{},[],[],[]]
-        self.selectBoxOptions   = ["",list(range(0,26,1))]
+        self.selectBoxOptions   = []
 
 
     def log(self, msg, level=xbmc.LOGDEBUG):
@@ -1458,7 +1459,7 @@ class ForceEpisode(BaseRule):
             builder.sort = self.storedValues[0]
             self.log("runAction, restoring sort and forcing episode/year ordering (%s)"%(len(parameter)))
             fileList = list(sorted(parameter, key=lambda k: k.get('year',0)))
-            return interleave(list(self._sortShows(fileList)), builder.interleaveValue)
+            return interleave(list(self._sortShows(fileList)), builder.interleaveSet, builder.interleaveRepeat)
         return parameter
         
         

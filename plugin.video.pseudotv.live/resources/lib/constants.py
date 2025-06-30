@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -61,6 +61,7 @@ CHANNEL_LIMIT       = 999
 AUTOTUNE_LIMIT      = 3
 FILLER_LIMIT        = 250
 QUEUE_CHUNK         = 25
+M3U_REFRESH         = 15
 
 FILLER_TYPE         = ['Rating',
                        'Bumper',
@@ -267,6 +268,7 @@ RESTART_XML     = '%s.restart.xml'%(ADDON_ID)
 ONNEXT_XML      = '%s.onnext.xml'%(ADDON_ID)
 BACKGROUND_XML  = '%s.background.xml'%(ADDON_ID)
 MANAGER_XML     = '%s.manager.xml'%(ADDON_ID)
+WIZARD_XML      = '%s.wizard.xml'%(ADDON_ID)
 OVERLAYTOOL_XML = '%s.overlaytool.xml'%(ADDON_ID)
 DIALOG_SELECT   = '%s.dialogselect.xml'%(ADDON_ID)
 

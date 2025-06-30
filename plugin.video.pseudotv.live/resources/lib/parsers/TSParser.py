@@ -29,8 +29,10 @@ class TSPacket:
 
 
 class TSParser:
+    monitor = MONITOR()
+    
     def __init__(self):
-        self.monitor = MONITOR()
+        ...
         
 
     def determineLength(self, filename: str) -> int and float:

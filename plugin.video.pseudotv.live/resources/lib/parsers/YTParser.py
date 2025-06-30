@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -22,7 +22,7 @@ class YTParser:
     def determineLength(self, filename: str) -> int and float:
         try:
             dur = 0
-            if hasAddon('script.module.youtube.dl'):
+            if SETTINGS.hasAddon('script.module.youtube.dl'):
                 from youtube_dl import YoutubeDL
                 if   'videoid'  in filename: vID = (re.compile(r'videoid\=(.*)' , re.IGNORECASE).search(filename)).group(1)
                 elif 'video_id' in filename: vID = (re.compile(r'video_id\=(.*)', re.IGNORECASE).search(filename)).group(1)

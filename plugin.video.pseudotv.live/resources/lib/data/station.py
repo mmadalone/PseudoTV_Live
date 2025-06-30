@@ -1,4 +1,4 @@
-  # Copyright (C) 2024 Lunatixz
+  # Copyright (C) 2025 Lunatixz
 
 
 # This file is part of PseudoTV Live.

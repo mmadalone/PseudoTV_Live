@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -20,7 +20,6 @@
 
 from globals    import *
 from functools  import reduce
-from difflib    import SequenceMatcher
 from seasonal   import Seasonal 
 
 LOCAL_FOLDERS   = [LOGO_LOC, IMAGE_LOC]
@@ -43,7 +42,10 @@ class Resources:
     queuePool = {}
     
     def __init__(self, service=None):
-        if service is None: service = Service()
+        self.log('__init__')    
+        if service is None:
+            service = Service()
+            
         self.service    = service
         self.jsonRPC    = service.jsonRPC
         self.cache      = service.jsonRPC.cache
@@ -134,7 +136,7 @@ class Resources:
         cacheResponse = self.cache.get(cacheName, checksum=getMD5('|'.join([SETTINGS.getAddonDetails(id).get('version',ADDON_VERSION) for id in resources])))
         if not cacheResponse:
             for id in list(dict.fromkeys(resources)):
-                if not hasAddon(id):
+                if not SETTINGS.hasAddon(id):
                     self.log('getLogoResources, missing %s'%(id))
                     continue
                 else:
@@ -195,7 +197,7 @@ class Resources:
             
     def isMono(self, file: str) -> bool:
         if file.startswith('resource://') and (bool(set([match in file.lower() for match in ['transparent','white','mono']]))): return True
-        elif hasAddon('script.module.pil'):
+        elif SETTINGS.hasAddon('script.module.pil'):
             try:
                 from PIL import Image, ImageStat
                 file = unquoteString(file.replace('resource://','special://home/addons/').replace('image://','')).replace('\\','/')
@@ -219,7 +221,7 @@ class Resources:
             text_color: Color of the text (optional).
         """
 
-        if hasAddon('script.module.pil'):
+        if SETTINGS.hasAddon('script.module.pil'):
             from PIL import Image, ImageDraw, ImageFont
             # Open the background image
             background_image = Image.open(background_image_path)

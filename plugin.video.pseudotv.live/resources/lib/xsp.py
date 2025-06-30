@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -22,8 +22,10 @@ from globals          import *
 from library          import Library
 
 class XSP:
+    library = Library()
+    
     def __init__(self):
-        self.library    = Library()
+        self.log('__init__')
         self.jsonRPC    = self.library.jsonRPC
         self.predefined = self.library.predefined
 
@@ -76,7 +78,7 @@ class XSP:
     def _parseRoot(self, id, path, media='files', checksum=ADDON_VERSION, expiration=datetime.timedelta(minutes=15)):
         self.log("[%s] _parseRoot, path = %s"%(id,path))
         paths = []
-        items = self.jsonRPC.getDirectory({"directory":path,"media":media},True,checksum,expiration).get('files',[])
+        items, limits, errors = self.jsonRPC.getDirectory({"directory":path,"media":media},True,checksum,expiration)
         [paths.extend(self.predefined.createShowPlaylist(item.get('label'))) for item in items if item.get('filetype') == 'directory' and item.get('label')]
         return paths
 
@@ -114,9 +116,9 @@ class XSP:
                 elif type.lower() == "tvshows": paths.extend(list(self._parseRoot(id,path)))
             except Exception as e:
                 self.log("[%s] parseXSP, parsing paths failed! %s"%(id,e), xbmc.LOGDEBUG)
-                type  = 'Unknown'
+                type = LANGUAGE(32105)
                 
-            self.log("[%s] parseXSP, type = %s, media = %s, sort = %s, limit = %s\npaths = %s"%(id,type, media, sort, limit, paths))
+            self.log("[%s] parseXSP, type = %s, media = %s, sort = %s, limit = %s\npaths = %s"%(id, type, media, sort, limit, paths))
         except Exception as e: self.log("[%s] parseXSP, failed! %s"%(id,e), xbmc.LOGERROR)
         return paths, media, sort, limit
             

@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -19,13 +19,15 @@
 # -*- coding: utf-8 -*-
 
 import os, sys, re, json, struct, errno, zlib
-import shutil, subprocess, io, platform
+import shutil, subprocess, io, platform, asyncio
 import codecs, random
 import uuid, base64, binascii, hashlib
 import time, datetime, calendar
 import heapq, requests, pyqrcode
 import xml.sax.saxutils
 
+from difflib               import SequenceMatcher
+from functools             import partial, wraps, reduce, update_wrapper
 from six.moves             import urllib 
 from io                    import StringIO, BytesIO
 from threading             import Lock, Thread, Event, Timer, BoundedSemaphore
@@ -227,22 +229,10 @@ def getLabel(item, addYear=False):
    
 def hasFile(file):
     if not file.startswith(tuple(VFS_TYPES + WEB_TYPES)): state = FileAccess.exists(file)
-    elif   file.startswith('plugin://'):                  state = hasAddon(file)
+    elif   file.startswith('plugin://'):                  state = SETTINGS.hasAddon(file)
     else:                                                 state = True
     log("Globals: hasFile, file = %s (%s)"%(file,state))
     return state    
-
-def hasAddon(id, install=False, enable=False, force=False, notify=False):
-    if '://' in id: id = getIDbyPath(id)
-    if BUILTIN.getInfoBool('HasAddon(%s)'%(id),'System'):
-        if BUILTIN.getInfoBool('AddonIsEnabled(%s)'%(id),'System'): return True
-        elif enable: 
-            if not force:
-                if not DIALOG.yesnoDialog(message=LANGUAGE(32156)%(id)): return False
-            return BUILTIN.executebuiltin('EnableAddon(%s)'%(id),wait=True)
-    elif install: return BUILTIN.executebuiltin('InstallAddon(%s)'%(id),wait=True)
-    if notify: DIALOG.notificationDialog(LANGUAGE(32034)%(id))
-    return False
 
 def diffRuntime(dur, roundto=15):
     def ceil_dt(dt, delta):
@@ -299,7 +289,7 @@ def escapeDirJSON(path):
     mydir = path
     if (mydir.find(":")): mydir = mydir.replace("\\", "\\\\")
     return mydir
-      
+
 def KODI_LIVETV_SETTINGS(): #recommended Kodi LiveTV settings
     return {'pvrmanager.preselectplayingchannel' :'true',
             'pvrmanager.syncchannelgroups'       :'true',
@@ -313,22 +303,6 @@ def KODI_LIVETV_SETTINGS(): #recommended Kodi LiveTV settings
             # 'epg.epgupdate':120,
            'pvrmanager.startgroupchannelnumbersfromone':'false'}
 
-def togglePVR(state=True, reverse=False, wait=FIFTEEN):
-    if SETTINGS.getSettingBool('Enable_PVR_RELOAD'):
-        isEnabled = BUILTIN.getInfoBool('AddonIsEnabled(%s)'%(PVR_CLIENT_ID),'System')
-        if (state and isEnabled) or (not state and not isEnabled): return
-        elif not PROPERTIES.isRunning('togglePVR'):
-            with PROPERTIES.chkRunning('togglePVR'):
-                BUILTIN.executebuiltin("Dialog.Close(all)") 
-                log('globals: togglePVR, state = %s, reverse = %s, wait = %s'%(state,reverse,wait))
-                BUILTIN.executeJSONRPC('{"jsonrpc":"2.0","method":"Addons.SetAddonEnabled","params":{"addonid":"%s","enabled":%s}, "id": 1}'%(PVR_CLIENT_ID,str(state).lower()))
-                if reverse:
-                    with BUILTIN.busy_dialog(): 
-                        MONITOR().waitForAbort(1.0)
-                        timerit(togglePVR)(wait,[not bool(state)])
-                    DIALOG.notificationWait('%s: %s'%(PVR_CLIENT_NAME,LANGUAGE(32125)),wait=wait)
-    else: DIALOG.notificationWait(LANGUAGE(30023)%(PVR_CLIENT_NAME))
-        
 def isRadio(item):
     if item.get('radio',False) or item.get('type') == "Music Genres": return True
     for path in item.get('path',[item.get('file','')]):
@@ -384,13 +358,6 @@ def cleanMPAA(mpaa):
         mpaa = mpaa.strip()
     return mpaa
 
-def getIDbyPath(url):
-    try:
-        if   url.startswith('special://'): return re.compile('special://home/addons/(.*?)/resources', re.IGNORECASE).search(url).group(1)
-        elif url.startswith('plugin://'):  return re.compile('plugin://(.*?)/', re.IGNORECASE).search(url).group(1)
-    except Exception as e: log('Globals: getIDbyPath failed! url = %s, %s'%(url,e), xbmc.LOGERROR)
-    return url
-    
 def combineDicts(dict1={}, dict2={}):
     for k,v in list(dict1.items()):
         if dict2.get(k): k = dict2.pop(k)
@@ -507,3 +474,20 @@ def isEnding(progress=100):
 def chkLogo(old, new=LOGO):
     if new.endswith('wlogo.png') and not old.endswith('wlogo.png'): return old
     return new
+    
+def parseSE(filename):
+    pattern = re.compile(
+        r'(?:s|season)\s*(\d+)\s*(?:e|x|episode)\s*(\d+)|'  # s01e01, 1x01, Season 1 Episode 1
+        r'(\d{1,2})[xX](\d{1,2})|'                          # 1x01 format
+        r'(\d)(\d{2})(?!\d)'                                # 101 format (single digit season, two digit episode)
+    , re.IGNORECASE)
+
+    match = pattern.search(filename)
+    if match:
+        if match.group(1) is not None:
+            return int(match.group(1)), int(match.group(2))
+        elif match.group(3) is not None:
+            return int(match.group(3)), int(match.group(4))
+        elif match.group(5) is not None:
+            return int(match.group(5)), int(match.group(6))
+    return -1, -1

@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -62,9 +62,9 @@ M3U_MIN  = {"id"                : "",
             
 class M3U:
     def __init__(self):
+        self.log('__init__')
         stations, recordings = self.cleanSelf(list(self._load()))
         self.M3UDATA = {'data':'#EXTM3U tvg-shift="" x-tvg-url="" x-tvg-id="" catchup-correction=""', 'stations':stations, 'recordings':recordings}
-        # self.M3UTEMP = getJSON(M3UFLE_DEFAULT)
         
         
     def log(self, msg, level=xbmc.LOGDEBUG):
@@ -80,7 +80,7 @@ class M3U:
             
         if FileAccess.exists(file): 
             fle   = FileAccess.open(file, 'r')
-            lines = (fle.readlines())
+            lines = fle.readlines()
             fle.close()
             
             chCount = 0
@@ -89,17 +89,11 @@ class M3U:
             
             for idx, line in enumerate(lines):
                 line = line.rstrip()
-                
                 if line.startswith('#EXTM3U'):
                     data = {'tvg-shift'         :re.compile('tvg-shift=\"(.*?)\"'          , re.IGNORECASE).search(line),
                             'x-tvg-url'         :re.compile('x-tvg-url=\"(.*?)\"'          , re.IGNORECASE).search(line),
                             'catchup-correction':re.compile('catchup-correction=\"(.*?)\"' , re.IGNORECASE).search(line)}
-                            
-                    # if SETTINGS.getSettingInt('Import_XMLTV_TYPE') == 2 and file == os.path.join(TEMP_LOC,slugify(SETTINGS.getSetting('Import_M3U_URL'))):
-                        # if data.get('x-tvg-url').group(1):
-                            # self.log('_load, using #EXTM3U "x-tvg-url"')
-                            # SETTINGS.setSetting('Import_XMLTV_M3U',data.get('x-tvg-url').group(1))
-                           
+
                 elif line.startswith('#EXTINF:'):
                     chCount += 1
                     match = {'label'             :re.compile(',(.*)'                        , re.IGNORECASE).search(line),
@@ -384,68 +378,3 @@ class M3U:
         if not idx is None:
             self.M3UDATA['recordings'].pop(idx)
             return self._save()
-    
-    
-    def importM3U(self, file, filters={}, multiplier=1):
-        self.log('importM3U, file = %s, filters = %s, multiplier = %s'%(file,filters,multiplier))
-        try:
-            importChannels = []
-            if file.startswith('http'):
-                url  = file
-                file = os.path.join(TEMP_LOC,'%s'%(slugify(url)))
-                setURL(url,file)
-                
-            stations = self._load(file)
-            for key, value in list(filters.items()):
-                if key == 'slug' and value:
-                    importChannels.extend(self.cleanSelf(stations,'id',value)[0])
-                elif key == 'providers' and value:
-                    for provider in value: 
-                        importChannels.extend(self.cleanSelf(stations,'provider',provider)[0])
-            
-            #no filter found, import all stations.
-            if not importChannels: importChannels.extend(stations)
-            importChannels = self.sortStations(list(self.chkImport(importChannels,multiplier)))
-            self.log('importM3U, found import stations = %s'%(len(importChannels)))
-            self.M3UDATA.get('stations',[]).extend(importChannels)
-        except Exception as e: self.log("importM3U, failed! %s"%(e), xbmc.LOGERROR)
-        return importChannels
-        
-        
-    def chkImport(self, stations, multiplier=1):
-        def roundup(x):
-            return x if x % 1000 == 0 else x + 1000 - x % 1000
-            
-        def frange(start, stop, step):
-          while not MONITOR().abortRequested() and start < stop:
-            yield float(start)
-            start += decimal.Decimal(step)
-
-        stations  = self.sortStations(stations)
-        chstart   = roundup((CHANNEL_LIMIT * len(CHAN_TYPES)+1))
-        chmin     = int(chstart + (multiplier*1000))
-        chmax     = int(chmin + (CHANNEL_LIMIT))
-        chrange   = list(frange(chmin,chmax,0.1))
-        leftovers = []
-        self.log('chkImport, stations = %s, multiplier = %s, chstart = %s, chmin = %s, chmax = %s'%(len(stations),multiplier,chstart,chmin,chmax))
-        ## check tvg-chno for conflict, use multiplier to modify org chnum.
-        for mitem in stations:
-            if len(chrange) == 0:
-                self.log('chkImport, reached max import')
-                break
-            elif mitem['number'] < CHANNEL_LIMIT: 
-                newnumber = (chmin+mitem['number'])
-                if newnumber in chrange:
-                    chrange.remove(newnumber)
-                    mitem['number'] = newnumber
-                    yield mitem
-                else: leftovers.append(mitem)
-            else: leftovers.append(mitem)
-        
-        for mitem in leftovers:
-            if len(chrange) == 0:
-                self.log('chkImport, reached max import')
-                break
-            else:
-                mitem['number'] = chrange.pop(0)
-                yield mitem

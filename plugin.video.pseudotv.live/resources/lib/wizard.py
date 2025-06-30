@@ -29,3 +29,56 @@ from globals   import *
 #search discovery
 #parse library
 #prompt autotune
+
+
+
+# if SETTINGS.hasWizardRun():
+# hasAutotuned = SETTINGS.hasAutotuned()
+        # DIALOG.qrDialog(URL_WIKI,LANGUAGE(32216)%(ADDON_NAME,ADDON_AUTHOR))
+
+class Wizard(xbmcgui.WindowXMLDialog):
+    
+    def __init__(self, *args, **kwargs):
+        self.log('__init__')    
+        xbmcgui.WindowXMLDialog.__init__(self, *args, **kwargs)    
+        with BUILTIN.busy_dialog():
+            self.tasks   = kwargs.get('inherited')
+            self.cache   = tasks.cache    
+            self.cacheDB = tasks.cacheDB        
+            self.jsonRPC = tasks.jsonRPC
+            self.player  = tasks.player
+            self.monitor = tasks.monitor
+            
+        self.doModal()
+            
+        
+    def log(self, msg, level=xbmc.LOGDEBUG):
+        log('%s: %s'%(self.__class__.__name__,msg),level)
+        
+        
+    def onInit(self):
+        self.log('onInit')   
+        
+        
+    def onClose(self):
+        # SETTINGS.hasAutotuned()
+        self.close()
+        
+        
+    def onAction(self, act):
+        actionId = act.getId()   
+        self.log('onAction: actionId = %s'%(actionId))
+        if (time.time() - self.lastActionTime) < .5 and actionId not in ACTION_PREVIOUS_MENU: action = ACTION_INVALID # during certain times we just want to discard all input
+        else:
+            if actionId in ACTION_PREVIOUS_MENU:
+                self.onClose()
+                
+            
+    def onFocus(self, controlId):
+        self.log('onFocus: controlId = %s'%(controlId))
+
+        
+    def onClick(self, controlId):
+        self.log('onClick: controlId = %s'%(controlId))
+        
+        

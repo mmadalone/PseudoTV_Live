@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -24,6 +24,7 @@ from globals    import *
 class Channels:
              
     def __init__(self):
+        self.log('__init__')
         self.channelDATA = getJSON(CHANNELFLE_DEFAULT)
         self.channelTEMP = getJSON(CHANNEL_ITEM)
         self.channelDATA.update(self._load())
@@ -39,6 +40,12 @@ class Channels:
         return channelDATA
     
     
+    def _reload(self) -> bool:
+        self.log('_reload') 
+        self.__init__()
+        return True
+        
+        
     def _verify(self, channels: list=[]):
         for idx, citem in enumerate(self.channelDATA.get('channels',[])):
             if not citem.get('name') or not citem.get('id') or len(citem.get('path',[])) == 0:

@@ -20,24 +20,25 @@ from globals     import *
 
 class MP4DataBlock:
     def __init__(self):
-        self.size = -1
+        self.size    = -1
         self.boxtype = ''
-        self.data = ''
+        self.data    = ''
 
 
 class MP4MovieHeader:
     def __init__(self):
-        self.version = 0
-        self.flags = 0
-        self.created = 0
+        self.version  = 0
+        self.flags    = 0
+        self.created  = 0
         self.modified = 0
-        self.scale = 0
+        self.scale    = 0
         self.duration = 0
 
 class MP4Parser:
+    monitor = MONITOR()
+    
     def __init__(self):
         self.MovieHeader = MP4MovieHeader()
-        self.monitor     = MONITOR()
 
 
     def determineLength(self, filename: str) -> int and float:

@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -23,11 +23,12 @@ from library    import Library
 from channels   import Channels
 
 class Autotune:
+    channels = Channels()
+    library  = Library()
+    
     def __init__(self, sysARG=sys.argv):
         self.log('__init__, sysARG = %s'%(sysARG))
-        self.sysARG   = sysARG 
-        self.channels = Channels()
-        self.library  = Library()
+        self.sysARG = sysARG 
         
         
     def log(self, msg, level=xbmc.LOGDEBUG):
@@ -201,4 +202,4 @@ class Autotune:
             elif param == None: return
             return SETTINGS.openSettings(ctl)
         
-if __name__ == '__main__': timerit(Autotune(sys.argv).run)(0.1)
+if __name__ == '__main__': Autotune(sys.argv).run()

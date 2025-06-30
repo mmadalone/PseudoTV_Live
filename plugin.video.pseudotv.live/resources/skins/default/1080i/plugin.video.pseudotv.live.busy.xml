@@ -31,7 +31,7 @@
                     <centerleft>50%</centerleft>
                     <width>160</width>
                     <height>160</height>
-                    <visible>!Window.IsTopMost(fullscreenvideo)</visible>
+                    <visible>!Window.IsVisible(fullscreenvideo)</visible>
                     <aspectratio aligny="center">keep</aspectratio>
                     <texture colordiffuse="dimgray">dialogs/extendedprogress/loading-back.png</texture>
                 </control>
@@ -40,7 +40,7 @@
                     <centerleft>50%</centerleft>
                     <width>160</width>
                     <height>160</height>
-                    <visible>!Window.IsTopMost(fullscreenvideo)</visible>
+                    <visible>!Window.IsVisible(fullscreenvideo)</visible>
                     <aspectratio aligny="center">keep</aspectratio>
                     <texture>dialogs/extendedprogress/logo.png</texture>
                 </control>
@@ -49,7 +49,7 @@
                     <centerleft>50%</centerleft>
                     <width>160</width>
                     <height>160</height>
-                    <visible>!Window.IsTopMost(fullscreenvideo)</visible>
+                    <visible>!Window.IsVisible(fullscreenvideo)</visible>
                     <aspectratio aligny="center">keep</aspectratio>
                     <texture colordiffuse="FF01416b">dialogs/extendedprogress/loading.png</texture>
                     <animation effect="rotate" center="auto" start="360" end="0" time="1500" loop="true" condition="true">Conditional</animation>

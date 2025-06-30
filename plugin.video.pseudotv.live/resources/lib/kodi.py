@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -140,14 +140,22 @@ def findItemsInLST(items, values, item_key='getLabel', val_key='', index=True):
                 _match(item.get(item_key,''),value)
             else: _match(item,value)
     return matches
+    
+def getIDbyPath(url):
+    try:
+        if   url.startswith('special://profile/addon_data/'):      return re.compile('special://profile/addon_data/(.*?)', re.IGNORECASE).search(url).group(1)
+        elif url.startswith('special://home/addons/'):             return re.compile('special://home/addons/(.*?)/resources', re.IGNORECASE).search(url).group(1)
+        elif url.startswith(('plugin://','resource://','pvr://')): return re.compile('(.*)://(.*?)/', re.IGNORECASE).search(url).group(2)
+    except: pass
+    return url
 
 class Settings:
-    monitor = MONITOR()
+    cacheDB = Cache()
+    cache   = Cache(mem_cache=True)
     
     def __init__(self):
-        self.cacheDB = Cache()
-        self.cache   = Cache(mem_cache=True)
-
+        self.log('__init__')
+        
         
     def log(self, msg, level=xbmc.LOGDEBUG):
         log('%s: %s'%(self.__class__.__name__,msg),level)
@@ -165,27 +173,37 @@ class Settings:
         except: return REAL_SETTINGS
 
 
-    def updateSettings(self):
-        self.log('updateSettings')
-        #todo build json of third-party addon settings
-        # self.pluginMeta.setdefault(addonID,{})['settings'] = [{'key':'value'}]
- 
-    
+    def hasAddon(self, id, install=False, enable=False, force=False, notify=False):
+        if '://' in id: id = getIDbyPath(id)
+        if self.builtin.getInfoBool('HasAddon(%s)'%(id),'System'):
+            if not self.builtin.getInfoBool('AddonIsEnabled(%s)'%(id),'System') and enable:
+                if not force:
+                    if not self.dialog.yesnoDialog(message=LANGUAGE(32156)%(id)):
+                        self.log('hasAddon, id = %s (Not Enabled!)'%(id))
+                        return
+                self.builtin.executebuiltin('EnableAddon(%s)'%(id),wait=True)
+            self.log('hasAddon, id = %s (Installed)'%(id))
+            return xbmcaddon.Addon(id)
+        elif install:
+            if self.builtin.executebuiltin('InstallAddon(%s)'%(id),wait=True):
+                return self.hasAddon(id, False, enable, force, notify)
+        elif notify: self.dialog.notificationDialog(LANGUAGE(32034)%(id))
+        self.log('hasAddon, id = %s (Not Installed!)'%(id))
+        
+
     def openSettings(self, ctl=(0,1), id=ADDON_ID):
-        builtin = Builtin()
-        builtin.closeBusyDialog()
-        with builtin.busy_dialog():
-            builtin.executebuiltin(f'Addon.OpenSettings({id})')
+        self.builtin.closeBusyDialog()
+        with self.builtin.busy_dialog():
+            self.builtin.executebuiltin(f'Addon.OpenSettings({id})')
             xbmc.sleep(100)
-            builtin.executebuiltin('SetFocus(%i)'%(ctl[0]-200))
+            self.builtin.executebuiltin('SetFocus(%i)'%(ctl[0]-200))
             xbmc.sleep(50)
-            builtin.executebuiltin('SetFocus(%i)'%(ctl[1]-180))
-        del builtin
-    
+            self.builtin.executebuiltin('SetFocus(%i)'%(ctl[1]-180))
+
  
     def openGuide(self, instance=ADDON_NAME):
         def __match(label):
-            items = jsonRPC.getDirectory({"directory":baseURL}).get('files',[])
+            items, limits, errors = jsonRPC.getDirectory({"directory":baseURL})
             for item in items:
                 if label.lower() == item.get('label','').lower(): return item
             for item in items:
@@ -284,7 +302,7 @@ class Settings:
         
     def getFriendlyName(self):
         friendly = Properties().getProperty('INSTANCE_NAME')
-        if not friendly:
+        if not friendly or friendly == LANGUAGE(32105):
             from jsonrpc import JSONRPC
             friendly = Properties().setProperty('INSTANCE_NAME', JSONRPC().inputFriendlyName())
         return friendly
@@ -444,213 +462,6 @@ class Settings:
         return Json2Html().convert(self.getPayload(inclDebug=True))
 
 
-    def IPTV_SIMPLE_SETTINGS(self): #recommended IPTV Simple settings
-        return {'kodi_addon_instance_name'      :ADDON_NAME,
-                'kodi_addon_instance_enabled'   :'false',
-                'm3uPathType'                   :'0',
-                'm3uPath'                       :'0',
-                'm3uUrl'                        :'0',
-                'm3uCache'                      :'true',
-                'startNum'                      :'1',
-                'numberByOrder'                 :'false',
-                'm3uRefreshMode'                :'1',
-                'm3uRefreshIntervalMins'        :'15',
-                'm3uRefreshHour'                :'0',
-                'connectioncheckinterval'       :'10',
-                'connectionchecktimeout'        :'20',
-                'defaultProviderName'           :ADDON_NAME,
-                'enableProviderMappings'      :'true',
-                # 'providerMappingFile'         :PROVIDERFLEPATH,#todo
-                # 'tvGroupMode'                 :'0',
-                # 'customTvGroupsFile'          :(TVGROUPFLE),#todo
-                # 'radioGroupMode'              :'0',
-                # 'customRadioGroupsFile'       :(RADIOGROUPFLE),#todo
-                'epgPathType'                   :'0',
-                'epgPath'                       :'0',
-                'epgUrl'                        :'0',
-                'epgCache'                      :'true',
-                'genresPathType'                :'0',
-                'genresPath'                    :'0',
-                'genresUrl'                     :'0',
-                'useEpgGenreText'               :'true',
-                'logoPathType'                  :'0',
-                'logoPath'                      :LOGO_LOC,
-                'logoFromEpg'                   :'2',
-                'mediaTitleSeasonEpisode'       :'true',
-                'timeshiftEnabled'              :'false',
-                'catchupEnabled'                :'true',
-                'catchupPlayEpgAsLive'          :'false',
-                'catchupWatchEpgEndBufferMins'  :'0',
-                'catchupWatchEpgBeginBufferMins':'0'}
-
-
-    def setPVRPath(self, path, instance=ADDON_NAME, prompt=False, force=False): #local instance
-        settings  = self.IPTV_SIMPLE_SETTINGS()
-        nsettings = {'m3uPathType'                :'0',
-                     'm3uPath'                    :os.path.join(path,M3UFLE),
-                     'epgPathType'                :'0',
-                     'epgPath'                    :os.path.join(path,XMLTVFLE),
-                     'genresPathType'             :'0',
-                     'genresPath'                 :os.path.join(path,GENREFLE),
-                     'logoPathType'               :'0',
-                     'logoPath'                   :os.path.join(path,'logos'),
-                     'kodi_addon_instance_name'   : '%s - %s'%(ADDON_NAME,instance),
-                     'kodi_addon_instance_enabled':'true'}
-        settings.update(nsettings)
-        self.log('setPVRPath, new settings = %s'%(nsettings))
-        if self.hasPVRInstance(instance) and not force:
-            return self.log('setPVRPath, instance (%s) settings exists.'%(instance))
-        return self.chkPluginSettings(PVR_CLIENT_ID,settings,instance,prompt)
-        
-        
-    def setPVRRemote(self, host, instance=ADDON_NAME, prompt=False): #multi-room instances
-        settings  = self.IPTV_SIMPLE_SETTINGS()
-        nsettings = {'m3uPathType'                :'1',
-                     'm3uUrl'                     :'http://%s/%s'%(host,M3UFLE),
-                     'epgPathType'                :'1',
-                     'epgUrl'                     :'http://%s/%s'%(host,XMLTVFLE),
-                     'genresPathType'             :'1',
-                     'genresUrl'                  :'http://%s/%s'%(host,GENREFLE),
-                     'kodi_addon_instance_name'   : '%s - %s'%(ADDON_NAME,instance),
-                     'kodi_addon_instance_enabled':'true'}
-        settings.update(nsettings)
-        self.log('setPVRRemote, new settings = %s'%(nsettings))
-        return self.chkPluginSettings(PVR_CLIENT_ID,settings,instance,prompt)
-        
-        
-    def hasPVRInstance(self, instance=ADDON_NAME):
-        instancePath = os.path.join(PVR_CLIENT_LOC,'instance-settings-%s.xml'%(self.gePVRInstance(instance)))
-        if FileAccess.exists(instancePath): 
-            self.log('hasPVRInstance, instance = %s, instancePath = %s'%(instance, instancePath))
-            return instancePath
-        
-        
-    def setPVRInstance(self, instance=ADDON_NAME):
-        # todo https://github.com/xbmc/xbmc/pull/23648
-        if   not self.getSettingBool('Enable_PVR_SETTINGS'): self.dialog.notificationDialog(LANGUAGE(32186))
-        elif not FileAccess.exists(os.path.join(PVR_CLIENT_LOC,'settings.xml')):
-            self.log('setPVRInstance, creating missing default settings.xml')
-            return self.chkPluginSettings(PVR_CLIENT_ID,self.IPTV_SIMPLE_SETTINGS(),False)
-        else:
-            newFile = os.path.join(PVR_CLIENT_LOC,'instance-settings-%s.xml'%(self.gePVRInstance(instance)))
-            if FileAccess.exists(newFile): FileAccess.delete(newFile)
-            else: #todo remove after migration to new instances
-                pvrFile = self.chkPVRInstance(instance)
-                if pvrFile: FileAccess.delete(pvrFile)
-            #new instance settings
-            self.log('setPVRInstance, creating %s'%(newFile))
-            return FileAccess.move(os.path.join(PVR_CLIENT_LOC,'settings.xml'),newFile)
-           
-        
-    def gePVRInstance(self, instance=ADDON_NAME):
-        return int(re.sub("[^0-9]", "", getMD5(instance))) * 2
-        
-        
-    def chkPVRInstance(self, instance=ADDON_NAME):
-        found   = False
-        for file in [filename for filename in FileAccess.listdir(PVR_CLIENT_LOC)[1] if filename.endswith('.xml')]:
-            if self.monitor.waitForAbort(0.0001): break
-            elif file.startswith('instance-settings-'):
-                try:
-                    xml = FileAccess.open(os.path.join(PVR_CLIENT_LOC,file), "r")
-                    txt = xml.read()
-                    xml.close()
-                except Exception as e:
-                    self.log('chkPVRInstance, path = %s, failed to open file = %s\n%s'%(PVR_CLIENT_LOC,file,e))
-                    continue
-                        
-                match = re.compile(r'<setting id=\"kodi_addon_instance_name\" default=\"true\">(.*?)\</setting>', re.IGNORECASE).search(txt)
-                try: name = match.group(1)
-                except:
-                    match = re.compile(r'<setting id=\"kodi_addon_instance_name\">(.*?)\</setting>', re.IGNORECASE).search(txt)
-                    try:    name = match.group(1)
-                    except: name = None
-                    
-                if name == instance:
-                    if found ==  False: found = os.path.join(PVR_CLIENT_LOC,file)
-                    else: #auto remove any duplicate entries with the same instance name.
-                        FileAccess.delete(os.path.join(PVR_CLIENT_LOC,file))
-                        self.log('chkPVRInstance, removing duplicate entry %s'%(file))
-                self.log('chkPVRInstance, found %s file = %s'%(name,found))
-        return found
-
-
-    @cacheit(expiration=datetime.timedelta(minutes=5),json_data=True)
-    def getPVRInstanceSettings(self, instance):
-        instanceConf = dict()
-        instancePath = self.hasPVRInstance(instance)
-        if instancePath:
-            fle = FileAccess.open(instancePath,'r')
-            lines = fle.readlines()
-            for line in lines:
-                if not 'id=' in line: continue
-                match = re.compile(r'<setting id=\"(.*)\" default=\"(.*)\">(.*?)\</setting>', re.IGNORECASE).search(line)
-                try: instanceConf.update({match.group(1):(match.group(2),match.group(3))})
-                except:
-                    match = re.compile(r'<setting id=\"(.*)\">(.*?)\</setting>', re.IGNORECASE).search(line)
-                    try: instanceConf.update({match.group(1):('',match.group(2))})
-                    except:
-                        match = re.compile(r'<setting id=\"(.*)\" default=\"(.*?)\" />', re.IGNORECASE).search(line)
-                        try: instanceConf.update({match.group(1):(match.group(2),None)})
-                        except: pass
-            fle.close()
-        self.log('getPVRInstanceSettings, returning instance = %s\n%s'%(instance,instanceConf))
-        return instanceConf
-        
-        
-    def chkPluginSettings(self, id, nsettings, instance=ADDON_NAME, prompt=False):
-        self.log('chkPluginSettings, id = %s, instance = %s, prompt=%s'%(id,instance,prompt))
-        addon   = xbmcaddon.Addon(id)
-        dialog  = Dialog()
-        if addon is None: dialog.notificationDialog(LANGUAGE(32034)%(id))
-        else:
-            changes   = {}
-            name      = addon.getAddonInfo('name')
-            osettings = self.getPVRInstanceSettings(instance)
-            for setting, newvalue in list(nsettings.items()):
-                if self.monitor.waitForAbort(0.0001): return False
-                default, oldvalue = osettings.get(setting,({},{}))
-                if str(newvalue).lower() != str(oldvalue).lower(): 
-                    changes[setting] = (oldvalue, newvalue)
-                
-            if not changes:
-                self.log('chkPluginSettings, no changes detected!')
-                return False
-            elif prompt:
-                modified = '\n'.join(['Modifying %s: [COLOR=dimgray][B]%s[/B][/COLOR] => [COLOR=green][B]%s[/B][/COLOR]'%(setting,newvalue[0],newvalue[1]) for setting, newvalue in list(changes.items())])
-                dialog.textviewer('%s\n\n%s'%(LANGUAGE(32035)%(name),modified))
-                if not dialog.yesnoDialog((LANGUAGE(32036)%name)): 
-                    dialog.notificationDialog(LANGUAGE(32046))
-                    return False
-                
-            for s, v in list(changes.items()):
-                if self.monitor.waitForAbort(0.0001): return False
-                addon.setSetting(s, v[1])
-                self.log('chkPluginSettings, setting = %s, current value = %s => %s'%(s,oldvalue,v[1]))
-            self.setPVRInstance(instance)
-            dialog.notificationDialog((LANGUAGE(32037)%(name)))
-            del dialog
-            return True
-        del dialog
-        
-
-    def getCurrentSettings(self):
-        settings = ['User_Folder',
-                    'Debug_Enable',
-                    'Overlay_Enable',
-                    'Enable_OnInfo',
-                    'Disable_Trakt',
-                    'Rollback_Watched',
-                    'Store_Duration',
-                    'Seek_Tolerance',
-                    'Seek_Threshold',
-                    'Idle_Timer',
-                    'Run_While_Playing',
-                    'Restart_Percentage',]
-        for setting in settings:
-            yield (setting,self.getSetting(setting))
-               
-
     def hasAutotuned(self):
         return self.getCacheSetting('has.Autotuned')
         
@@ -667,12 +478,205 @@ class Settings:
         return self.getCacheSetting('has.wizardRun')
 
        
+    def _IPTV_SIMPLE_SETTINGS(self): #recommended IPTV Simple settings
+        return {'kodi_addon_instance_name'      :ADDON_NAME,
+                'kodi_addon_instance_enabled'   :'false',
+                'm3uPathType'                   :'0',
+                'm3uPath'                       :M3UFLEPATH,
+                'm3uUrl'                        :'',
+                'm3uCache'                      :'false',
+                'startNum'                      :'1',
+                'numberByOrder'                 :'false',
+                'm3uRefreshMode'                :'1',
+                'm3uRefreshIntervalMins'        :'%s'%(M3U_REFRESH),
+                'm3uRefreshHour'                :'0',
+                'connectioncheckinterval'       :'10',
+                'connectionchecktimeout'        :'20',
+                'defaultProviderName'           :ADDON_NAME,
+                'enableProviderMappings'      :'true',
+                # 'providerMappingFile'         :PROVIDERFLEPATH,#todo
+                # 'tvGroupMode'                 :'0',
+                # 'customTvGroupsFile'          :(TVGROUPFLE),#todo
+                # 'radioGroupMode'              :'0',
+                # 'customRadioGroupsFile'       :(RADIOGROUPFLE),#todo
+                'epgPathType'                   :'0',
+                'epgPath'                       :XMLTVFLEPATH,
+                'epgUrl'                        :'',
+                'epgCache'                      :'true',
+                'genresPathType'                :'0',
+                'genresPath'                    :GENREFLEPATH,
+                'genresUrl'                     :'',
+                'useEpgGenreText'               :'true',
+                'logoPathType'                  :'0',
+                'logoPath'                      :LOGO_LOC,
+                'logoBaseUrl'                   :'',
+                'logoFromEpg'                   :'2',
+                'mediaTitleSeasonEpisode'       :'true',
+                'timeshiftEnabled'              :'false',
+                'catchupEnabled'                :'true',
+                'catchupPlayEpgAsLive'          :'false',
+                'catchupWatchEpgEndBufferMins'  :'0',
+                'catchupWatchEpgBeginBufferMins':'0',
+                'useFFmpegReconnect'            :'false',
+                'useInputstreamAdaptiveforHls'  :'false',
+                'transformMulticastStreamUrls'  :'false',}
+
+
+    def setPVRPath(self, path, instance=ADDON_NAME, prompt=None):
+        settings  = self._IPTV_SIMPLE_SETTINGS()
+        nsettings = {'m3uPathType'                :'0',
+                     'm3uCache'                   :'false',
+                     'm3uPath'                    :os.path.join(path,M3UFLE),
+                     'epgPathType'                :'0',
+                     'epgCache'                   :'false',
+                     'epgPath'                    :os.path.join(path,XMLTVFLE),
+                     'genresPathType'             :'0',
+                     'genresPath'                 :os.path.join(path,GENREFLE),
+                     'logoPathType'               :'0',
+                     'logoPath'                   :os.path.join(path,'logos'),
+                     'kodi_addon_instance_name'   : '%s - %s'%(ADDON_NAME,instance),
+                     'kodi_addon_instance_enabled':'true'}
+        settings.update(nsettings)
+        self.log('setPVRRemote, %s settings = %s'%(instance, nsettings))
+        return self.chkPluginSettings(settings, instance, prompt)
+        
+        
+    def setPVRRemote(self, host, instance=ADDON_NAME, prompt=None, cache=False):
+        settings  = self._IPTV_SIMPLE_SETTINGS()
+        nsettings = {'m3uPathType'                :'1',
+                     'm3uCache'                   :'%s'%(str(cache)),
+                     'm3uUrl'                     :'http://%s/%s'%(host,M3UFLE),
+                     'epgPathType'                :'1',
+                     'epgCache'                   :'%s'%(str(cache)),
+                     'epgUrl'                     :'http://%s/%s'%(host,XMLTVFLE),
+                     'genresPathType'             :'1',
+                     'genresUrl'                  :'http://%s/%s'%(host,GENREFLE),
+                     'logoPathType'               :'1',
+                     'logoBaseUrl'                :'http://%s/logos'%(host),
+                     'kodi_addon_instance_name'   : '%s - %s'%(ADDON_NAME,instance),
+                     'kodi_addon_instance_enabled':'true'}
+        settings.update(nsettings)
+        self.log('setPVRRemote, %s settings = %s, cache = %s'%(instance, nsettings, cache))
+        return self.chkPluginSettings(settings, instance, prompt)
+        
+        
+    def hasPVRInstance(self, instance=ADDON_NAME):
+        instancePath = os.path.join(PVR_CLIENT_LOC,'instance-settings-%s.xml'%(self.gePVRInstance(instance)))
+        if FileAccess.exists(instancePath):
+            self.log('hasPVRInstance, instance = %s, path = %s'%(instance, instancePath))
+            return instancePath
+        
+        
+    def gePVRInstance(self, instance=ADDON_NAME):
+        return int(re.sub("[^0-9]", "", getMD5(instance))) * 2
+        
+        
+    def findPVRInstance(self, instance=ADDON_NAME):
+        found = self.hasPVRInstance(instance)
+        if not found:
+            for file in [filename for filename in FileAccess.listdir(PVR_CLIENT_LOC)[1] if filename.endswith('.xml')]:
+                if file.startswith('instance-settings-'):
+                    try:
+                        xml = FileAccess.open(os.path.join(PVR_CLIENT_LOC,file), "r")
+                        txt = xml.read()
+                        xml.close()
+                    except Exception as e:
+                        self.log('findPVRInstance, path = %s, failed to open file = %s\n%s'%(PVR_CLIENT_LOC,file,e))
+                        continue
+                            
+                    match = re.compile(r'<setting id=\"kodi_addon_instance_name\" default=\"true\">(.*?)\</setting>', re.IGNORECASE).search(txt)
+                    try: name = match.group(1)
+                    except:
+                        match = re.compile(r'<setting id=\"kodi_addon_instance_name\">(.*?)\</setting>', re.IGNORECASE).search(txt)
+                        try:    name = match.group(1)
+                        except: name = None
+                        
+                    if instance.lower() == str(name).lower():
+                        if not found: found = os.path.join(PVR_CLIENT_LOC,file)
+                        else: #auto remove any duplicate entries with the same instance name.
+                            FileAccess.delete(os.path.join(PVR_CLIENT_LOC,file))
+                            self.log('findPVRInstance, removing duplicate entry %s'%(file))
+                    self.log('findPVRInstance, found %s file = %s'%(name,found))
+        return found
+
+
+    def getPVRInstanceSettings(self, instance):
+        instanceConf = dict()
+        instancePath = self.hasPVRInstance(instance)
+        self.log('getPVRInstanceSettings, instance = %s, path = %s'%(instance,instancePath))
+        if instancePath:
+            fle = FileAccess.open(instancePath,'r')
+            lines = fle.readlines()
+            for line in lines:
+                if not 'id="' in line: continue
+                match = re.compile(r'<setting id=\"(.*)\" default=\"(.*)\">(.*?)\</setting>', re.IGNORECASE).search(line)
+                try: 
+                    instanceConf[match.group(1)] = match.group(3)
+                    self.log('getPVRInstanceSettings, setting = %s, value = %s'%(match.group(1),match.group(3)))
+                except:
+                    match = re.compile(r'<setting id=\"(.*)\">(.*?)\</setting>', re.IGNORECASE).search(line)
+                    try:
+                        instanceConf[match.group(1)] = match.group(2)
+                        self.log('getPVRInstanceSettings, setting = %s, value = %s'%(match.group(1),match.group(2)))
+                    except: pass
+            fle.close()
+        self.log('getPVRInstanceSettings, returning instance = %s\n%s'%(instance,instanceConf))
+        return instanceConf
+        
+        
+    def chkPluginSettings(self, nsettings, instance=ADDON_NAME, prompt=None):
+        if prompt is None: prompt = not bool(self.getSettingBool('Enable_Kodi_Access'))
+        self.log('chkPluginSettings, id = %s, instance = %s, prompt = %s'%(PVR_CLIENT_ID,instance,prompt))
+        addon = self.hasAddon(PVR_CLIENT_ID,enable=True,notify=True)
+        if addon:
+            message   = []
+            osettings = self._IPTV_SIMPLE_SETTINGS()
+            osettings.update(self.getPVRInstanceSettings(instance))
+            for setting, nvalue in list(nsettings.items()):
+                ovalue = (osettings.get(setting) or '')
+                if str(nvalue).lower() != str(ovalue).lower(): 
+                    osettings[setting] = nvalue
+                    self.log('chkPluginSettings, setting = %s, current value = %s => %s'%(setting,ovalue,nvalue))
+                    message.append('Modifying %s: [COLOR=dimgray][B]%s[/B][/COLOR] => [COLOR=green][B]%s[/B][/COLOR]'%(setting,ovalue,nvalue))
+
+            if len(message) > 0:
+                if prompt:
+                    self.dialog.textviewer('%s\n\n%s'%(LANGUAGE(32035)%(addon.getAddonInfo('name')),'[CR]'.join(message)))
+                    if not self.dialog.yesnoDialog((LANGUAGE(32036)%addon.getAddonInfo('name'))):
+                        self.dialog.notificationDialog(LANGUAGE(32046))
+                        return False
+                return self.setPVRInstanceSettings(instance, osettings)
+            self.log('chkPluginSettings, no changes detected!')
+
+
+    def setPVRInstanceSettings(self, instance=ADDON_NAME, settings={}):
+        addon = self.hasAddon(PVR_CLIENT_ID,enable=True)
+        if addon:
+            for setting, value in list(settings.items()):
+                addon.setSetting(setting, value)
+                self.log('setPVRInstanceSettings, %s = %s'%(setting,value))
+
+            # todo https://github.com/xbmc/xbmc/pull/23648
+            defaultFile = os.path.join(PVR_CLIENT_LOC,'settings.xml')
+            if FileAccess.exists(defaultFile):
+                instanceFile = os.path.join(PVR_CLIENT_LOC,'instance-settings-%s.xml'%(self.gePVRInstance(instance)))
+                if FileAccess.exists(instanceFile): FileAccess.delete(instanceFile)
+                self.log('setPVRInstanceSettings, creating %s'%(instanceFile))
+                FileAccess.move(defaultFile, instanceFile)
+                return self.dialog.notificationDialog((LANGUAGE(32037)%(addon.getAddonInfo('name'))))
+        return self.dialog.notificationDialog(LANGUAGE(32000))
+        
+        
+    def getCurrentSettings(self):
+        settings = ['User_Folder', 'Debug_Enable', 'TCP_PORT']
+        return dict([(setting,self.getSetting(setting)) for setting in settings])
+               
+
 class Properties:
-    monitor = MONITOR()
-    
     def __init__(self, winID=10000):
-        self.winID      = winID
-        self.window     = xbmcgui.Window(winID)
+        self.log('__init__, winID = %s'%(winID))
+        self.winID  = winID
+        self.window = xbmcgui.Window(winID)
 
 
     def log(self, msg, level=xbmc.LOGDEBUG):
@@ -706,6 +710,13 @@ class Properties:
         else: yield
         
         
+    def setTrakt(self, state=False):
+        self.log('setTrakt, disable trakt = %s'%(state))
+        # https://github.com/trakt/script.trakt/blob/d45f1363c49c3e1e83dabacb70729cc3dec6a815/resources/lib/kodiUtilities.py#L104
+        if state: self.setEXTPropertyBool('script.trakt.paused',state)
+        else:     self.clrEXTProperty('script.trakt.paused')
+
+
     def setUpdateChannels(self, id):
         ids = self.getUpdateChannels()
         if isinstance(id, list): ids.extend(id)
@@ -944,7 +955,8 @@ class Properties:
     #SET
     def setEXTProperty(self, key, value):
         if not '.TRASH' in key: self.log('setEXTProperty, id = %s, key = %s, value = %s'%(10000,key,'%s...'%((str(value)[:128]))))
-        xbmcgui.Window(10000).setProperty(key,str(value))
+        if value: xbmcgui.Window(10000).setProperty(key,str(value))
+        else:     self.clrEXTProperty(key)
         return value
         
         
@@ -968,7 +980,7 @@ class Properties:
     def setPropertyBool(self, key, value):
         if value: self.setProperty(key, value)
         else:     self.clrProperty(key)
-        return str(value).lower() == 'true'
+        return value
         
         
     def setPropertyDict(self, key, value={}):
@@ -983,16 +995,9 @@ class Properties:
         return self.setProperty(key, float(value))
 
     
-    def setTrakt(self, state=False):
-        self.log('setTrakt, disable trakt = %s'%(state))
-        # https://github.com/trakt/script.trakt/blob/d45f1363c49c3e1e83dabacb70729cc3dec6a815/resources/lib/kodiUtilities.py#L104
-        if state: self.setEXTPropertyBool('script.trakt.paused',state)
-        else:     self.clrEXTProperty('script.trakt.paused')
-
-
-    def setTrash(self, key): #catalog instance properties that may become abandoned
+    def setTrash(self, key): #catalog instance properties that are abandoned
         instanceID = self.getInstanceID()
-        tmpDCT = loadJSON(self.getEXTProperty('%s.TRASH'%(ADDON_ID)))
+        tmpDCT     = loadJSON(self.getEXTProperty('%s.TRASH'%(ADDON_ID)))
         if key not in tmpDCT.setdefault(instanceID,[]): tmpDCT.setdefault(instanceID,[]).append(key)
         self.setEXTProperty('%s.TRASH'%(ADDON_ID),dumpJSON(tmpDCT))
         return key
@@ -1108,13 +1113,11 @@ class ListItems:
             
     
 class Builtin:
-    busy       = None
-    monitor    = MONITOR()
-    properties = Properties()
-    
+    busy = None
     
     def __init__(self):
-        ...
+        self.log('__init__')
+        
 
     def log(self, msg, level=xbmc.LOGDEBUG):
         log('%s: %s'%(self.__class__.__name__,msg),level)
@@ -1149,7 +1152,23 @@ class Builtin:
     def hasMovie(self):
         return self.getInfoBool('HasContent(Movies)','Library')
                 
-                
+
+    def hasMedia(self) -> bool:
+        return self.getInfoBool('hasMedia','Player')
+
+
+    def hasGame(self) -> bool:
+        return self.getInfoBool('HasGame','Player')
+
+
+    def hasDuration(self) -> bool:
+        return self.getInfoBool('HasDuration','Player')
+
+
+    def hasEPG(self) -> bool:
+        return self.getInfoBool('HasEpg','VideoPlayer')
+
+  
     def hasSubtitle(self):
         return self.getInfoBool('HasSubtitles','VideoPlayer')
 
@@ -1167,7 +1186,7 @@ class Builtin:
 
 
     def isPaused(self):
-        return self.getInfoBool('Player.Paused')
+        return self.getInfoBool('Paused','Player')
                 
                 
     def isRecording(self):
@@ -1181,7 +1200,15 @@ class Builtin:
     def isSettingsOpened(self) -> bool:
         return (self.getInfoBool('IsVisible(addonsettings)','Window') | self.getInfoBool('IsVisible(selectdialog)' ,'Window'))
 
-  
+
+    def isPlaying(self):
+        return (self.getInfoBool('Playing','Player') | self.getInfoBool('IsInternetStream','Player'))
+
+
+    def isPVRPlaying(self) -> bool:
+        return (self.getInfoBool('IsPlayingTv','Pvr') | self.getInfoBool('IsPlayingRadio','Pvr') | self.getInfoBool('IsPlayingRecording','Pvr') | self.getInfoBool('IsPlayingActiveRecording','Pvr'))
+
+
     def isBusyDialog(self):
         return (self.properties.isRunning('OVERLAY_BUSY') | self.getInfoBool('IsActive(busydialognocancel)','Window') | self.getInfoBool('IsActive(busydialog)','Window'))
 
@@ -1196,12 +1223,12 @@ class Builtin:
 
 
     @contextmanager
-    def busy_dialog(self, cancel=False):
+    def busy_dialog(self, cancel=False, lock=False):
         if not self.isBusyDialog() and not cancel:
             try: 
                 if self.busy is None:
                     from overlay import Busy 
-                    self.busy = Busy(BUSY_XML, ADDON_PATH, "default")
+                    self.busy = Busy(BUSY_XML, ADDON_PATH, "default", lock=lock)
                     self.busy.show()
                 yield
             finally:
@@ -1218,7 +1245,7 @@ class Builtin:
     def getInfoLabel(self, key, param='ListItem', default=''):
         value = xbmc.getInfoLabel('%s.%s'%(param,key))
         if value == "Busy": 
-            if not MONITOR().waitForAbort(1.0): return self.getInfoLabel(key,param,default)
+            if not self.monitor.waitForAbort(1.0): return self.getInfoLabel(key,param,default)
         self.log('getInfoLabel, key = %s.%s, value = %s'%(param,key,value))
         return (value or default)
         
@@ -1229,39 +1256,29 @@ class Builtin:
         return value
         
         
-    def executeWindow(self, key):
-        if self.getInfoBool('Playing','Player'):
-            self.executebuiltin(key)
+    def executewindow(self, key, wait=False, delay=0.1, condition='Player.Playing'):
+        self.executebuiltin(key,wait,delay,condition)
         
         
-    def executebuiltin(self, key, wait=False):
-        self.log('executebuiltin, key = %s, wait = %s'%(key,wait))
-        xbmc.executebuiltin('%s'%(key),wait)
-        return True
+    def executebuiltin(self, key, wait=False, delay=0.1, condition=None):
+        self.log('executebuiltin, key = %s, wait = %s, delay = %s, condition = %s):'%(key,wait,delay,condition))
+        if condition and not xbmc.getCondVisibility(condition): return
+        if wait: xbmc.executebuiltin('%s'%(key),wait)
+        else:    timerit(xbmc.executebuiltin)(delay,['%s'%(key)])
         
         
     def executescript(self, path):
         self.log('executescript, path = %s'%(path))
         xbmc.executescript('%s'%(path))
         return True
+
+
+    def executeJSONRPC(self, request):
+        response = xbmc.executeJSONRPC(request)
+        self.monitor.waitForAbort(float(self.settings.getSettingInt('RPC_Delay')/1000))
+        self.log('executeJSONRPC, request = %s\nresponse = %s'%(request,response))
+        return response
         
-        
-    @contextmanager
-    def sendLocker(self, wait=0.0001):
-        while not self.monitor.abortRequested(): #try and make kodi api thread safe / thread locks not working? todo debug.
-            if self.monitor.waitForAbort(wait) or self.properties.getEXTPropertyBool('%s.pendingInterrupt'%(ADDON_ID)): break
-            elif not self.properties.getEXTPropertyBool('%s.sendLocker'%(ADDON_ID)): break
-            else: log('sendLocker, avoiding collision')
-        self.properties.setEXTPropertyBool('%s.sendLocker'%(ADDON_ID),True)
-        try: yield
-        finally: self.properties.setEXTPropertyBool('%s.sendLocker'%(ADDON_ID),False)
-
-
-    def executeJSONRPC(self, command):
-        self.log('executeJSONRPC, command = %s'%(command))
-        # with self.sendLocker():
-        return xbmc.executeJSONRPC(command)
-
 
     def getResolution(self):
         WH, WIN = self.getInfoLabel('ScreenResolution','System').split(' - ')
@@ -1269,6 +1286,7 @@ class Builtin:
 
 
 class Dialog:
+    monitor    = MONITOR()
     settings   = Settings()
     properties = Properties()
     listitems  = ListItems()
@@ -1276,10 +1294,15 @@ class Dialog:
     dialog     = xbmcgui.Dialog()
     
     def __init__(self):
-        self.settings.dialog   = self
-        self.settings.property = self.properties
-        self.settings.builtin  = self.builtin
-        self.monitor           = self.builtin.monitor
+        self.log('__init__')
+        self.settings.monitor   = self.monitor
+        self.settings.property  = self.properties
+        self.settings.builtin   = self.builtin
+        self.properties.monitor = self.monitor
+        self.builtin.monitor    = self.monitor
+        self.builtin.properties = self.properties
+        self.builtin.settings   = self.settings
+        self.settings.dialog    = self
         
 
     def log(self, msg, level=xbmc.LOGDEBUG):
@@ -1429,8 +1452,8 @@ class Dialog:
             def _updateText(self, txt):
                 try:
                     self.textbox.setText(txt)
-                    xbmc.executebuiltin('SetFocus(3000)')
-                    xbmc.executebuiltin('AlarmClock(down,Action(down),.5,true,false)')
+                    self.builtin.executebuiltin('SetFocus(3000)')
+                    self.builtin.executebuiltin('AlarmClock(down,Action(down),.5,true,false)')
                 except: pass
                 
         return TEXTVIEW("DialogTextViewer.xml", os.getcwd(), "Default")
@@ -1468,7 +1491,7 @@ class Dialog:
             pDialog = self.progressBGDialog(message=message,header=header)
             for idx in range(int(wait)):
                 pDialog = self.progressBGDialog((((idx+1) * 100)//int(wait)),pDialog,header=header)
-                if pDialog is None or MONITOR().waitForAbort(1.0): break
+                if pDialog is None or self.monitor.waitForAbort(1.0): break
             if hasattr(pDialog, 'close'): pDialog.close()
         return True
 
@@ -1510,8 +1533,9 @@ class Dialog:
         self.dialog.info(listitem)
         
 
-    def notificationDialog(self, message, header=ADDON_NAME, sound=False, time=PROMPT_DELAY, icon=COLOR_LOGO, show=True):
-        self.log('notificationDialog: %s'%(message))
+    def notificationDialog(self, message, header=ADDON_NAME, sound=False, time=PROMPT_DELAY, icon=COLOR_LOGO, show=None):
+        if show is None: show = self.settings.getSettingBool('Notify_While_Playing')
+        self.log('notificationDialog: %s, show = %s'%(message,show))
         ## - Builtin Icons:
         ## - xbmcgui.NOTIFICATION_INFO
         ## - xbmcgui.NOTIFICATION_WARNING
@@ -1572,8 +1596,9 @@ class Dialog:
         try:
             with self.builtin.busy_dialog():
                 fle   = FileAccess.open(strm,'r')
-                paths = [line for line in fle.readlines() if not line.startswith('#') and '://' in line]
+                lines = fle.readlines()
                 fle.close()
+                paths = [line for line in lines if not line.startswith('#') and '://' in line]
                 if len(paths) == 0: return self.notificationDialog(LANGUAGE(32018)%(LANGUAGE(30047)))
             select = self.selectDialog(paths, LANGUAGE(32080), useDetails=False, multi=False)
             self.log("importSTRM, strm = %s paths = %s"%(strm,paths))
@@ -1674,7 +1699,7 @@ class Dialog:
         epaths  = paths.copy()
         pathLST = list([_f for _f in paths if _f])
         lastOPT = None
-        while not MONITOR().abortRequested() and not select is None:
+        while not self.monitor.abortRequested() and not select is None:
             with self.builtin.busy_dialog():
                 npath  = None
                 lizLST = [__buildListItem('%s|'%(idx+1),path,paths=[path],icon=DUMMY_ICON.format(text=str(idx+1)),items={'idx':idx+1}) for idx, path in enumerate(pathLST) if path]
@@ -1707,9 +1732,9 @@ class Dialog:
     def buildDXSP(self, path=''):
         # https://github.com/xbmc/xbmc/blob/master/xbmc/playlists/SmartPlayList.cpp
         
-        def mtype(params={"type":"","order":{'direction':'ascending','method':'random','ignorearticle':True,'useartistsortname':True},"rules":{}}):
+        def __mtype(params={"type":"","order":{"direction":"ascending","method":"random","ignorearticle":True,"useartistsortname":True},"rules":{}}):
             path    = ''
-            enumLST = list(sorted(['albums', 'artists', 'episodes', 'mixed', 'movies', 'musicvideos', 'songs', 'tvshows']))
+            enumLST = list(sorted(["albums", "artists", "episodes", "mixed", "movies", "musicvideos", "songs", "tvshows"]))
             enumSEL = self.selectDialog(list(sorted([l.title() for l in enumLST])),header="Select Media Type",preselect=(enumLST.index(params.get('type','')) if params.get('type') else -1),useDetails=False, multi=False)
             if not enumSEL is None:
                 params['type'] = enumLST[enumSEL]
@@ -1722,24 +1747,24 @@ class Dialog:
                 else:                                                      path = ''
             return path, params
             
-        def andor(params={}):
+        def __andor(params={}):
             enumLST = list(sorted(['and', 'or']))
             enumSEL = self.selectDialog(list(sorted([l.title() for l in enumLST])),header="Select Conjunction",preselect=(enumLST.index(list(params.get('rules',{}).keys())) if params.get('rules',{}) else -1),useDetails=False, multi=False)
             if not enumSEL is None: return enumLST[enumSEL]
                   
-        def order(params={}):
+        def __order(params={}):
             enums   = jsonRPC.getEnums("List.Sort",type="order") 
             enumLST = list(sorted([_f for _f in enums if _f]))
             enumSEL = self.selectDialog(list(sorted([l.title() for l in enumLST])),header="Select order",preselect=enumLST.index(params.get('order',{}).get('direction','ascending')),useDetails=False, multi=False)
             if not enumSEL is None: return enumLST[enumSEL]
             
-        def method(params={}):
+        def __method(params={}):
             enums   = jsonRPC.getEnums("List.Sort",type="method") 
             enumLST = list(sorted([_f for _f in enums if _f]))
             enumSEL = self.selectDialog(list(sorted([l.title() for l in enumLST])),header="Select method",preselect=enumLST.index(params.get('order',{}).get('method','random')),useDetails=False, multi=False)
             if not enumSEL is None: return enumLST[enumSEL]
             
-        def field(params={}, rule={}):
+        def __field(params={}, rule={}):
             if   params.get('type') == 'songs':       enums = jsonRPC.getEnums("List.Filter.Fields.Songs"   , type='items')
             elif params.get('type') == 'albums':      enums = jsonRPC.getEnums("List.Filter.Fields.Albums"  , type='items')
             elif params.get('type') == 'artists':     enums = jsonRPC.getEnums("List.Filter.Fields.Artists" , type='items')
@@ -1747,13 +1772,13 @@ class Dialog:
             elif params.get('type') == 'episodes':    enums = jsonRPC.getEnums("List.Filter.Fields.Episodes", type='items')
             elif params.get('type') == 'movies':      enums = jsonRPC.getEnums("List.Filter.Fields.Movies"  , type='items')
             elif params.get('type') == 'musicvideos': enums = jsonRPC.getEnums("List.Filter.Fields.MusicVideos")
-            elif params.get('type') == 'mixed':       enums = ['playlist', 'virtualfolder']
+            elif params.get('type') == 'mixed':       enums = ["playlist", "virtualfolder"]
             else: return
             enumLST = list(sorted([_f for _f in enums if _f]))
             enumSEL = self.selectDialog(list(sorted([l.title() for l in enumLST])),header="Select Filter",preselect=(enumLST.index(rule.get('field')) if rule.get('field') else -1),useDetails=False, multi=False)
             if not enumSEL is None: return enumLST[enumSEL]
 
-        def operator(params={}, rule={}):
+        def __operator(params={}, rule={}):
             enumLST = sorted(jsonRPC.getEnums("List.Filter.Operators"))
             if rule.get("field") != 'date':
                 if 'inthelast'    in enumLST: enumLST.remove('inthelast')
@@ -1761,10 +1786,10 @@ class Dialog:
             enumSEL = self.selectDialog(list(sorted([l.title() for l in enumLST])),header="Select Operator",preselect=(enumLST.index(rule.get('operator')) if rule.get('operator') else -1),useDetails=False, multi=False)
             if not enumSEL is None: return enumLST[enumSEL]
 
-        def value(params={}, rule={}):
+        def __value(params={}, rule={}):
             return self.getValue(params, rule)
             
-        def getRule(params={}, rule={"field":"","operator":"","value":[]}):
+        def __getRule(params={}, rule={"field":"","operator":"","value":[]}):
             enumSEL = -1
             while not self.monitor.abortRequested() and not enumSEL is None:
                 enumLST = [self.listitems.buildMenuListItem(key.title(),str(value),icon=DUMMY_ICON.format(text=getAbbr(key.title())),props={'key':key,'value':value}) for key, value in list(rule.items())]
@@ -1772,7 +1797,7 @@ class Dialog:
                 if not enumSEL is None: rule.update({enumLST[enumSEL].getProperty('key'):({"field":field,"operator":operator,"value":value}[enumLST[enumSEL].getProperty('key')])(params,rule)})
             return rule
             
-        def getRules(params={}):
+        def __getRules(params={}):
             enumSEL = -1
             eparams = params.copy()
             while not self.monitor.abortRequested() and not enumSEL is None:
@@ -1789,26 +1814,26 @@ class Dialog:
                             if len(ruleLST) > 0 and eparams != params: andLST.insert(1,self.listitems.buildMenuListItem('[COLOR=white][B]%s[/B][/COLOR]'%(LANGUAGE(32174)),"",icon=ICON,props={'key':'save'}))
                             CONSEL = self.selectDialog(andLST,header="Edit Rules",multi=False)
                             if not CONSEL is None:
-                                if   andLST[CONSEL].getProperty('key') == 'add': ruleLST.append(getRule(params,{"field":"","operator":"","value":[]}))
+                                if   andLST[CONSEL].getProperty('key') == 'add': ruleLST.append(__getRule(params,{"field":"","operator":"","value":[]}))
                                 elif andLST[CONSEL].getProperty('key') == 'save': 
                                     params.setdefault('rules',{})[CONLKEY] = ruleLST
                                     break
                                 elif sorted(loadJSON(andLST[CONSEL].getLabel2())) in [sorted(andd) for andd in ruleLST]:
                                     retval = self.yesnoDialog(LANGUAGE(32175), customlabel=LANGUAGE(32176))
                                     if retval in [1,2]: ruleLST.pop(int(andLST[CONSEL].getProperty('idx')))
-                                    if retval == 2:     ruleLST.append(getRule(params,loadJSON(andLST[CONSEL].getLabel2())))
-                                else:                   ruleLST.append(getRule(params,loadJSON(andLST[CONSEL].getLabel2())))
+                                    if retval == 2:     ruleLST.append(__getRule(params,loadJSON(andLST[CONSEL].getLabel2())))
+                                else:                   ruleLST.append(__getRule(params,loadJSON(andLST[CONSEL].getLabel2())))
             return params
 
-        def getOrder(params={}):
+        def __getOrder(params={}):
             enumSEL = -1
             while not self.monitor.abortRequested() and not enumSEL is None:
                 enumLST = [self.listitems.buildMenuListItem(key.title(),str(value).title(),icon=DUMMY_ICON.format(text=getAbbr(key.title()))) for key, value in list(params.get('order',{}).items())]
                 enumLST.insert(0,self.listitems.buildMenuListItem('[COLOR=white][B]%s[/B][/COLOR]'%(LANGUAGE(32174)),"",icon=ICON,props={'key':'save'}))
                 enumSEL = self.selectDialog(enumLST,header="Edit Selection",preselect=-1,multi=False)
                 if not enumSEL is None:
-                    if   enumLST[enumSEL].getLabel() == 'Direction': params['order'].update({'direction':order(params)})
-                    elif enumLST[enumSEL].getLabel() == 'Method':    params['order'].update({'method':method(params)})
+                    if   enumLST[enumSEL].getLabel() == 'Direction': params['order'].update({'direction':__order(params)})
+                    elif enumLST[enumSEL].getLabel() == 'Method':    params['order'].update({'method':__method(params)})
                     elif enumLST[enumSEL].getProperty('key') == 'save': break
                     else: params['order'].update({enumLST[enumSEL].getLabel().lower(): not enumLST[enumSEL].getLabel2() == 'True'})
             return params
@@ -1819,7 +1844,7 @@ class Dialog:
             path, params = path.split('?xsp=')
             params = loadJSON(params)
         except:
-            path, params = mtype()
+            path, params = __mtype()
         self.log('buildDXSP, path = %s, params = %s'%(path,params))
         
         enumSEL = -1
@@ -1827,9 +1852,9 @@ class Dialog:
             enumLST = [self.listitems.buildMenuListItem('Path',path,icon=ICON),self.listitems.buildMenuListItem('Order',dumpJSON(params.get('order',{})),icon=ICON),self.listitems.buildMenuListItem('Rules',dumpJSON(params.get('rules',{})),icon=ICON)]
             enumSEL = self.selectDialog(enumLST,header="Edit Dynamic Path", multi=False)
             if not enumSEL is None:
-                if   enumLST[enumSEL].getLabel() == 'Path':  path, params = mtype(params)
-                elif enumLST[enumSEL].getLabel() == 'Order': params = getOrder(params)
-                elif enumLST[enumSEL].getLabel() == 'Rules': params = getRules(params)
+                if   enumLST[enumSEL].getLabel() == 'Path':  path, params = __mtype(params)
+                elif enumLST[enumSEL].getLabel() == 'Order': params = __getOrder(params)
+                elif enumLST[enumSEL].getLabel() == 'Rules': params = __getRules(params)
         del jsonRPC
         
         if len(params.get('rules',{}).get('and',[]) or params.get('rules',{}).get('and',[])) > 0:

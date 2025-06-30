@@ -62,7 +62,7 @@ msgid "Options"
 msgstr ""
 
 msgctxt "#30011"
-msgid "[COLOR=red][B]Warning!! [/B]It's Recommend Flash/SSD users change path to a HDD or RAMDISK.[/COLOR]"
+msgid "[COLOR=red][B]Warning!! [/B]It's Recommend Flash/SSD users change path to a HDD or PMem.[/COLOR]"
 msgstr ""
 
 msgctxt "#30012"
@@ -110,7 +110,7 @@ msgid "Auto"
 msgstr ""
 
 msgctxt "#30023"
-msgid "Unable to reload %s while playing..."
+msgid "Unable to reload %s"
 msgstr ""
 
 msgctxt "#30024"
@@ -314,7 +314,7 @@ msgid "Version: [B]%s[/B]"
 msgstr ""
 
 msgctxt "#30074"
-msgid "Enable Automatic PVR Configurations"
+msgid "Enable Access to Kodi Settings"
 msgstr ""
 
 msgctxt "#30075"
@@ -334,7 +334,7 @@ msgid "Idle Timer"
 msgstr ""
 
 msgctxt "#30079"
-msgid "Disabled"
+msgid "Something Went Wrong, Contact the plugin developer..."
 msgstr ""
 
 msgctxt "#30080"
@@ -406,7 +406,7 @@ msgid "Genre:"
 msgstr ""
 
 msgctxt "#30097"
-msgid "UDP Port:"
+msgid "Port %s is In-Use! Port %s Available\n All PseudoTV Instances must be configured to use the same port."
 msgstr ""
 
 msgctxt "#30098"
@@ -738,7 +738,7 @@ msgid "Vignette V-Shift"
 msgstr ""
 
 msgctxt "#30179"
-msgid "Interleave set value"
+msgid "Interleave sets"
 msgstr ""
 
 msgctxt "#30180"
@@ -826,7 +826,7 @@ msgid "Received"
 msgstr ""
 
 msgctxt "#30201"
-msgid "JSONRPC Timer"
+msgid "JSONRPC Wait"
 msgstr ""
 
 msgctxt "#30202"
@@ -865,8 +865,23 @@ msgctxt "#30209"
 msgid "Select Transparency"
 msgstr ""
 
-# Skin - strings 31000 thru 31999 reserved for skins
+msgctxt "#30210"
+msgid "Auto tuning"
+msgstr ""
 
+msgctxt "#30211"
+msgid "Interleave repeating"
+msgstr ""
+
+msgctxt "#30212"
+msgid "Notifications During Playback"
+msgstr ""
+
+msgctxt "#30213"
+msgid "Client Only"
+msgstr ""
+
+# Skin - strings 31000 thru 31999 reserved for skins
 
 
 # Labels - strings 32000 thru 32999 reserved for scripts
@@ -963,7 +978,7 @@ msgid "Updating"
 msgstr ""
 
 msgctxt "#32023"
-msgid "Channel"
+msgid "Channels"
 msgstr ""
 
 msgctxt "#32024"
@@ -1536,7 +1551,7 @@ msgid "Playback Unavailable! Guide data is updating\nTry again later..."
 msgstr ""
 
 msgctxt "#32167"
-msgid "Playback Failed! No Media found."
+msgid "Playback Failed!"
 msgstr ""
 
 msgctxt "#32168"
@@ -1891,6 +1906,10 @@ msgctxt "#32257"
 msgid "Recover M3U"
 msgstr ""
 
+msgctxt "#32258"
+msgid "Parser"
+msgstr ""
+
 
 # Help - strings 33000 thru 33999 reserved for common strings used in add-ons
 
@@ -1963,7 +1982,7 @@ msgid "Set in Kodi PVR & LiveTV Settings"
 msgstr ""
 
 msgctxt "#33038"
-msgid "If a selection is [COLOR=dimgray][B]dim[/B][/COLOR] either the background task is running or no media found!\nClose settings to resume background tasks and try again later..."
+msgid "Run AutoTuning in Channels Tab"
 msgstr ""
 
 msgctxt "#33039"
@@ -2059,7 +2078,7 @@ msgid "Open IPTV Simple's settings"
 msgstr ""
 
 msgctxt "#33074"
-msgid "Automatically configure IPTV-Simple for use with PseudoTV Live [Minimal risk of overriding existing user configurations]."
+msgid "Allow Access to configure aspects of Kodi for use with PseudoTV Live [Minimal risk of overriding existing user configurations]."
 msgstr ""
 
 msgctxt "#33078"
@@ -2301,6 +2320,18 @@ msgstr ""
 
 msgctxt "#33209"
 msgid "Select Channel Bug Transparency. [25% = More Transparent, 50% = Less Transparent]"
+msgstr ""
+
+msgctxt "#33211"
+msgid "Include repeating content when interleave for a round-robin of content *see wiki for details [True Default]"
+msgstr ""
+
+msgctxt "#33212"
+msgid "Notifications During Playback"
+msgstr ""
+
+msgctxt "#33213"
+msgid "This Instance of PseudoTV only runs as a client, with no channels configured locally."
 msgstr ""
 
 msgctxt "#33214"

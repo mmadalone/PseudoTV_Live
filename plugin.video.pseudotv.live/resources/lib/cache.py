@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -25,7 +25,7 @@ from fileaccess import FileAccess
 try:    from simplecache             import SimpleCache
 except: from simplecache.simplecache import SimpleCache #pycharm stub
         
-def cacheit(expiration=datetime.timedelta(days=MIN_GUIDEDAYS), checksum=ADDON_VERSION, json_data=False):
+def cacheit(expiration=datetime.timedelta(minutes=15), checksum=ADDON_VERSION, json_data=False):
     def internal(method):
         @wraps(method)
         def wrapper(*args, **kwargs):
@@ -64,6 +64,7 @@ class Cache:
 
 
     def __init__(self, mem_cache=False, is_json=False, disable_cache=False):
+        self.log('__init__, mem_cache = %s, is_json = %s, disable_cache = %s'%(mem_cache,is_json,disable_cache))
         self.cache.enable_mem_cache = mem_cache
         self.cache.data_is_json     = is_json  
         self.disable_cache          = (disable_cache | REAL_SETTINGS.getSettingBool('Disable_Cache'))

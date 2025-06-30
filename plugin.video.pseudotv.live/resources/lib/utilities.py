@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -142,19 +142,19 @@ class Utilities:
 
     def _runCPUBench(self):
         with BUILTIN.busy_dialog():
-            if hasAddon('script.pystone.benchmark',install=True, enable=True, notify=True):
+            if SETTINGS.hasAddon('script.pystone.benchmark',install=True, enable=True, notify=True):
                 return BUILTIN.executebuiltin('RunScript(script.pystone.benchmark)')
         
         
     def _runIOBench(self):
         with BUILTIN.busy_dialog():
-            if hasAddon('script.io.benchmark',install=True, enable=True, notify=True):
+            if SETTINGS.hasAddon('script.io.benchmark',install=True, enable=True, notify=True):
                 return BUILTIN.executebuiltin('RunScript(script.io.benchmark,%s)'%(escapeString(f'path={USER_LOC}')))
         
         
     def _runLogger(self):
         with BUILTIN.busy_dialog():
-            if hasAddon('script.kodi.loguploader',install=True, enable=True, notify=True):
+            if SETTINGS.hasAddon('script.kodi.loguploader',install=True, enable=True, notify=True):
                 return BUILTIN.executebuiltin('RunScript(script.kodi.loguploader)')
         
  
@@ -241,8 +241,7 @@ class Utilities:
         self.log('openChannelManager, chnum = %s'%(chnum))
         if not PROPERTIES.isRunning('OVERLAY_MANAGER'):
             with PROPERTIES.chkRunning('OVERLAY_MANAGER'), PROPERTIES.interruptActivity():
-                with BUILTIN.busy_dialog():
-                    from manager import Manager
+                from manager import Manager
                 chmanager = Manager(MANAGER_XML, ADDON_PATH, "default", channel=chnum)
                 del chmanager
         else: DIALOG.notificationDialog(LANGUAGE(32057)%(ADDON_NAME))
@@ -332,5 +331,5 @@ class Utilities:
                 
             return SETTINGS.openSettings(ctl)
 
-if __name__ == '__main__': timerit(Utilities(sys.argv).run)(0.1)
+if __name__ == '__main__': Utilities(sys.argv).run()
    

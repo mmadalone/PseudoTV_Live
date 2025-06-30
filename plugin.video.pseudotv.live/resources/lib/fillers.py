@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -62,11 +62,11 @@ class Fillers:
     def buildSource(self, ftype, path=''):
         self.log('[%s] buildSource, type = %s, path = %s'%(self.citem.get('id'),ftype, path))
         def _parseResource(id):
-            if hasAddon(id, install=True): return self.jsonRPC.walkListDirectory(os.path.join('special://home/addons/%s'%id,'resources'),exts=VIDEO_EXTS,depth=CHANNEL_LIMIT,checksum=SETTINGS.getAddonDetails(id).get('version',ADDON_VERSION),expiration=datetime.timedelta(days=MAX_GUIDEDAYS))
+            if SETTINGS.hasAddon(id, install=True): return self.jsonRPC.walkListDirectory(os.path.join('special://home/addons/%s'%id,'resources'),exts=VIDEO_EXTS,depth=CHANNEL_LIMIT,checksum=SETTINGS.getAddonDetails(id).get('version',ADDON_VERSION),expiration=datetime.timedelta(days=MAX_GUIDEDAYS))
 
         def _parseVFS(path):
             if path.startswith('plugin://'):
-                if not hasAddon(path, install=True): return {}
+                if not SETTINGS.hasAddon(path, install=True): return {}
             return self.jsonRPC.walkFileDirectory(path, depth=CHANNEL_LIMIT, chkDuration=True, retItem=True)
 
         def _parseLocal(path):

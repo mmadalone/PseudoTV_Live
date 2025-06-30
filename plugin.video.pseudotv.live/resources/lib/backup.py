@@ -1,4 +1,4 @@
- #   Copyright (C) 2024 Lunatixz
+ #   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -24,6 +24,7 @@ from channels   import Channels
 
 class Backup:
     def __init__(self, sysARG=sys.argv):
+        self.log('__init__, sysARG = %s'%(sysARG))
         self.sysARG = sysARG
         
     
@@ -95,4 +96,4 @@ class Backup:
             if   param == 'Recover_Backup': self.recoverChannels()
             elif param == 'Backup_Channels':  self.backupChannels()
         
-if __name__ == '__main__': timerit(Backup(sys.argv).run)(0.1)
+if __name__ == '__main__': Backup(sys.argv).run()

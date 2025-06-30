@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -20,10 +20,27 @@
 from globals    import *
 from service    import Service
 
-if __name__ == '__main__': 
-    pendingRestart = Service()._start()
-    if pendingRestart: 
-        DIALOG.notificationWait(LANGUAGE(32124))
-        Service()._start()
-    else: 
+def _start():
+    """
+    Main entry point for the PseudoTV Live service monitor.
+
+    This function continuously checks for abort requests and handles service entry.
+    - Initializes the Kodi monitor.
+    - Waits for abort signals or service entry breaks.
+    - Displays notifications during the wait.
+    - On exceptions, shows an error dialog.
+    - Ensures proper exit from the script.
+    """
+    try:
+        monitor = MONITOR()
+        while not monitor.abortRequested():
+            restart = Service()._start()
+            if    monitor.waitForAbort(FIFTEEN) or not restart: break
+            else: DIALOG.notificationWait(LANGUAGE(32124),wait=FIFTEEN)
+    except Exception as e:
+         log("Services: _start, failed! %s"%(e), xbmc.LOGERROR)
+         DIALOG.notificationDialog(LANGUAGE(30079))
+    finally:
         sys.exit()
+   
+if __name__ == '__main__': _start()

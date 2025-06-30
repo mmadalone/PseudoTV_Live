@@ -1,4 +1,4 @@
-  # Copyright (C) 2024 Lunatixz
+  # Copyright (C) 2025 Lunatixz
 
 
 # This file is part of PseudoTV Live.
@@ -42,6 +42,7 @@ class Manager(xbmcgui.WindowXMLDialog):
     newChannels = []
     
     def __init__(self, *args, **kwargs):
+        self.log('__init__')    
         xbmcgui.WindowXMLDialog.__init__(self, *args, **kwargs)    
     
         def __get1stChannel(channelList):
@@ -199,8 +200,8 @@ class Manager(xbmcgui.WindowXMLDialog):
         with self.toggleSpinner():
             listitems = poolit(__buildItem)(channelList)
             self.chanList.addItems(listitems)
-            if focus is None: self.chanList.selectItem(self.setFocusPOS(listitems))
-            else:             self.chanList.selectItem(focus)
+            if focus is None: self.selItem(self.chanList, self.setFocusPOS(listitems))
+            else:             self.selItem(self.chanList, focus)
             self.setFocus(self.chanList)
             if channel: self.buildChannelItem(channel)
 
@@ -225,7 +226,7 @@ class Manager(xbmcgui.WindowXMLDialog):
                 self.setVisibility(self.itemList,False)
                 self.setVisibility(self.chanList,True)
                 self.setFocus(self.chanList)
-                self.chanList.selectItem(focus)
+                self.selItem(self.chanList, focus)
                 
                 if self.madeChanges:
                     self.setLabels(self.right_button1,LANGUAGE(32059))#Save
@@ -249,7 +250,7 @@ class Manager(xbmcgui.WindowXMLDialog):
                 self.itemList.reset()
                 self.setVisibility(self.chanList,False)
                 self.setVisibility(self.itemList,True)
-                self.itemList.selectItem(focus)
+                self.selItem(self.itemList, focus)
                 self.setFocus(self.itemList)
                 
                 if self.madeItemchange:
@@ -277,6 +278,12 @@ class Manager(xbmcgui.WindowXMLDialog):
             elif chnum is None and cleanLabel(listitem.getLabel2()): return idx
         return 0
         
+           
+    def selItem(self, cntrl, focus=0):
+        try: cntrl.selectItem(focus)
+        except Exception as e:
+            self.log("selItem, failed! %s"%(e), xbmc.LOGERROR)
+           
            
     def getRuleAbbr(self, citem, myId, optionindex):
         value = citem.get('rules',{}).get(str(myId),{}).get('values',{}).get(str(optionindex))
@@ -922,12 +929,12 @@ class Manager(xbmcgui.WindowXMLDialog):
 
 
     def onAction(self, act):
-        actionId = act.getId()   
+        actionId = act.getId() 
+        self.log('onAction: actionId = %s'%(actionId))
         if (time.time() - self.lastActionTime) < .5 and actionId not in ACTION_PREVIOUS_MENU: action = ACTION_INVALID # during certain times we just want to discard all input
         else:
             if actionId in ACTION_PREVIOUS_MENU:
-                self.log('onAction: actionId = %s'%(actionId))
-                if   xbmcgui.getCurrentWindowDialogId() == "13001": BUILTIN.executebuiltin("Action(Back)")
+                if   xbmcgui.getCurrentWindowDialogId() == "13001": BUILTIN.executebuiltin('Action(Back)')
                 elif self.isVisible(self.itemList): self.closeChannel(self.getFocusItems().get('citem'),self.getFocusItems().get('position'))
                 elif self.isVisible(self.chanList): self.closeManager()
             

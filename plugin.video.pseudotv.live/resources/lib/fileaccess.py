@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -22,8 +22,8 @@ from globals    import *
 
 #constants 
 DEFAULT_ENCODING           = "utf-8"
-FILE_LOCK_MAX_FILE_TIMEOUT = 10
 FILE_LOCK_NAME             = "pseudotv"
+FILE_LOCK_MAX_FILE_TIMEOUT = 10
 
 class FileAccess:
     @staticmethod
@@ -100,10 +100,11 @@ class FileAccess:
             try: filename = (filename.split('stack://')[1].split(' , '))[0]
             except Exception as e: log('FileAccess: exists failed! %s'%(e), xbmc.LOGERROR)
         try:
-            return xbmcvfs.exists(filename)
+            exists = xbmcvfs.exists(filename)
         except UnicodeDecodeError:
-            return os.path.exists(xbmcvfs.translatePath(filename))
-        return False
+            exists = os.path.exists(xbmcvfs.translatePath(filename))
+        log('FileAccess: filename = %s, exists = %s'%(filename,exists))
+        return exists
 
 
     @staticmethod
@@ -227,10 +228,10 @@ class VFSFile:
             self.currentFile = xbmcvfs.File(filename, 'wb')
         else:
             self.currentFile = xbmcvfs.File(filename, 'r')
-        log("VFSFile: Opening %s"%filename, xbmc.LOGDEBUG)
+        log("VFSFile: __init__, Opening %s"%filename, xbmc.LOGDEBUG)
 
         if self.currentFile == None:
-            log("VFSFile: Couldnt open %s"%filename, xbmc.LOGERROR)
+            log("VFSFile: __init__, Couldnt open %s"%filename, xbmc.LOGERROR)
 
 
     def read(self, bytes=0):
@@ -260,21 +261,24 @@ class VFSFile:
         return self.currentFile.size()
 
 
-    def readlines(self):
-        return self.read().split('\n')
-        # return list(self.readline())
-
-
-    def readline(self):
-        for line in self.read_in_chunks():
-            yield line
-
-
     def tell(self):
         try:    return self.currentFile.tell()
         except: return self.currentFile.seek(0, 1)
         
+
+    def readlines(self):
+        try:    return ''.join(list(self.readline())).split('\n')
+        except: return self.read().split('\n')
+
+
+    def readline(self):
+        try:
+            for line in self.read_in_chunks():
+                yield line
+        except Exception as e:
+            log("VFSFile: readline, failed! %s"%e, xbmc.LOGERROR)
         
+
     def read_in_chunks(self, chunk_size=1024):
         """Lazy function (generator) to read a file piece by piece."""
         while not self.monitor.abortRequested():

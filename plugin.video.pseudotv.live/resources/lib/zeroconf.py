@@ -37,7 +37,6 @@ from functools import reduce
 from kodi_six import xbmc
 
 monitor = xbmc.Monitor()
-
 pythree = (sys.version_info[0] >= 3)
 
 __all__ = ["Zeroconf", "ServiceInfo", "ServiceBrowser", "pythree"]

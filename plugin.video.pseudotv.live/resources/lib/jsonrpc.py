@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -30,11 +30,14 @@ class Service:
         
           
 class JSONRPC:
+    cache       = SETTINGS.cacheDB
+    videoParser = VideoParser()
+        
     def __init__(self, service=None):
-        if service is None: service = Service()
+        self.log('__init__')    
+        if service is None:
+            service = Service()
         self.service = service
-        self.cache   = SETTINGS.cacheDB
-        self.videoParser = VideoParser()
 
 
     def log(self, msg, level=xbmc.LOGDEBUG):
@@ -42,17 +45,16 @@ class JSONRPC:
 
 
     def sendJSON(self, param, timeout=-1):
+        self.log('sendJSON, timeout = %s'%(timeout))
         command  = param
         command["jsonrpc"] = "2.0"
         command["id"] = ADDON_ID
-        self.log('sendJSON, timeout = %s, command = %s'%(timeout,dumpJSON(command)))
         if timeout > 0: response = loadJSON((killit(BUILTIN.executeJSONRPC)(timeout,dumpJSON(command))) or {'error':{'message':'JSONRPC timed out!'}})
         else:           response = loadJSON(BUILTIN.executeJSONRPC(dumpJSON(command)))
+        self.log('sendJSON, response received')
         if response.get('error'):
             self.log('sendJSON, failed! error = %s\n%s'%(dumpJSON(response.get('error')),command), xbmc.LOGWARNING)
             response.setdefault('result',{})['error'] = response.pop('error')
-        #throttle calls, low power devices suffer segfault during rpc flood
-        self.service.monitor.waitForAbort(float(SETTINGS.getSettingInt('RPC_Delay')/1000))
         return response
 
 
@@ -79,7 +81,7 @@ class JSONRPC:
     def walkFileDirectory(self, path, media='video', depth=5, chkDuration=False, retItem=False, checksum=ADDON_VERSION, expiration=datetime.timedelta(minutes=15)):
         walk = dict()
         self.log('walkFileDirectory, walking %s, depth = %s'%(path,depth))
-        items = self.getDirectory({"directory":path,"media":media},True,checksum,expiration).get('files',[])
+        items, limits, errors = self.getDirectory({"directory":path,"media":media},True,checksum,expiration)
         for idx, item in enumerate(items):
             if item.get('filetype') == 'file':
                 if chkDuration:
@@ -159,7 +161,7 @@ class JSONRPC:
     def getSetting(self, category, section, cache=False):
         param = {"method":"Settings.GetSettings","params":{"filter":{"category":category,"section":section}}}
         if cache: return self.cacheJSON(param).get('result',{}).get('settings',[])
-        else:     return self.sendJSON(param).get('result', {}).get('settings',[])
+        else:     return self.sendJSON(param).get('result',{}).get('settings',[])
 
 
     def getSettingValue(self, key, default='', cache=False):
@@ -176,83 +178,98 @@ class JSONRPC:
 
     def getSources(self, media='video', cache=True):
         param = {"method":"Files.GetSources","params":{"media":media}}
-        if cache: return self.cacheJSON(param).get('result', {}).get('sources', [])
-        else:     return self.sendJSON(param).get('result', {}).get('sources', [])
+        if cache: return self.cacheJSON(param).get('result',{}).get('sources', [])
+        else:     return self.sendJSON(param).get('result',{}).get('sources', [])
 
 
     def getAddonDetails(self, addonid=ADDON_ID, cache=True):
         param = {"method":"Addons.GetAddonDetails","params":{"addonid":addonid,"properties":self.getEnums("Addon.Fields", type='items')}}
-        if cache: return self.cacheJSON(param).get('result', {}).get('addon', {})
-        else:     return self.sendJSON(param).get('result', {}).get('addon', {})
+        if cache: return self.cacheJSON(param).get('result',{}).get('addon', {})
+        else:     return self.sendJSON(param).get('result',{}).get('addon', {})
 
 
     def getAddons(self, param={"content":"video","enabled":True,"installed":True}, cache=True):
         param["properties"] = self.getEnums("Addon.Fields", type='items')
         param = {"method":"Addons.GetAddons","params":param}
-        if cache: return self.cacheJSON(param).get('result', {}).get('addons', [])
-        else:     return self.sendJSON(param).get('result', {}).get('addons', [])
+        if cache: return self.cacheJSON(param).get('result',{}).get('addons', [])
+        else:     return self.sendJSON(param).get('result',{}).get('addons', [])
 
 
     def getSongs(self, cache=True):
         param = {"method":"AudioLibrary.GetSongs","params":{"properties":self.getEnums("Audio.Fields.Song", type='items')}}
-        if cache: return self.cacheJSON(param).get('result', {}).get('songs', [])
-        else:     return self.sendJSON(param).get('result', {}).get('songs', [])
+        if cache: return self.cacheJSON(param).get('result',{}).get('songs', [])
+        else:     return self.sendJSON(param).get('result',{}).get('songs', [])
 
 
     def getArtists(self, cache=True):
         param = {"method":"AudioLibrary.GetArtists","params":{"properties":self.getEnums("Audio.Fields.Artist", type='items')}}
-        if cache: return self.cacheJSON(param).get('result', {}).get('artists', [])
-        else:     return self.sendJSON(param).get('result', {}).get('artists', [])
+        if cache: return self.cacheJSON(param).get('result',{}).get('artists', [])
+        else:     return self.sendJSON(param).get('result',{}).get('artists', [])
 
 
     def getAlbums(self, cache=True):
         param = {"method":"AudioLibrary.GetAlbums","params":{"properties":self.getEnums("Audio.Fields.Album", type='items')}}
-        if cache: return self.cacheJSON(param).get('result', {}).get('albums', [])
-        else:     return self.sendJSON(param).get('result', {}).get('albums', [])
+        if cache: return self.cacheJSON(param).get('result',{}).get('albums', [])
+        else:     return self.sendJSON(param).get('result',{}).get('albums', [])
 
-
+     
+    def getEpisode(self, tvshowid, season, episode, cache=True):
+        param = {"method":"VideoLibrary.GetEpisodes","params":{"tvshowid":tvshowid,"season":season,"properties":self.getEnums("Video.Fields.Episode", type='items'),"filter":{"field":"episode","operator":"is","value":str(episode)}}}
+        if cache: return self.cacheJSON(param).get('result',{}).get('episodes', [])
+        else:     return self.sendJSON(param).get('result',{}).get('episodes', [])
+  
+  
     def getEpisodes(self, cache=True):
         param = {"method":"VideoLibrary.GetEpisodes","params":{"properties":self.getEnums("Video.Fields.Episode", type='items')}}
-        if cache: return self.cacheJSON(param).get('result', {}).get('episodes', [])
-        else:     return self.sendJSON(param).get('result', {}).get('episodes', [])
+        if cache: return self.cacheJSON(param).get('result',{}).get('episodes', [])
+        else:     return self.sendJSON(param).get('result',{}).get('episodes', [])
 
 
     def getTVshows(self, cache=True):
         param = {"method":"VideoLibrary.GetTVShows","params":{"properties":self.getEnums("Video.Fields.TVShow", type='items')}}
-        if cache: return self.cacheJSON(param).get('result', {}).get('tvshows', [])
-        else:     return self.sendJSON(param).get('result', {}).get('tvshows', [])
+        if cache: return self.cacheJSON(param).get('result',{}).get('tvshows', [])
+        else:     return self.sendJSON(param).get('result',{}).get('tvshows', [])
+
+
+    def getMovie(self, uniqueid, title, year, cache=True):
+        param = {"method":"VideoLibrary.GetMovies","params":{"properties":self.getEnums("Video.Fields.Movie", type='items'),"filter":{"and":[{"field":"title","operator":"is","value":title},{"field":"year","operator":"is","value":str(year)}]}}}
+        if cache: return self.cacheJSON(param).get('result',{}).get('movies', [])
+        else:     return self.sendJSON(param).get('result',{}).get('movies', [])
 
 
     def getMovies(self, cache=True):
         param = {"method":"VideoLibrary.GetMovies","params":{"properties":self.getEnums("Video.Fields.Movie", type='items')}}
-        if cache: return self.cacheJSON(param).get('result', {}).get('movies', [])
-        else:     return self.sendJSON(param).get('result', {}).get('movies', [])
+        if cache: return self.cacheJSON(param).get('result',{}).get('movies', [])
+        else:     return self.sendJSON(param).get('result',{}).get('movies', [])
 
 
     def getVideoGenres(self, type="movie", cache=True): #type = "movie"/"tvshow"
         param = {"method":"VideoLibrary.GetGenres","params":{"type":type,"properties":self.getEnums("Library.Fields.Genre", type='items')}}
-        if cache: return self.cacheJSON(param).get('result', {}).get('genres', [])
-        else:     return self.sendJSON(param).get('result', {}).get('genres', [])
+        if cache: return self.cacheJSON(param).get('result',{}).get('genres', [])
+        else:     return self.sendJSON(param).get('result',{}).get('genres', [])
 
 
     def getMusicGenres(self, cache=True):
         param = {"method":"AudioLibrary.GetGenres","params":{"properties":self.getEnums("Library.Fields.Genre", type='items')}}
-        if cache: return self.cacheJSON(param).get('result', {}).get('genres', [])
-        else:     return self.sendJSON(param).get('result', {}).get('genres', [])
+        if cache: return self.cacheJSON(param).get('result',{}).get('genres', [])
+        else:     return self.sendJSON(param).get('result',{}).get('genres', [])
 
 
     def getDirectory(self, param={}, cache=True, checksum=ADDON_VERSION, expiration=datetime.timedelta(minutes=15), timeout=-1):
         param["properties"] = self.getEnums("List.Fields.Files", type='items')
         param = {"method":"Files.GetDirectory","params":param}
-        if cache: return self.cacheJSON(param, expiration, checksum, timeout).get('result', {})
-        else:     return self.sendJSON(param, timeout).get('result', {})
-        
-        
-    def getLibrary(self, method, param={}, cache=True):
-        param = {"method":method,"params":param}
-        if cache: return self.cacheJSON(param).get('result', {})
-        else:     return self.sendJSON(param).get('result', {})
+        if cache: results = self.cacheJSON(param, expiration, checksum, timeout).get('result',{})
+        else:     results = self.sendJSON(param, timeout).get('result',{})
+        if 'filedetails' in results: return results.get('filedetails',[]), results.get('limits',{}), results.get('error',{})
+        else:                        return results.get('files',[]), results.get('limits',{}), results.get('error',{})
 
+
+    def getLibrary(self, method, param={}, key=None, cache=True):
+        param = {"method":method,"params":param}
+        if cache: results = self.cacheJSON(param).get('result',{})
+        else:     results = self.sendJSON(param).get('result',{})
+        return results.get((key or list(results.keys())[0]),[]), results.get('limits',{}), results.get('error',{})
+        
 
     def getStreamDetails(self, path, media='video'):
         if isStack(path): path = splitStacks(path)[0]
@@ -266,7 +283,7 @@ class JSONRPC:
 
     def getViewMode(self):
         default = {"nonlinearstretch":False,"pixelratio":1,"verticalshift":0,"viewmode":"custom","zoom": 1.0}
-        return self.cacheJSON({"method":"Player.GetViewMode","params":{}},datetime.timedelta(seconds=FIFTEEN)).get('result',default)
+        return self.cacheJSON({"method":"Player.GetViewMode","params":{}},datetime.timedelta(seconds=15)).get('result',default)
         
 
     def setViewMode(self, params={}):
@@ -277,64 +294,64 @@ class JSONRPC:
         self.log('getPlayerItem, playlist = %s' % (playlist))
         if playlist: param = {"method":"Playlist.GetItems","params":{"playlistid":self.getActivePlaylist(),"properties":self.getEnums("List.Fields.All", type='items')}}
         else:        param = {"method":"Player.GetItem"   ,"params":{"playerid":self.getActivePlayer()    ,"properties":self.getEnums("List.Fields.All", type='items')}}
-        result = self.sendJSON(param).get('result', {})
+        result = self.sendJSON(param).get('result',{})
         return (result.get('item', {}) or result.get('items', []))
 
 
     def getPVRChannels(self, radio=False):
         param = {"method":"PVR.GetChannels","params":{"channelgroupid":{True:'allradio',False:'alltv'}[radio],"properties":self.getEnums("PVR.Fields.Channel", type='items')}}
-        return self.sendJSON(param).get('result', {}).get('channels', [])
+        return self.sendJSON(param).get('result',{}).get('channels', [])
 
 
     def getPVRChannelsDetails(self, id):
         param = {"method":"PVR.GetChannelDetails","params":{"channelid":id,"properties":self.getEnums("PVR.Fields.Channel", type='items')}}
-        return self.sendJSON(param).get('result', {}).get('channels', [])
+        return self.sendJSON(param).get('result',{}).get('channels', [])
 
 
     def getPVRBroadcasts(self, id):
         param = {"method":"PVR.GetBroadcasts","params":{"channelid":id,"properties":self.getEnums("PVR.Fields.Broadcast", type='items')}}
-        return self.sendJSON(param).get('result', {}).get('broadcasts', [])
+        return self.sendJSON(param).get('result',{}).get('broadcasts', [])
 
 
     def getPVRBroadcastDetails(self, id):
         param = {"method":"PVR.GetBroadcastDetails","params":{"broadcastid":id,"properties":self.getEnums("PVR.Fields.Broadcast", type='items')}}
-        return self.sendJSON(param).get('result', {}).get('broadcastdetails', [])
+        return self.sendJSON(param).get('result',{}).get('broadcastdetails', [])
 
 
     def getPVRRecordings(self, media='video', cache=True):
         param = {"method":"Files.GetDirectory","params":{"directory":"pvr://recordings/tv/active/","media":media,"properties":self.getEnums("List.Fields.Files", type='items')}}
-        if cache: return self.cacheJSON(param).get('result', {}).get('files', [])
-        else:     return self.sendJSON(param).get('result', {}).get('files', [])
+        if cache: return self.cacheJSON(param).get('result',{}).get('files', [])
+        else:     return self.sendJSON(param).get('result',{}).get('files', [])
 
     
     def getPVRSearches(self, media='video', cache=True):
         param = {"method":"Files.GetDirectory","params":{"directory":"pvr://search/tv/savedsearches/","media":media,"properties":self.getEnums("List.Fields.Files", type='items')}}
-        if cache: return self.cacheJSON(param).get('result', {}).get('files', [])
-        else:     return self.sendJSON(param).get('result', {}).get('files', [])
+        if cache: return self.cacheJSON(param).get('result',{}).get('files', [])
+        else:     return self.sendJSON(param).get('result',{}).get('files', [])
         
         
     def getPVRSearchItems(self, id, media='video', cache=True):
         param = {"method":"Files.GetDirectory","params":{"directory":f"pvr://search/tv/savedsearches/{id}/","media":media,"properties":self.getEnums("List.Fields.Files", type='items')}}
-        if cache: return self.cacheJSON(param).get('result', {}).get('files', [])
-        else:     return self.sendJSON(param).get('result', {}).get('files', [])
+        if cache: return self.cacheJSON(param).get('result',{}).get('files', [])
+        else:     return self.sendJSON(param).get('result',{}).get('files', [])
     
     
     def getSmartPlaylists(self, type='video', cache=True):
         param = {"method":"Files.GetDirectory","params":{"directory":f"special://profile/playlists/{type}/","media":"video","properties":self.getEnums("List.Fields.Files", type='items')}}
-        if cache: return self.cacheJSON(param).get('result', {}).get('files', [])
-        else:     return self.sendJSON(param).get('result', {}).get('files', [])
+        if cache: return self.cacheJSON(param).get('result',{}).get('files', [])
+        else:     return self.sendJSON(param).get('result',{}).get('files', [])
         
         
     def getInfoLabel(self, key, cache=False):
         param = {"method":"XBMC.GetInfoLabels","params":{"labels":[key]}}
-        if cache: return self.cacheJSON(param).get('result', {}).get(key)
-        else:     return self.sendJSON(param).get('result', {}).get(key)
+        if cache: return self.cacheJSON(param).get('result',{}).get(key)
+        else:     return self.sendJSON(param).get('result',{}).get(key)
 
 
     def getInfoBool(self, key, cache=False):
         param = {"method":"XBMC.GetInfoBooleans","params":{"booleans":[key]}}
-        if cache: return self.cacheJSON(param).get('result', {}).get(key)
-        else:     return self.sendJSON(param).get('result', {}).get(key)
+        if cache: return self.cacheJSON(param).get('result',{}).get(key)
+        else:     return self.sendJSON(param).get('result',{}).get(key)
     
     
     def _setRuntime(self, item={}, runtime=0, save=SETTINGS.getSettingBool('Store_Duration')): #set runtime collected by player, accurate meta.
@@ -402,7 +419,7 @@ class JSONRPC:
   
   
     def queDuration(self, item={}, duration=0, runtime=0):
-        mtypes = {'video'      : {},
+        mtypes = {'video'      : {"method":"Files.SetFileDetails"             ,"params":{"file"        :item.get('file',"")         ,"runtime": runtime,"resume": {"position": item.get('position',0.0),"total": duration}}},
                   'movie'      : {"method":"VideoLibrary.SetMovieDetails"     ,"params":{"movieid"     :item.get('id',-1)           ,"runtime": runtime,"resume": {"position": item.get('position',0.0),"total": duration}}},
                   'movies'     : {"method":"VideoLibrary.SetMovieDetails"     ,"params":{"movieid"     :item.get('movieid',-1)      ,"runtime": runtime,"resume": {"position": item.get('position',0.0),"total": duration}}},
                   'episode'    : {"method":"VideoLibrary.SetEpisodeDetails"   ,"params":{"episodeid"   :item.get('id',-1)           ,"runtime": runtime,"resume": {"position": item.get('position',0.0),"total": duration}}},
@@ -411,19 +428,21 @@ class JSONRPC:
                   'musicvideos': {"method":"VideoLibrary.SetMusicVideoDetails","params":{"musicvideoid":item.get('musicvideoid',-1) ,"runtime": runtime,"resume": {"position": item.get('position',0.0),"total": duration}}},
                   'song'       : {"method":"AudioLibrary.SetSongDetails"      ,"params":{"songid"      :item.get('id',-1)           ,"runtime": runtime,"resume": {"position": item.get('position',0.0),"total": duration}}},
                   'songs'      : {"method":"AudioLibrary.SetSongDetails"      ,"params":{"songid"      :item.get('songid',-1)       ,"runtime": runtime,"resume": {"position": item.get('position',0.0),"total": duration}}}}
-        try:
-            mtype = mtypes.get(item.get('type'))
-            if mtype.get('params'):
-                if   duration == 0: mtype['params'].pop('resume')  #save file duration meta
-                elif runtime  == 0: mtype['params'].pop('runtime') #save player runtime meta
-                id = (item.get('id') or item.get('movieid') or item.get('episodeid') or item.get('musicvideoid') or item.get('songid'))
-                self.log('[%s] queDuration, media = %s, duration = %s, runtime = %s'%(id,item['type'],duration,runtime))
-                self.queueJSON(mtype['params'])
-        except Exception as e: self.log("queDuration, failed! %s\nmtype = %s\nitem = %s"%(e,mtype,item), xbmc.LOGERROR)
+        
+        if not item.get('file','plugin://').startswith(tuple(VFS_TYPES)):
+            try:
+                mtype = mtypes.get(item.get('type'))
+                if mtype.get('params'):
+                    if   duration == 0: mtype['params'].pop('resume')  #save file duration meta
+                    elif runtime  == 0: mtype['params'].pop('runtime') #save player runtime meta
+                    id = (item.get('id') or item.get('movieid') or item.get('episodeid') or item.get('musicvideoid') or item.get('songid'))
+                    self.log('[%s] queDuration, media = %s, duration = %s, runtime = %s'%(id,item['type'],duration,runtime))
+                    self.queueJSON(mtype['params'])
+            except Exception as e: self.log("queDuration, failed! %s\nmtype = %s\nitem = %s"%(e,mtype,item), xbmc.LOGERROR)
         
         
-    def quePlaycount(self, item, save=SETTINGS.getSettingBool('Rollback_Watched')):
-        param = {'video'      : {},
+    def quePlaycount(self, item={}, save=SETTINGS.getSettingBool('Rollback_Watched')):
+        param = {'video'      : {"method":"Files.SetFileDetails"             ,"params":{"file"        :item.get('file',"")         ,"playcount": item.get('playcount',0),"resume": {"position": item.get('position',0.0),"total": item.get('total',0.0)}}},
                  'movie'      : {"method":"VideoLibrary.SetMovieDetails"     ,"params":{"movieid"     :item.get('id',-1)           ,"playcount": item.get('playcount',0),"resume": {"position": item.get('position',0.0),"total": item.get('total',0.0)}}},
                  'movies'     : {"method":"VideoLibrary.SetMovieDetails"     ,"params":{"movieid"     :item.get('movieid',-1)      ,"playcount": item.get('playcount',0),"resume": {"position": item.get('position',0.0),"total": item.get('total',0.0)}}},
                  'episode'    : {"method":"VideoLibrary.SetEpisodeDetails"   ,"params":{"episodeid"   :item.get('id',-1)           ,"playcount": item.get('playcount',0),"resume": {"position": item.get('position',0.0),"total": item.get('total',0.0)}}},
@@ -490,15 +509,9 @@ class JSONRPC:
         param["sort"] = sort
         self.log('[%s] requestList, page = %s\nparam = %s'%(citem['id'], page, param))
         
-        if getDirectory:
-            results = self.getDirectory(param,timeout=float(SETTINGS.getSettingInt('RPC_Timer')*60))
-            if 'filedetails' in results: key = 'filedetails'
-            else:                        key = 'files'
-        else:
-            results = self.getLibrary(query['method'],param, cache=False)
-            key = query.get('key',list(results.keys())[0])
-            
-        items, limits, errors = results.get(key,[]), results.get('limits',param["limits"]), results.get('error',{})
+        if getDirectory: items, limits, errors = self.getDirectory(param,timeout=float(SETTINGS.getSettingInt('RPC_Timer')*60))
+        else:            items, limits, errors = self.getLibrary(query['method'],param,query.get('key'),cache=False)
+
         if (limits.get('end',0) >= limits.get('total',0) or limits.get('start',0) >= limits.get('total',0)):
             # restart page to 0, exceeding boundaries.
             self.log('[%s] requestList, resetting limits to 0'%(citem['id']))
@@ -588,12 +601,12 @@ class JSONRPC:
     def getCallback(self, sysInfo={}):
         self.log('[%s] getCallback, mode = %s, radio = %s, isPlaylist = %s'%(sysInfo.get('chid'),sysInfo.get('mode'),sysInfo.get('radio',False),sysInfo.get('isPlaylist',False)))
         def _matchJSON():#requires 'pvr://' json whitelisting
-            results = self.getDirectory(param={"directory":"pvr://channels/{dir}/".format(dir={'True':'radio','False':'tv'}[str(sysInfo.get('radio',False))])}, cache=False).get('files',[])
+            results, limits, errors = self.getDirectory(param={"directory":"pvr://channels/{dir}/".format(dir={'True':'radio','False':'tv'}[str(sysInfo.get('radio',False))])}, cache=False)
             for dir in [ADDON_NAME,'All channels']: #todo "All channels" may not work with non-English translations!
                 for result in results:
                     if result.get('label','').lower().startswith(dir.lower()):
                         self.log('getCallback: _matchJSON, found dir = %s'%(result.get('file')))
-                        channels = self.getDirectory(param={"directory":result.get('file')},checksum=PROPERTIES.getInstanceID(),expiration=datetime.timedelta(minutes=FIFTEEN)).get('files',[])
+                        channels, limits, errors = self.getDirectory(param={"directory":result.get('file')},checksum=PROPERTIES.getInstanceID(),expiration=datetime.timedelta(minutes=15))
                         for item in channels:
                             if item.get('label','').lower() == sysInfo.get('name','').lower() and decodePlot(item.get('plot','')).get('citem',{}).get('id') == sysInfo.get('chid'):
                                 self.log('[%s] getCallback: _matchJSON, found file = %s'%(sysInfo.get('chid'),item.get('file')))
@@ -646,7 +659,7 @@ class JSONRPC:
             pvrItem = __match()
             if pvrItem:
                 if extend: pvrItem = __extend(pvrItem)
-                cacheResponse = self.cache.set(cacheName, pvrItem, checksum=PROPERTIES.getInstanceID(), expiration=datetime.timedelta(seconds=FIFTEEN), json_data=True)
+                cacheResponse = self.cache.set(cacheName, pvrItem, checksum=PROPERTIES.getInstanceID(), expiration=datetime.timedelta(seconds=15), json_data=True)
             else: return {}
         return cacheResponse
         
@@ -661,8 +674,6 @@ class JSONRPC:
 
     def toggleShowLog(self, state=False):
         self.log('toggleShowLog, state = %s'%(state))
-        if SETTINGS.getSettingBool('Enable_PVR_RELOAD'): #check that users allow alternations to kodi.
-            opState = not bool(state)
-            if self.getSettingValue("debug.showloginfo") == opState:
-                self.setSettingValue("debug.showloginfo",state,queue=False)
-            
+        opState = not bool(state)
+        if self.getSettingValue("debug.showloginfo") == opState:
+            self.setSettingValue("debug.showloginfo",state,queue=False)

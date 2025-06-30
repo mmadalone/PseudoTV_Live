@@ -1,3 +1,10 @@
+v.0.6.3
+- Removed "AutoTune" settings tab, replaced with "Auto Tuning" wizard under "Channels".
+- Interleaving option added to "Global" and "Advanced Rules" to enable/disable round-robin interleaving; see wiki for details.
+- Improved Bonjour multi-room discovery.
+- Improved IPTV-Simple configuratoin and refresh.
+- Improved Playback when filenames have changed.
+
 v.0.6.2
 - Optimized background logo tasks to prevent potential deadlocks.
 - Resolved repeated "Offline" server notifications.
@@ -290,9 +297,9 @@ v.0.4.8
 - Refactored HTTP server.
 - Added disable Trakt scrobbling during playback to global options.
 - Added rollback watched playcount & resume points to global options.
-- Fixed TV bumpers and resources (W.I.P); see readme for details.
-- Added TV adverts and resources (W.I.P); see readme for details.
-- Added trailers and resources (W.I.P); see readme for details.
+- Fixed TV bumpers and resources (W.I.P); see wiki for details.
+- Added TV adverts and resources (W.I.P); see wiki for details.
+- Added trailers and resources (W.I.P); see wiki for details.
 
 v.0.4.7
 - The following steps are required:

@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -21,41 +21,34 @@
 from globals   import *
 from plugin    import Plugin
 
-def run(sysARG, fitem: dict={}, nitem: dict={}):
+def _run(sysARG, fitem: dict={}, nitem: dict={}):
     """
     Main entry point for PseudoTV Live's functionality.
 
-    This function handles various modes of playback and interaction based on the parameters passed.
-    These modes include live TV, video-on-demand (VOD), DVR playback, guide display, and more.
-    It also processes system arguments and settings to determine the appropriate behavior.
+    Processes system arguments from Kodi and determines the mode of operation,
+    including live TV, VOD, DVR, radio, guide, settings, etc. Calls the appropriate
+    Plugin functions based on mode and parameters.
 
     Args:
-        sysARG (list): System arguments passed by the Kodi interface.
-        fitem (dict, optional): Dictionary containing information about the current (featured) item. Defaults to an empty dictionary.
-        nitem (dict, optional): Dictionary containing information about the next item. Defaults to an empty dictionary.
+        sysARG (list): System arguments passed by Kodi.
+        fitem (dict, optional): Data about the current item (featured/program). Default empty dict.
+        nitem (dict, optional): Data about the next item (upcoming/program). Default empty dict.
 
-    Behavior:
-        - Parses system arguments and determines the mode of operation.
-        - Depending on the mode, it invokes the appropriate plugin functionality (e.g., play live TV, VOD, DVR, etc.).
-        - Utilizes utility functions like `threadit` for threading and `PROPERTIES` for managing app states.
+    Returns:
+        None
 
-    Supported Modes:
-        - 'live': Plays live TV or a playlist based on the provided parameters.
-        - 'vod': Plays video-on-demand content.
-        - 'dvr': Plays DVR recordings.
-        - 'resume': Resumes paused playback.
-        - 'broadcast': Simulates broadcast playback.
-        - 'radio': Plays radio streams.
-        - 'guide': Opens the TV guide using the PVR client.
-        - 'settings': Opens the settings menu.
-
-    Notifications:
-        - Displays notification dialogs for unsupported modes or errors.
+    Side Effects:
+        - Initiates playback, guide, or settings depending on mode.
+        - Displays notifications for unsupported modes or errors.
+        - Uses threading for playback functions.
+        - Suspends/resumes Kodi activity appropriately.
+        - Delays to avoid thread crashes during fast channel changes.
 
     """
     with BUILTIN.busy_dialog(), PROPERTIES.suspendActivity():
         params = dict(urllib.parse.parse_qsl(sysARG[2][1:].replace('.pvr','')))
-        mode = (params.get("mode")  or 'guide')
+        mode = (params.get("mode") or 'guide')
+        params['radio']      = mode == "radio"
         params['fitem']      = fitem
         params['nitem']      = nitem
         params['vid']        = decodeString(params.get("vid",''))
@@ -65,9 +58,9 @@ def run(sysARG, fitem: dict={}, nitem: dict={}):
         params['isPlaylist'] = bool(SETTINGS.getSettingInt('Playback_Method'))
         log("Default: run, params = %s"%(params))
         
-        if   PROPERTIES.isRunning('togglePVR'): DIALOG.notificationDialog(LANGUAGE(32166))
+        if   PROPERTIES.isRunning('chkPVRRefresh'): DIALOG.notificationDialog(LANGUAGE(32166))
         elif mode == 'live':
-            if params.get('start') == '{utc}':
+            if params.get('start') == '{utc}' or str(BUILTIN.getInfoLabel('ChannelNumber')) == '0':
                 PROPERTIES.setPropTimer('chkPVRRefresh')
                 params.update({'start':0,'stop':0,'duration':0})
                 if   params['isPlaylist']:      threadit(Plugin(sysARG, sysInfo=params).playPlaylist)(params["name"],params["chid"])
@@ -80,16 +73,22 @@ def run(sysARG, fitem: dict={}, nitem: dict={}):
         elif mode == 'resume':                  threadit(Plugin(sysARG, sysInfo=params).playPaused)(params["name"],params["chid"])
         elif mode == 'broadcast':               threadit(Plugin(sysARG, sysInfo=params).playBroadcast)(params["name"],params["chid"],params["vid"])
         elif mode == 'radio':                   threadit(Plugin(sysARG, sysInfo=params).playRadio)(params["name"],params["chid"],params["vid"])
-        elif mode == 'guide'                and hasAddon(PVR_CLIENT_ID,install=True,enable=True): SETTINGS.openGuide()
-        elif mode == 'settings'             and hasAddon(PVR_CLIENT_ID,install=True,enable=True): SETTINGS.openSettings()
+        elif mode == 'guide'                and SETTINGS.hasAddon(PVR_CLIENT_ID,install=True,enable=True): SETTINGS.openGuide()
+        elif mode == 'settings'             and SETTINGS.hasAddon(PVR_CLIENT_ID,install=True,enable=True): SETTINGS.openSettings()
         else:                                   DIALOG.notificationDialog(LANGUAGE(32000))
-        MONITOR().waitForAbort(float(SETTINGS.getSettingInt('RPC_Delay')/1000)) #delay to avoid thread crashes when fast channel changing.
+        MONITOR().waitForAbort(float(SETTINGS.getSettingInt('RPC_Delay')/1000)) #delay to avoid thread crashes when fast channel changing ie PVR channel surfing.
         
 if __name__ == '__main__':
     """
-    Runs the script when executed as the main module.
+    Script entry point when run as main.
 
-    It decodes information about the current and next items using the `decodePlot` function
-    and then invokes the `run` function with the appropriate arguments.
+    Decodes plot information for current and next items, then initiates the main run
+    function with the decoded items and system arguments.
+
+    Side Effects:
+        - Calls _run() to start PseudoTV Live's main logic.
+
+    Returns:
+        None
     """
-    run(sys.argv, fitem=decodePlot(BUILTIN.getInfoLabel('Plot')), nitem=decodePlot(BUILTIN.getInfoLabel('NextPlot')))
+    _run(sys.argv, fitem=decodePlot(BUILTIN.getInfoLabel('Plot')), nitem=decodePlot(BUILTIN.getInfoLabel('NextPlot')))

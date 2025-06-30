@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -38,19 +38,23 @@ class Service:
         
         
 class Library:
+    predefined = Predefined()
+    channels   = Channels()
+    
     def __init__(self, service=None):
-        if service is None: service = Service()
+        self.log('__init__')    
+        if service is None:
+            service = Service()
+            
         self.service      = service
         self.jsonRPC      = service.jsonRPC
         self.cache        = service.jsonRPC.cache
-        self.predefined   = Predefined()
-        self.channels     = Channels()
         self.resources    = Resources(service=self.service)
         
-        self.pCount  = 0
-        self.pDialog = None
-        self.pMSG    = ''
-        self.pHeader = ''
+        self.pCount       = 0
+        self.pDialog      = None
+        self.pMSG         = ''
+        self.pHeader      = ''
         
         self.libraryDATA  = getJSON(LIBRARYFLE_DEFAULT)
         self.libraryTEMP  = self.libraryDATA['library'].pop('Item')
@@ -73,17 +77,12 @@ class Library:
     def getLibrary(self, type=None):
         self.log('getLibrary, type = %s'%(type))
         if type is None: return self.libraryDATA.get('library',{})
-        else:            return self.libraryDATA.get('library',{}).get(type,[])
-        
+        return self.libraryDATA.get('library',{}).get(type,[])
+
         
     def enableByName(self, type, names=[]):
         self.log('enableByName, type = %s, names = %s'%(type, names))
-        items = self.getLibrary(type)
-        for name in names:
-            for item in items:
-                if name.lower() == item.get('name','').lower(): item['enabled'] = True
-                else:                                           item['enabled'] = False
-        return self.setLibrary(type, items)
+        return self.setLibrary(type, [self.setEnabled(item, name.lower() == item.get('name','').lower()) for item in self.getLibrary(type) for name in names])
         
         
     def setLibrary(self, type, items=[]):
@@ -97,8 +96,13 @@ class Library:
 
 
     def getEnabled(self, type, items=None):
-        if items is None: items = self.getLibrary(type)
+        if not items: items = self.getLibrary(type)
         return [item for item in items if item.get('enabled',False)]
+        
+        
+    def setEnabled(item, state=False):
+        item['enabled'] = state
+        return item
 
 
     def updateLibrary(self, force: bool=False) -> bool:  
@@ -148,8 +152,7 @@ class Library:
                 
         
         complete = True 
-        types     =  list(__funcs().keys())
-
+        types    =  list(__funcs().keys())
         for idx, type in enumerate(types):
             self.pMSG    = type
             self.pCount  = int(idx*100//len(types))
@@ -177,14 +180,15 @@ class Library:
         self.log('updateLibrary, force = %s, complete = %s'%(force,  complete))
         return complete
         
+        
+    def _chkLibrary(self):
+        self.log('_chkLibrary')
+        for idx, type in enumerate(AUTOTUNE_TYPES):
+            self.setLibrary(type, self.libraryDATA['library'][type])
+        
 
     def resetLibrary(self, ATtypes=AUTOTUNE_TYPES):
-        self.log('resetLibrary')
-        for ATtype in ATtypes: 
-            items = self.getLibrary(ATtype)
-            for item in items:
-                item['enabled'] = False #disable everything before selecting new items.
-            self.setLibrary(ATtype, items)
+        self.log('resetLibrary, items = %s'%(len([self.setLibrary(ATtype, [self.setEnabled(item, False) for item in self.getLibrary(ATtype)]) for ATtype in ATtypes])))
 
 
     def updateProgress(self, percent, message, header):
@@ -256,7 +260,7 @@ class Library:
 
     def getPlaylists(self):
         PlayList = []
-        for type in ['video','mixed','music']:
+        for type in ['video','music']:#['video','mixed','music']
             self.updateProgress(self.pCount,'%s: %s'%(self.pMSG,LANGUAGE(32140)),self.pHeader)
             results = self.jsonRPC.getSmartPlaylists(type)
             for idx, result in enumerate(results):
@@ -271,7 +275,7 @@ class Library:
         return PlayList
 
 
-    @cacheit()
+    @cacheit(expiration=datetime.timedelta(minutes=FIFTEEN))
     def getTVInfo(self, sortbycount=True):
         self.log('getTVInfo')
         if BUILTIN.hasTV():
@@ -293,10 +297,8 @@ class Library:
                 NetworkList   = [x[0] for x in sorted(NetworkList.most_common(50))]
                 ShowGenreList = [x[0] for x in sorted(ShowGenreList.most_common(25))]
             else:
-                TVShows = (sorted(map(json.loads, list(TVShows.keys())), key=itemgetter('name')))
-                del TVShows[250:]
-                NetworkList = (sorted(set(list(NetworkList.keys()))))
-                del NetworkList[250:]
+                TVShows       = (sorted(map(json.loads, list(TVShows.keys())), key=itemgetter('name')))
+                NetworkList   = (sorted(set(list(NetworkList.keys()))))
                 ShowGenreList = (sorted(set(list(ShowGenreList.keys()))))
                 
             #search resources for studio/genre logos
@@ -317,7 +319,7 @@ class Library:
         return {'studios':NetworkList,'genres':ShowGenreList,'shows':TVShows}
 
 
-    @cacheit()
+    @cacheit(expiration=datetime.timedelta(minutes=FIFTEEN))
     def getMovieInfo(self, sortbycount=True):
         self.log('getMovieInfo')
         if BUILTIN.hasMovie():     
@@ -334,8 +336,7 @@ class Library:
                 StudioList     = [x[0] for x in sorted(StudioList.most_common(25))]
                 MovieGenreList = [x[0] for x in sorted(MovieGenreList.most_common(25))]
             else:
-                StudioList = (sorted(set(list(StudioList.keys()))))
-                del StudioList[250:]
+                StudioList     = (sorted(set(list(StudioList.keys()))))
                 MovieGenreList = (sorted(set(list(MovieGenreList.keys()))))
                 
             #search resources for studio/genre logos
@@ -356,7 +357,7 @@ class Library:
         return {'studios':StudioList,'genres':MovieGenreList}
         
         
-    @cacheit()
+    @cacheit(expiration=datetime.timedelta(minutes=FIFTEEN))
     def getMusicInfo(self, sortbycount=True):
         self.log('getMusicInfo')
         if BUILTIN.hasMusic():
@@ -370,8 +371,6 @@ class Library:
             if sortbycount:
                 MusicGenreList = [x[0] for x in sorted(MusicGenreList.most_common(50))]
             else:
-                MusicGenreList = (sorted(set(list(MusicGenreList.keys()))))
-                del MusicGenreList[250:]
                 MusicGenreList = (sorted(set(list(MusicGenreList.keys()))))
 
             #search resources for studio/genre logos
@@ -505,3 +504,73 @@ class Library:
         PROPERTIES.setEXTPropertyBool('%s.has.WhiteList'%(ADDON_ID),len(self.getWhiteList()) > 0)
         PROPERTIES.setEXTPropertyBool('%s.has.BlackList'%(ADDON_ID),len(self.getBlackList()) > 0)
         SETTINGS.setSetting('Clear_BlackList','|'.join(self.getBlackList()))
+
+
+
+################################
+
+        
+    # def chkRecommended(self):
+        # self.log('chkRecommended')
+        # try:
+            # library = Library(service=self.service)
+            # library.searchRecommended()
+            # del library
+        # except Exception as e: self.log('chkRecommended failed! %s'%(e), xbmc.LOGERROR)
+
+        
+    # def chkLibrary(self, force=PROPERTIES.getPropertyBool('ForceLibrary')):
+        # try:
+            # # library.importPrompt() #todo refactor feature
+            # complete = Library(service=self.service).updateLibrary(force)
+            # del library
+            # if complete:
+                # self._que(self.chkChannels,3)
+                # if force: PROPERTIES.setPropertyBool('ForceLibrary',False)
+            # else:
+                # self._que(self.chkLibrary,2,force)
+            # self.log('chkLibrary, force = %s, complete = %s'%(force,complete))
+        # except Exception as e: self.log('chkLibrary failed! %s'%(e), xbmc.LOGERROR)
+
+
+    # def chkFillers(self, channels=[]):
+        # self.log('chkFillers')
+        # if not channels: channels = self.getVerifiedChannels()
+        # pDialog = DIALOG.progressBGDialog(header='%s, %s'%(ADDON_NAME,LANGUAGE(32179)))
+        # for idx, ftype in enumerate(FILLER_TYPES):
+            # if not FileAccess.exists(os.path.join(FILLER_LOC,ftype.lower(),'')): 
+                # pDialog = DIALOG.progressBGDialog(int(idx*50//len(ftype)), pDialog, message='%s: %s'%(ftype,int(idx*100//len(ftype)))+'%', header='%s, %s'%(ADDON_NAME,LANGUAGE(32179)))
+                # FileAccess.makedirs(os.path.join(FILLER_LOC,ftype.lower(),''))
+        
+        # genres = self.getGenreNames()
+        # for idx, citem in enumerate(channels):
+            # for ftype in FILLER_TYPES[1:]:
+                # for genre in genres:
+                    # if not FileAccess.exists(os.path.join(FILLER_LOC,ftype.lower(),genre.lower(),'')):
+                        # pDialog = DIALOG.progressBGDialog(int(idx*50//len(channels)), pDialog, message='%s: %s'%(genre,int(idx*100//len(channels)))+'%', header='%s, %s'%(ADDON_NAME,LANGUAGE(32179)))
+                        # FileAccess.makedirs(os.path.join(FILLER_LOC,ftype.lower(),genre.lower()))
+                
+                # if not FileAccess.exists(os.path.join(FILLER_LOC,ftype.lower(),citem.get('name','').lower())):
+                    # if ftype.lower() == 'adverts': IGNORE = IGNORE_CHTYPE + MOVIE_CHTYPE
+                    # else:                          IGNORE = IGNORE_CHTYPE
+                    # if citem.get('name') and not citem.get('radio',False) and citem.get('type') not in IGNORE: 
+                        # pDialog = DIALOG.progressBGDialog(int(idx*50//len(channels)), pDialog, message='%s: %s'%(citem.get('name'),int(idx*100//len(channels)))+'%', header='%s, %s'%(ADDON_NAME,LANGUAGE(32179)))
+                        # FileAccess.makedirs(os.path.join(FILLER_LOC,ftype.lower(),citem['name'].lower()))
+        # pDialog = DIALOG.progressBGDialog(100, pDialog, message=LANGUAGE(32025), header='%s, %s'%(ADDON_NAME,LANGUAGE(32179)))
+    
+
+    # @cacheit(expiration=datetime.timedelta(minutes=15),json_data=False)
+    # def getGenreNames(self):
+        # self.log('getGenres')
+        # try:
+            # library     = Library(self.service)
+            # tvgenres    = library.getTVGenres()
+            # moviegenres = library.getMovieGenres()
+            # genres  = set([tvgenre.get('name') for tvgenre in tvgenres if tvgenre.get('name')] + [movgenre.get('name') for movgenre in moviegenres if movgenre.get('name')])
+            # del library
+            # return list(genres)
+        # except Exception as e: 
+            # self.log('getGenres failed! %s'%(e), xbmc.LOGERROR)
+            # return []
+
+        

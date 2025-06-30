@@ -1,4 +1,4 @@
-#   Copyright (C) 2024 Lunatixz
+#   Copyright (C) 2025 Lunatixz
 #
 #
 # This file is part of PseudoTV Live.
@@ -20,13 +20,16 @@
 
 import xmltv
 from globals    import *
-from seasonal   import Seasonal 
+from seasonal   import Seasonal
+from pool       import ExecutorPool
 
 #todo check for empty recordings/channel meta and trigger refresh/rebuild empty xmltv via Kodi json rpc?
 
 class XMLTVS:
+    pool = ExecutorPool()
         
     def __init__(self):   
+        self.log('__init__')
         self.XMLTVDATA = self._load()
 
 
@@ -90,10 +93,10 @@ class XMLTVS:
             try:
                 match = re.compile(r'line\ (.*?),\ column\ (.*)', re.IGNORECASE).search(str(e))
                 if match: 
-                    fle  = FileAccess.open(file,'r')
-                    file = fle.readlines()
+                    fle   = FileAccess.open(file,'r')
+                    lines = fle.readlines()
                     fle.close()
-                    self.log('%s, failed! parser error %s\nLine: %s\n Error: %s'%(name,e,file[int(match.group(1))],file[int(match.group(1))][int(match.group(2))-5:]), xbmc.LOGERROR)
+                    self.log('%s, failed! parser error %s\nLine: %s\n Error: %s'%(name,e,lines[int(match.group(1))],lines[int(match.group(1))][int(match.group(2))-5:]), xbmc.LOGERROR)
                 else: raise Exception('no parser match %s'%(str(e)))
             except Exception as en: self.log('%s, failed! %s\n%s'%(name,e,en), xbmc.LOGERROR)
     
@@ -182,7 +185,7 @@ class XMLTVS:
         return bytes(text,DEFAULT_ENCODING).decode(DEFAULT_ENCODING,'ignore')
 
              
-    def cleanSelf(self, items: list, key: str='id', slug: str='@%s'%(slugify(ADDON_NAME))) -> list: # remove imports (Non PseudoTV Live), key = {'id':channels,'channel':programmes}
+    def cleanSelf(self, items: list, key: str='id', slug: str='@%s'%(slugify(ADDON_NAME))) -> list: # remove (Non PseudoTV Live), key = {'id':channels,'channel':programmes}
         if not slug: return items
         channels   = list([item for item in items if item.get(key,'').endswith(slug) and len(item.get(key,'').replace(slug,'')) == 32])
         recordings = list([item for item in items if item.get(key,'').endswith(slug) and len(item.get(key,'').replace(slug,'')) == 16])
@@ -211,8 +214,8 @@ class XMLTVS:
             if citem.get('holiday') and citem.get('holiday',{}).get('name',str(random.random())) != holiday.get('name',str(random.random())): return None
             elif (strpTime(program.get('stop',now).rstrip(),DTFORMAT) < now): return None  # remove expired content, ignore "recordings" ie. media=True
             return program
-
-        tmpProgrammes = [prog for prog in [__filterProgrammes(program) for program in programmes] if prog is not None]
+            
+        tmpProgrammes = [program for program in self.pool.executors(__filterProgrammes,  programmes) if program is not None]
         self.log('cleanProgrammes, before = %s, after = %s'%(len(programmes),len(tmpProgrammes)))
         return tmpProgrammes
 
@@ -343,7 +346,7 @@ class XMLTVS:
 
     def addProgram(self, id: str, item: dict, encodeDESC: bool=True) -> bool:
         pitem = {'channel'     : id,
-                 'category'    : [(self.cleanString(genre.replace('Unknown','Undefined')),LANG) for genre in item['categories']],
+                 'category'    : [(self.cleanString(genre.replace(LANGUAGE(32105),'Undefined')),LANG) for genre in item['categories']],
                  'title'       : [(self.cleanString(item['title']), LANG)],
                  'desc'        : [(encodePlot(self.cleanString(item['desc']),item['fitem']), LANG) if encodeDESC else (self.cleanString(item['desc']), LANG)],
                  'stop'        : (datetime.datetime.fromtimestamp(float(item['stop'])).strftime(DTFORMAT)),
@@ -435,69 +438,6 @@ class XMLTVS:
             return self._save()
         
         
-    def importXMLTV(self, file: str, m3uChannels: dict={}):
-        self.log('importXMLTV, file = %s, m3uChannels = %s'%(file,len(m3uChannels)))
-        def matchChannel(channel, channels, programmes):
-            importChannels.extend(list([chan for chan in channels if chan.get('id') == channel.get('id')]))
-            importProgrammes.extend(list([prog for prog in programmes if prog.get('channel') == channel.get('id')]))
-
-        try:
-            if file.startswith('http'):
-                files = []
-                for file in file.split(','): #handle possible list.
-                    url  = file
-                    file = os.path.join(TEMP_LOC,'%s'%(slugify(url)))
-                    files.append(file)
-                    setURL(url,file)
-            else:
-                files = [file]
-                
-            for file in files:
-                importChannels, importProgrammes = [],[]
-                channels, programmes = self.loadChannels(file), self.loadProgrammes(file)
-                
-                if m3uChannels: #filter imported programmes by m3uchannels list.
-                    poolit(matchChannel)(m3uChannels, **{'channels':channels,'programmes':programmes})
-                else: #no filter, import everything!
-                    importChannels   = channels
-                    importProgrammes = programmes
-                    
-                importChannels, importProgrammes = self.chkImport(importChannels, importProgrammes)
-                self.log('importXMLTV, found importChannels = %s, importProgrammes = %s from %s'%(len(importChannels),len(importProgrammes),file))
-                self.XMLTVDATA.get('channels',[]).extend(self.sortChannels(importChannels))
-                self.XMLTVDATA.get('programmes',[]).extend(self.sortProgrammes(importProgrammes))
-        except Exception as e: self.log("importXMLTV, failed! %s"%(e), xbmc.LOGERROR)
-
-
-    def chkImport(self, channels: list, programmes: list) -> tuple: # parse for empty programmes, inject single cell entry.
-        try:
-            def addSingleEntry(channel, start=None, length=10800): #create a single entry with min. channel meta, use as a filler.
-                if start is None: start = datetime.datetime.fromtimestamp(roundTimeDown(getUTCstamp(),offset=60))
-                pitem = {'channel'     : channel.get('id'),
-                         'title'       : [(channel.get('display-name',[{'',LANG}])[0][0], LANG)],
-                         'desc'        : [(xbmc.getLocalizedString(161), LANG)],
-                         'stop'        : ((start + datetime.timedelta(seconds=length)).strftime(DTFORMAT)),
-                         'start'       : (start.strftime(DTFORMAT)),
-                         'icon'        : [{'src': (channel.get('icon','') or [{}])[0].get('src')}],
-                         'length'      : {'units': 'seconds', 'length': str(length)}}
-                self.log('addSingleEntry = %s'%(pitem))
-                return pitem
-
-            def chkPrograms(channel):
-                for program in programmes:
-                    if channel.get('id') == program.get('channel'):
-                        try:    return tmpChannels.remove(channel)
-                        except: continue
-                          
-            tmpChannels = channels.copy() 
-            poolit(chkPrograms)(channels)
-            for channel in tmpChannels: programmes.append(addSingleEntry(channel)) #append single cell entry for channels missing programmes
-            self.log("chkImport, added %s single entries"%(len(tmpChannels)))
-        except Exception as e: 
-            self.log("chkImport, failed! %s"%(e), xbmc.LOGERROR)
-        return channels, programmes
-        
-        
     def buildGenres(self):
         self.log('buildGenres') #todo custom user color selector.
         def parseGenres(plines):
@@ -505,7 +445,7 @@ class XMLTVS:
             for line in plines:
                 try:    
                     names = line.childNodes[0].data
-                    items = names.split('/')
+                    items = names.split(' / ')
                     data  = {'genre':names,'name':names,'genreId':line.attributes['genreId'].value}
                     epggenres[names.lower()] = data
                     for item in items:
@@ -517,7 +457,7 @@ class XMLTVS:
                 except: continue
             return epggenres
 
-        def matchGenres(programmes):
+        def matchGenres(epggenres,  programmes=[]):
             for program in programmes:
                 categories = [cat[0] for cat in program.get('category',[])]
                 catcombo   = '/'.join(categories)
@@ -526,16 +466,16 @@ class XMLTVS:
                     if match and not epggenres.get(catcombo.lower()):
                         epggenres[catcombo.lower()] = match
                         break
+            return dict(sorted(sorted(list(epggenres.items()), key=lambda v:v[1]['name']), key=lambda v:v[1]['genreId']))
+            
+        def getGenres(file):
+            fle = FileAccess.open(file, "r")
+            dom = parse(fle)
+            fle.close()
+            return parseGenres(dom.getElementsByTagName('genre'))
         
         if FileAccess.exists(GENREFLE_DEFAULT): 
             try:
-                fle = FileAccess.open(GENREFLE_DEFAULT, "r")
-                dom = parse(fle)
-                fle.close()
-                epggenres = parseGenres(dom.getElementsByTagName('genre'))
-                matchGenres(self.XMLTVDATA.get('programmes',[]))
-                epggenres = dict(sorted(sorted(list(epggenres.items()), key=lambda v:v[1]['name']), key=lambda v:v[1]['genreId']))
-                
                 doc  = Document()
                 root = doc.createElement('genres')
                 doc.appendChild(root)
@@ -543,7 +483,10 @@ class XMLTVS:
                 name.appendChild(doc.createTextNode('%s'%(ADDON_NAME)))
                 root.appendChild(name)
                 
-                for key in epggenres:
+                if FileAccess.exists(GENREFLEPATH): epggenres = getGenres(GENREFLEPATH)
+                else:                               epggenres = {}
+                epggenres.update(self.pool.executors(matchGenres,**{'epggenres':getGenres(GENREFLE_DEFAULT),'programmes':self.XMLTVDATA.get('programmes',[])}))
+                for key in list(set(epggenres)):
                     gen = doc.createElement('genre')
                     gen.setAttribute('genreId',epggenres[key].get('genreId'))
                     gen.appendChild(doc.createTextNode(key.title().replace('Tv','TV').replace('Nr','NR').replace('Na','NA')))

@@ -20,9 +20,9 @@ from globals import *
 
 class FLVTagHeader:
     def __init__(self):
-        self.tagtype = 0
-        self.datasize = 0
-        self.timestamp = 0
+        self.tagtype      = 0
+        self.datasize     = 0
+        self.timestamp    = 0
         self.timestampext = 0
 
 
@@ -46,9 +46,11 @@ class FLVTagHeader:
 
 
 class FLVParser:
-    def __init__(self):
-        self.monitor = MONITOR()    
+    monitor = MONITOR()
     
+    def __init__(self):
+        ...
+        
     
     def determineLength(self, filename: str) -> int and float:
         log("FLVParser: determineLength %s"%filename)
