@@ -40,10 +40,10 @@ class Service:
         
         
 class Builder:
-    xsp      = XSP()
-    xmltv    = XMLTVS()
-    m3u      = M3U()
-    channels = Channels()
+    xsp       = XSP()
+    xmltv     = XMLTVS()
+    m3u       = M3U()
+    channels  = Channels()
     
     def __init__(self, service=None):
         self.log('__init__')    
@@ -69,6 +69,7 @@ class Builder:
         self.inc3D            = SETTINGS.getSettingBool('Enable_3D')
         self.incExtras        = SETTINGS.getSettingBool('Enable_Extras') 
         self.fillBCTs         = SETTINGS.getSettingBool('Enable_Fillers')
+        self.enableChanged    = SETTINGS.getSettingBool('Enable_Changed')
         self.saveDuration     = SETTINGS.getSettingBool('Store_Duration')
         self.epgArt           = SETTINGS.getSettingInt('EPG_Artwork')
         self.enableGrouping   = SETTINGS.getSettingBool('Enable_Grouping')
@@ -105,8 +106,8 @@ class Builder:
         if self.pDialog: self.pDialog = DIALOG.updateProgress(percent, self.pDialog, message=message, header=header)
 
 
-    def getVerifiedChannels(self):
-        return sorted(self.verify(), key=itemgetter('number'))
+    def getVerifiedChannels(self, channels=[]):
+        return sorted(self.verify(channels), key=itemgetter('number'))
 
 
     def verify(self, channels=[]):
@@ -117,11 +118,19 @@ class Builder:
                 continue
             elif not citem.get('id'): citem['id'] = getChannelID(citem['name'],citem['path'],citem['number']) #generate new channelid
             citem['logo'] = self.resources.getLogo(citem,citem.get('logo',LOGO))
-            self.log('[%s] VERIFIED - channel %s: %s'%(citem['id'],citem['number'],citem['name']))
+            self.log('[%s] VERIFIED - channel %s: %s changed = %s'%(citem['id'],citem['number'],citem['name'],citem.get('changed',False)))
             yield self.runActions(RULES_ACTION_CHANNEL_CITEM, citem, citem, inherited=self) #inject persistent citem changes here
 
-
+             
     def build(self, channels: list=[], preview=False):
+        def __hasChanged(citem: dict, detect=SETTINGS.getSettingBool('Enable_Changed')) -> bool:
+            if not citem.get('changed',False) and detect:
+                state = any(set([SETTINGS.getFileCRC(file) for file in citem.get('path',[]) if file.endswith(tuple(KODI_PLAYLISTS + BASIC_PLAYLISTS))]))
+            else:
+                state = citem.get('changed',False)
+            self.log('[%s] __hasChanged = %s'%(citem['id'],state))
+            return state
+            
         def __hasProgrammes(citem: dict) -> bool:
             try:    return dict(self.xmltv.hasProgrammes([citem])).get(citem['id'],False)
             except: return False
@@ -133,8 +142,10 @@ class Builder:
         
         def __clrChannel(citem: dict) -> bool:
             self.log('[%s] __clrChannel'%(citem['id']))
-            return self.m3u.delStation(citem) & self.xmltv.delBroadcast(citem)
-        
+            if self.resetPagination(citem) & self.m3u.delStation(citem) & self.xmltv.delBroadcast(citem):
+                citem['changed'] = False
+                self.channels.addChannel(citem)
+                
         def __addStation(citem: dict) -> bool:
             self.log('[%s] __addStation'%(citem['id']))
             citem['logo']  = self.resources.buildWebImage(cleanImage(citem['logo']))
@@ -149,22 +160,19 @@ class Builder:
         
         def __setChannels():
             self.log('__setChannels')
-            return self.xmltv._save() & self.m3u._save()
+            return self.channels.setChannels() & self.xmltv._save() & self.m3u._save()
         
         if not PROPERTIES.isRunning('builder.build'):
             with PROPERTIES.legacy(), PROPERTIES.chkRunning('builder.build'):
-                try:    
-                    if len(channels) == 0: raise Exception('No individual channels to update, updating all!')
-                    else: channels = sorted(self.verify(channels), key=itemgetter('number'))
-                except: channels = self.getVerifiedChannels()
+                if len(channels) == 0: channels = self.getVerifiedChannels()
+                else:                  channels = self.getVerifiedChannels(channels)
                 
                 if len(channels) > 0:
                     complete = True
                     updated  = set()
                     now      = getUTCstamp()
                     start    = roundTimeDown(now,offset=60)#offset time to start bottom of the hour
-                    fallback = datetime.datetime.fromtimestamp(start).strftime(DTFORMAT)
-                    clrIDS   = SETTINGS.getResetChannels()
+                    fallback = epochTime(start,tz=False).strftime(DTFORMAT)
                     
                     if preview: self.pDialog = DIALOG.progressDialog()
                     else:       self.pDialog = DIALOG.progressBGDialog()
@@ -174,18 +182,24 @@ class Builder:
                         
                         citem = self.runActions(RULES_ACTION_CHANNEL_TEMP_CITEM, citem, citem, inherited=self) #inject temporary citem changes here
                         self.log('[%s] build, preview = %s, rules = %s'%(citem['id'],preview,citem.get('rules',{})))
-                        if self.service._interrupt():                       
+                        if self.service._interrupt():
                             self.log("[%s] build, _interrupt"%(citem['id']))
                             complete = False
                             self.pErrors = [LANGUAGE(32160)]
                             self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32213)), header=ADDON_NAME)
                             break
+                        elif self.service._suspend():
+                            self.log("[%s] build, _suspend"%(citem['id']))
+                            channels.insert(idx,citem)
+                            self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32145)), header=ADDON_NAME)
+                            self.service.monitor.waitForAbort(SUSPEND_TIMER)
+                            continue
                         else:
                             self.pMSG  = '%s: %s'%(LANGUAGE(32144),LANGUAGE(32212))
                             self.pName = citem['name']
                             self.runActions(RULES_ACTION_CHANNEL_START, citem, inherited=self)
                             
-                            if not preview and citem['id'] in clrIDS: __clrChannel({'id':clrIDS.pop(clrIDS.index(citem['id']))}) #clear channel xmltv
+                            if not preview and __hasChanged(citem, self.enableChanged): __clrChannel(citem) #clear channel m3u/xmltv
                             stopTimes = dict(self.xmltv.loadStopTimes([citem], fallback=fallback)) #check last stop times
                             
                             if    preview:                                                                           self.pMSG = LANGUAGE(32236)                           #Preview
@@ -198,7 +212,8 @@ class Builder:
                             response = self.getFileList(citem, now, (stopTimes.get(citem['id']) or start))# {False:'In-Valid Channel', True:'Valid Channel w/o programmes', list:'Valid Channel w/ programmes}
                             if preview: return response
                             elif response:
-                                if __addStation(citem) and __hasFileList(response): updated.add(__addProgrammes(citem, response)) #added xmltv lineup entries.
+                                if __addStation(citem) and __hasFileList(response):
+                                    updated.add(__addProgrammes(citem, response)) #added xmltv lineup entries.
                             else: 
                                 if complete: self.pErrors.append(LANGUAGE(32026))
                                 chanErrors = ' | '.join(list(sorted(set(self.pErrors))))
@@ -208,11 +223,10 @@ class Builder:
                                     self.updateProgress(self.pCount, message=self.pName,header='%s, %s'%(ADDON_NAME,'%s %s'%(LANGUAGE(32244),LANGUAGE(32023))))
                                     __clrChannel(citem) #remove m3u/xmltv references when no valid programmes found. # todo del citem causes issues down the road with citem missing params. reeval need to remove here
                             self.runActions(RULES_ACTION_CHANNEL_STOP, citem, inherited=self)
-                         
-                    SETTINGS.setResetChannels(clrIDS)       
+                            
                     self.pDialog = DIALOG.updateProgress(100, self.pDialog, message='%s %s'%(self.pMSG,LANGUAGE(32025) if complete else LANGUAGE(32135)))
-                    self.log('build, complete = %s, updated = %s, saved = %s'%(complete,bool(updated),__setChannels()))
-                    return complete, bool(updated)
+                    self.log('build, complete = %s, updated = %s, saved = %s'%(complete,any(updated),__setChannels()))
+                    return complete, any(updated)
                 else: self.log('build, no verified channels found!')
         return False, False
         
@@ -222,7 +236,7 @@ class Builder:
         try:
             if start > (now + ((MAX_GUIDEDAYS * 86400) - 43200)): #max guidedata days to seconds, minus fill buffer (12hrs) in seconds.
                 self.updateProgress(self.pCount, message=self.pName, header='%s, %s'%(ADDON_NAME,self.pMSG))
-                self.log('[%s] getFileList, programmes over MAX_DAYS! start = %s'%(citem['id'],datetime.datetime.fromtimestamp(start)),xbmc.LOGINFO)
+                self.log('[%s] getFileList, programmes over MAX_DAYS! start = %s'%(citem['id'],epochTime(start,tz=False)),xbmc.LOGINFO)
                 return True# prevent over-building
             
             multi = len(citem.get('path',[])) > 1 #multi-path source
@@ -234,12 +248,7 @@ class Builder:
             else:     response = self.buildChannel(citem)
             
             if isinstance(response,list): return sorted(self.addScheduling(citem, response, now, start), key=itemgetter('start'))
-            elif self.service._interrupt():   
-                self.log("[%s] getFileList, _interrupt"%(citem['id']))
-                self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32213)), header=ADDON_NAME)
-                return True
-            else:
-                return response
+            else:                         return response
         except Exception as e: self.log("[%s] getFileList, failed! %s"%(citem['id'],e), xbmc.LOGERROR)
         return False
 
@@ -325,16 +334,23 @@ class Builder:
         
         #Primary rule for handling fileList injection bypassing channel building below.
         if not _validFileList(fileArray): #if valid array bypass channel building
-            for idx, file in enumerate(citem.get('path',[])):
+            paths = citem.get('path',[])
+            for idx, path in enumerate(paths):
                 if self.service._interrupt():
-                    self.log("[%s]  buildChannel, _interrupt"%(citem['id']))
+                    self.log("[%s] buildChannel, _interrupt"%(citem['id']))
                     self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32213)), header=ADDON_NAME)
                     return []
+                elif self.service._suspend():
+                    self.log("[%s] buildChannel, _suspend"%(citem['id']))
+                    paths.insert(idx,path)
+                    self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32145)), header=ADDON_NAME)
+                    self.service.monitor.waitForAbort(SUSPEND_TIMER)
+                    continue
                 else:
                     if len(citem.get('path',[])) > 1: self.pName = '%s %s/%s'%(citem['name'],idx+1,len(citem.get('path',[])))
-                    fileList = self.buildFileList(citem, self.runActions(RULES_ACTION_CHANNEL_BUILD_PATH, citem, file, inherited=self), 'video', self.limit, self.sort, self.limits)
+                    fileList = self.buildFileList(citem, self.runActions(RULES_ACTION_CHANNEL_BUILD_PATH, citem, path, inherited=self), 'video', self.limit, self.sort, self.limits)
                     fileArray.append(fileList)
-                    self.log("[%s]  buildChannel, path = %s, fileList = %s"%(citem['id'],file,len(fileList)))
+                    self.log("[%s]  buildChannel, path = %s, fileList = %s"%(citem['id'],path,len(fileList)))
         fileArray = self.runActions(RULES_ACTION_CHANNEL_BUILD_FILEARRAY_POST, citem, fileArray, inherited=self) #flatten fileArray here to pass as fileList below
         
         #Primary rule for handling adv. interleaving, must return single list to avoid default interleave() below. Add adv. rule to setDictLST duplicates
@@ -364,7 +380,7 @@ class Builder:
             return fileItems
             
         fileArray = []
-        if path.endswith('.xsp'): #smartplaylist - parse xsp for path, sort info
+        if self.xsp.isXSP(path): #smartplaylist - parse xsp for path, sort info
             paths, media, sort, page = self.xsp.parseXSP(citem.get('id',''), path, media, sort, page)
             if len(paths) > 0:
                 for idx, npath in enumerate(paths):
@@ -372,22 +388,21 @@ class Builder:
                     fileArray.append(self.buildFileList(citem, npath, media, page, sort, limits))
                 return interleave(fileArray, self.interleaveSet, self.interleaveRepeat)
         
-        elif 'db://' in path and '?xsp=' in path: #dynamicplaylist - parse xsp for path, filter and sort info
+        elif self.xsp.isDXSP(path): #dynamicplaylist - parse xsp for path, filter and sort info
             path, media, sort, filter = self.xsp.parseDXSP(citem.get('id',''), path, sort, {}, self.incExtras) #todo filter adv. rules
-            
+
         fileList = []
         dirList  = [{'file':path}]
         npath    = path
         nlimits  = limits
         self.log("[%s] buildFileList, page = %s, sort = %s, limits = %s\npath = %s"%(citem['id'],page,sort,limits,path))
         
-        while not self.service.monitor.abortRequested() and len(fileList) < page:
-            #Not all results are flat hierarchies; walk all paths until fileList page is reached. ie. folders with pagination and/or directories
-            if self.service._interrupt(): 
+        while not self.service.monitor.abortRequested() and len(fileList) < page:   
+            if self.service._interrupt():
                 self.log("[%s] buildFileList, _interrupt"%(citem['id']))
                 self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32213)), header=ADDON_NAME)
-                return []       
-            elif self.service._suspend(): 
+                return []
+            elif self.service._suspend():
                 self.log("[%s] buildFileList, _suspend"%(citem['id']))
                 self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32145)), header=ADDON_NAME)
                 self.service.monitor.waitForAbort(SUSPEND_TIMER)
@@ -435,14 +450,18 @@ class Builder:
             for idx, item in enumerate(items):
                 file     = item.get('file','')
                 fileType = item.get('filetype','file')
-                if not item.get('type'): item['type'] = query.get('key','files')
-                
                 if self.service._interrupt():
                     self.log("[%s] buildList, _interrupt"%(citem['id']))
-                    self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32213)), header=ADDON_NAME)
                     self.jsonRPC.autoPagination(citem['id'], path, query, limits) #rollback pagination limits
+                    self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32213)), header=ADDON_NAME)
                     return [], [], nlimits, errors
-
+                elif self.service._suspend():
+                    self.log("[%s] buildList, _suspend"%(citem['id']))
+                    items.insert(idx,item)
+                    self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32145)), header=ADDON_NAME)
+                    self.service.monitor.waitForAbort(SUSPEND_TIMER)
+                    continue
+                elif not item.get('type'): item['type'] = query.get('key','files')
                 elif fileType == 'directory':
                     dirList.append(item)
                     # self.updateProgress(self.pCount, message=f'{self.pName}: {int(idx*100)//page}% appending: {item.get("label")}',header=f'{ADDON_NAME}, {self.pMSG}')
@@ -590,3 +609,11 @@ class Builder:
 
     def getTrailers(self, nitems: dict={}) -> dict:
         return self.cache.set('kodiTrailers', mergeDictLST((self.cache.get('kodiTrailers', json_data=True) or {}),nitems), expiration=datetime.timedelta(days=28), json_data=True)
+
+
+    def resetPagination(self, citem):
+        if isinstance(citem, list): [self.resetPagination(item) for item in citem]
+        else: [self.jsonRPC.resetPagination(citem.get('id'), path) for path in citem.get('path',[]) if citem.get('id')]
+        return True
+    
+        

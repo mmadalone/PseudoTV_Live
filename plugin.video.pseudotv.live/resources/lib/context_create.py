@@ -42,13 +42,14 @@ class Create:
                     channelData['name'], channelData = manager.validateLabel(cleanLabel(self.listitem.getLabel()),channelData)
                     path, channelData   = manager.validatePath(unquoteString(self.listitem.getPath()),channelData,spinner=False)
                     if path is None: return
+                    channelData['changed'] = True
                     channelData['path'] = [path.strip('/')] 
                     channelData['id'] = getChannelID(channelData['name'], channelData['path'], channelData['number'])
                     manager.channels.addChannel(channelData)
                     manager.channels.setChannels()
-                    PROPERTIES.setUpdateChannels(channelData['id'])
                     manager.closeManager()
                     del manager
+                    PROPERTIES.setEpochTimer('chkChannels')#trigger channel building
                 manager = Manager(MANAGER_XML, ADDON_PATH, "default", channel=channelData['number'])
                 del manager
                 
@@ -64,5 +65,7 @@ if __name__ == '__main__':
     log('Create: __main__, param = %s'%(sys.argv))
     try:    mode = sys.argv[1]
     except: mode = ''
-    if mode == 'manage':  Create(sys.argv,listitem=sys.listitem,fitem=decodePlot(BUILTIN.getInfoLabel('Plot'))).open()
-    else:                 Create(sys.argv,listitem=sys.listitem,fitem=decodePlot(BUILTIN.getInfoLabel('Plot'))).add()
+    if mode == 'manage':  timerit(Create(sys.argv,sys.listitem,decodePlot(BUILTIN.getInfoLabel('Plot')).open)(0.1)
+    else:                 timerit(Create(sys.argv,sys.listitem,decodePlot(BUILTIN.getInfoLabel('Plot')).add)(0.1)
+    
+    

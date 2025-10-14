@@ -1,5 +1,6 @@
 Language IDS w\empty strings: {
     "32033": "",
+    "32099": "",
     "33130": ""
 }
 
@@ -87,8 +88,8 @@ Language IDS not found in py files, possibly only in xml: {
     "30023": "Unable to reload %s",
     "30027": "Logo Resource",
     "30032": "Resources",
-    "30036": "Minimum Guide Days",
-    "30037": "Maximum Guide Days",
+    "30036": "Minimum (Past) Guide Days",
+    "30037": "Maximum (Future) Guide Days",
     "30038": "AutoTune",
     "30039": "Clear Recommended Blacklist",
     "30040": "Clear All Autotuned Channels",
@@ -170,7 +171,7 @@ Language IDS not found in py files, possibly only in xml: {
     "30166": "Submit Snapshot",
     "30167": "Enable Log Uploader",
     "30168": "Visit Project Wiki",
-    "30169": "OSD Display Time",
+    "30169": "Channel information (OSD) display time",
     "30171": "Hide OSD on change",
     "30172": "Channel List",
     "30183": "Interleave TV & Movies after Ordering",
@@ -185,6 +186,7 @@ Language IDS not found in py files, possibly only in xml: {
     "30210": "Auto tuning",
     "30212": "Notifications During Playback",
     "30213": "Client Only",
+    "30214": "Detect Playlist Changes",
     "32004": "TV Networks",
     "32005": "TV Shows",
     "32006": "TV Genres",
@@ -203,6 +205,7 @@ Language IDS not found in py files, possibly only in xml: {
     "32074": "Adding Channel",
     "32075": "Saving...",
     "32082": "Clear this Channels Configurations",
+    "32099": "",
     "32113": "Recovering Channel",
     "32115": "Running as a client.",
     "32128": "Rebuilding Autotuned Channels",
@@ -266,7 +269,7 @@ Language IDS not found in py files, possibly only in xml: {
     "33013": "AutoTune from Recommended (Supported) services installed on Kodi and supplied by IPTV Manager.\\nSupport does not imply a relation between projects, PseudoTV is not responsible for the content provided by third-party plugins.",
     "33016": "Global Filler rules apply to all channels, Advanced channel manager rules apply per channel. *see wiki for details.\\nChanges will propagate slowly over time and may not be instantaneous.",
     "33023": "Artwork changes will propagate slowly over time and are not instantaneous.",
-    "33036": "Set in Kodi PVR & LiveTV Settings",
+    "33036": "Kodi PVR & LiveTV",
     "33038": "Run AutoTuning in Channels Tab",
     "33039": "Clear Plugin Blacklist. Blacklisted plugins are ignored in Recommended list.",
     "33040": "Clear all Pre-defined selections and remove their channels.",
@@ -323,7 +326,7 @@ Language IDS not found in py files, possibly only in xml: {
     "33202": "Minimum Debugging Level [LOGERROR - Default]\\nIf submit is [COLOR=dimgray][B]dim[/B][/COLOR] no debugging information logged, change to [B]LOGDEBUG[/B] and reproduce error.",
     "33212": "Notifications During Playback",
     "33213": "This Instance of PseudoTV only runs as a client, with no channels configured locally.",
-    "33214": "Default Sort Method for all channels, overridden per channel by SmartPlaylist, DynamicPlaylist and Adv. Channel rules.",
+    "33214": "Force Channel rebuilding when Playlist changes are detected",
     "33308": "Install Log Uploader.",
     "33309": "Submit debugging log for review to http://paste.kodi.tv."
 }

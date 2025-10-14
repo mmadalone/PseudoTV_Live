@@ -125,7 +125,7 @@ class CustomQueue:
                 except Exception as e:
                     self.log(f"_push, func = {package[0].__name__} failed! {e}", xbmc.LOGFATAL)
         else:
-            if timer and self._exists(package, priority, timer): print('%s exists'%(package[0].__name__))
+            if timer and self._exists(package, priority, timer): self.log(f"{package[0].__name__} exists")
             else:
                 node = LlNode(package, priority, timer)
                 if self.head:
@@ -160,10 +160,7 @@ class CustomQueue:
                 self.log("_start, _shutdown")
                 break
             elif self.service._interrupt(): 
-                self.log("_start, _interrupt")
-                break
-            elif self.service._suspend():
-                self.log("_start, _suspend")
+                self.log("_start, _interrupt/_suspend")
                 self.service.monitor.waitForAbort(SUSPEND_TIMER)
                 continue
             elif self.priority:
@@ -183,7 +180,6 @@ class CustomQueue:
                     try:
                         package = self._process(curr_node, fifo=self.fifo)
                         if self.timer or curr_node.time:
-                            print('time',time.time(),curr_node.time,time.time() < curr_node.time)
                             if time.time() < curr_node.time: self._push(package, timer=curr_node.time)
                             else:
                                 self.nodes.remove((package[0].__name__))

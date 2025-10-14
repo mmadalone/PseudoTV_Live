@@ -162,7 +162,7 @@ class Settings:
     
 
     @cacheit(expiration=datetime.timedelta(minutes=FIFTEEN))
-    def getIP(self, default='127.0.0.1'):
+    def getIP(self, default='0.0.0.0'):
         IP = (xbmc.getIPAddress() or gethostbyname(gethostname()) or default)
         log('getIP, IP = %s'%(IP))
         return IP
@@ -388,13 +388,6 @@ class Settings:
         return xbmcaddon.Addon(id).setSetting(key,value)
 
 
-    def setResetChannels(self, id):
-        ids = self.getResetChannels()
-        if isinstance(id, list): ids.extend(id)
-        else:                    ids.append(id)
-        return self.setCacheSetting('clearChannels',list(set(ids)))
-
-
     @cacheit(expiration=datetime.timedelta(minutes=5), json_data=True)
     def getBonjour(self, inclChannels=False):
         self.log("getBonjour, inclChannels = %s"%(inclChannels))
@@ -423,7 +416,7 @@ class Settings:
         if inclChannels: 
             from channels    import Channels
             payload['channels'] = Channels().getChannels()
-        payload['updated'] = datetime.datetime.fromtimestamp(time.time()).strftime(DTFORMAT)
+        payload['updated'] = epochTime(time.time(),tz=False).strftime(DTFORMAT)
         payload['md5']     = getMD5(dumpJSON(payload))
         return payload
     
@@ -444,7 +437,7 @@ class Settings:
             recordings = xmltv.getRecordings()
             payload['xmltv']   = {'stations'  :[{'id':station.get('id'),'display-name':station.get('display-name',[['','']])[0][0],'icon':station.get('icon',[{'src':LOGO}])[0].get('src',LOGO)} for station in stations],
                                   'recordings':[{'id':recording.get('id'),'display-name':recording.get('display-name',[['','']])[0][0],'icon':recording.get('icon',[{'src':LOGO}])[0].get('src',LOGO)} for recording in recordings], 
-                                  'programmes':[{'id':key,'end-time':datetime.datetime.fromtimestamp(time.time()).strftime(DTFORMAT)} for key, value in list(dict(xmltv.loadStopTimes()).items())]}
+                                  'programmes':[{'id':key,'end-time':epochTime(time.time(),tz=False).strftime(DTFORMAT)} for key, value in list(dict(xmltv.loadStopTimes()).items())]}
             payload['library'] = Library().getLibrary()
             payload['servers'] = Multiroom().getDiscovery()
             del xmltv
@@ -452,7 +445,7 @@ class Settings:
 
         payload = __getMeta(self.getBonjour(inclChannels=True))
         if inclDebug: payload['debug'] = loadJSON(self.property.getEXTProperty('%s.debug.log'%(ADDON_ID))).get('DEBUG',{})
-        payload['updated']   = datetime.datetime.fromtimestamp(time.time()).strftime(DTFORMAT)
+        payload['updated']   = epochTime(time.time(),tz=False).strftime(DTFORMAT)
         payload['md5']       = getMD5(dumpJSON(payload))
         return payload
 
@@ -541,7 +534,7 @@ class Settings:
         return self.chkPluginSettings(settings, instance, prompt)
         
         
-    def setPVRRemote(self, host, instance=ADDON_NAME, prompt=None, cache=False):
+    def setPVRRemote(self, host, instance=ADDON_NAME, prompt=None, cache=True):
         settings  = self._IPTV_SIMPLE_SETTINGS()
         nsettings = {'m3uPathType'                :'1',
                      'm3uCache'                   :'%s'%(str(cache)),
@@ -653,8 +646,9 @@ class Settings:
         addon = self.hasAddon(PVR_CLIENT_ID,enable=True)
         if addon:
             for setting, value in list(settings.items()):
-                addon.setSetting(setting, value)
                 self.log('setPVRInstanceSettings, %s = %s'%(setting,value))
+                try:   addon.setSetting(setting, value)
+                except Exception as e: log("setPVRInstanceSettings, failed! %s"%(e), xbmc.LOGERROR)
 
             # todo https://github.com/xbmc/xbmc/pull/23648
             defaultFile = os.path.join(PVR_CLIENT_LOC,'settings.xml')
@@ -664,13 +658,21 @@ class Settings:
                 self.log('setPVRInstanceSettings, creating %s'%(instanceFile))
                 FileAccess.move(defaultFile, instanceFile)
                 return self.dialog.notificationDialog((LANGUAGE(32037)%(addon.getAddonInfo('name'))))
-        return self.dialog.notificationDialog(LANGUAGE(32000))
+        self.dialog.notificationDialog(LANGUAGE(32000))
+        return True
         
         
     def getCurrentSettings(self):
         settings = ['User_Folder', 'Debug_Enable', 'TCP_PORT']
         return dict([(setting,self.getSetting(setting)) for setting in settings])
                
+
+    def getFileCRC(self, file):
+        crc  = getCRC32(file)
+        name = 'getFileCRC.%s'%(getMD5(file))
+        cacheResponse = self.getCacheSetting(name, checksum=crc)
+        if not cacheResponse or cacheResponse != crc:  return self.setCacheSetting(name, crc, checksum=crc)
+            
 
 class Properties:
     def __init__(self, winID=10000):
@@ -683,11 +685,11 @@ class Properties:
         log('%s: %s'%(self.__class__.__name__,msg),level)
 
 
-    def setEpochTimer(self, key, time=0):
+    def setEpochTimer(self, key, time=0): #_chkEpochTimer trigger - Time = 0 == Run
         return self.setPropertyInt(key,time)
 
 
-    def setPropTimer(self, key, state=True):
+    def setPropTimer(self, key, state=True): #_chkPropTimer trigger - True == Run
         return self.setEXTPropertyBool('%s.%s'%(ADDON_ID,key),state)
 
 
@@ -717,20 +719,6 @@ class Properties:
         else:     self.clrEXTProperty('script.trakt.paused')
 
 
-    def setUpdateChannels(self, id):
-        ids = self.getUpdateChannels()
-        if isinstance(id, list): ids.extend(id)
-        else:                    ids.append(id)
-        timerit(self.setPropTimer)(FIFTEEN,['chkUpdate'])
-        return self.setPropertyList('updateChannels',list(set(ids)))
-    
-    
-    def getUpdateChannels(self):
-        ids = (self.getPropertyList('updateChannels') or [])
-        self.clrProperty('updateChannels')
-        return ids
-    
-    
     def setRunning(self, key, state=True):
         return self.setEXTPropertyBool('%s.Running.%s'%(ADDON_ID,key),state)
         
@@ -817,47 +805,51 @@ class Properties:
 
     @contextmanager
     def interruptActivity(self): #quit background task
-        self.setInterruptActivity(True)
-        try: yield
-        finally: self.setInterruptActivity(False)
-         
+        if not self.isInterruptActivity():
+            self.setInterruptActivity(True)
+            try: yield
+            finally: self.setInterruptActivity(False)
+        else: yield
         
-    def setInterruptActivity(self, state=True):
+        
+    def setInterruptActivity(self, state=True): # context state
         return self.setEXTPropertyBool('interruptActivity',state)
         
 
-    def isInterruptActivity(self):
+    def isInterruptActivity(self): # context state
         return self.getEXTPropertyBool('interruptActivity')
 
 
-    def setPendingInterrupt(self, state=True):
+    def setPendingInterrupt(self, state=True): # interrupt state
         return self.setEXTPropertyBool('pendingInterrupt',state)
 
 
-    def isPendingInterrupt(self):
+    def isPendingInterrupt(self):  # interrupt state
         return self.getEXTPropertyBool('pendingInterrupt')
 
         
     @contextmanager
     def suspendActivity(self): #pause background task.
-        self.setSuspendActivity(True)
-        try: yield
-        finally: self.setSuspendActivity(False)
+        if not self.isSuspendActivity():
+            self.setSuspendActivity(True)
+            try: yield
+            finally: self.setSuspendActivity(False)
+        else: yield
 
 
-    def setSuspendActivity(self, state=True):
+    def setSuspendActivity(self, state=True): # context state
         return self.setEXTPropertyBool('suspendActivity',state)
 
 
-    def isSuspendActivity(self):
+    def isSuspendActivity(self): # context state
         return self.getEXTPropertyBool('suspendActivity')
         
         
-    def setPendingSuspend(self, state=True):
+    def setPendingSuspend(self, state=True): # suspend state
         return self.setEXTPropertyBool('pendingSuspend',state)
         
         
-    def isPendingSuspend(self):
+    def isPendingSuspend(self): # suspend state
         return self.getEXTPropertyBool('pendingSuspend')
 
 
@@ -1037,7 +1029,7 @@ class ListItems:
         return xbmc.InfoTagVideo(offscreen)
         
 
-    def buildItemListItem(self, item, media='video', oscreen=False, playable=True):
+    def buildItemListItem(self, item, media='video', offscreen=False, playable=True):
         info       = item.copy()
         art        = (info.pop('art'              ,{}) or {})
         cast       = (info.pop('cast'             ,[]) or [])
@@ -1051,7 +1043,7 @@ class ListItems:
             art['poster'] = (getThumb(info,opt=1) or COLOR_LOGO)
             art['fanart'] = (getThumb(info)       or FANART)
             
-        listitem = self.getListItem(info.pop('label',''), info.pop('label2',''), info.pop('file',''), offscreen=oscreen)
+        listitem = self.getListItem(info.pop('label',''), info.pop('label2',''), info.pop('file',''), offscreen=offscreen)
         listitem.setArt(art)
         
         infoTag = ListItemInfoTag(listitem, media)
@@ -1071,9 +1063,9 @@ class ListItems:
         return listitem
              
                      
-    def buildMenuListItem(self, label="", label2="", icon=COLOR_LOGO, url="", info={}, art={}, props={}, oscreen=False, media='video'):
+    def buildMenuListItem(self, label="", label2="", icon=COLOR_LOGO, url="", info={}, art={}, props={}, offscreen=False, media='video'):
         if not art: art = {'thumb':icon,'logo':icon,'icon':icon}
-        listitem = self.getListItem(label, label2, url, offscreen=oscreen)
+        listitem = self.getListItem(label, label2, url, offscreen=offscreen)
         listitem.setIsFolder(True)
         listitem.setArt(art)
         if info:
@@ -1257,20 +1249,18 @@ class Builtin:
         
         
     def executewindow(self, key, wait=False, delay=0.1, condition='Player.Playing'):
-        self.executebuiltin(key,wait,delay,condition)
+        return self.executebuiltin(key,wait,delay,condition)
         
         
     def executebuiltin(self, key, wait=False, delay=0.1, condition=None):
         self.log('executebuiltin, key = %s, wait = %s, delay = %s, condition = %s):'%(key,wait,delay,condition))
         if condition and not xbmc.getCondVisibility(condition): return
-        if wait: xbmc.executebuiltin('%s'%(key),wait)
-        else:    timerit(xbmc.executebuiltin)(delay,['%s'%(key)])
+        return xbmc.executebuiltin('%s'%(key),wait)
         
         
     def executescript(self, path):
         self.log('executescript, path = %s'%(path))
-        xbmc.executescript('%s'%(path))
-        return True
+        return xbmc.executescript('%s'%(path))
 
 
     def executeJSONRPC(self, request):
@@ -1624,9 +1614,10 @@ class Dialog:
             return jsonRPC.getAddons({"enabled":True})
         
         from jsonrpc import JSONRPC
+        lizLST  = list()
         jsonRPC = JSONRPC()
         with self.builtin.busy_dialog():
-            lizLST = poolit(__buildMenuItem)([result for result in __getResources() if result.get('addonid').startswith('resource.%s.%s'%(content,ftype))])
+            lizLST.extend(poolit(__buildMenuItem)([result for result in __getResources() if result.get('addonid').startswith('resource.%s.%s'%(content,ftype))]))
             del jsonRPC
             
         selects = self.selectDialog(lizLST, 'Select one or more resources', preselect=findItemsInLST(lizLST,ids,'getPath'), multi=multi)
@@ -1649,7 +1640,7 @@ class Dialog:
                     {"idx":14, "label":LANGUAGE(32193)                    , "label2":"special://profile/playlists/mixed/"    , "default":"special://profile/playlists/mixed/" , "shares":""        , "mask":".xsp"                            , "type":1    , "multi":False},
                     {"idx":15, "label":LANGUAGE(32195)                    , "label2":"Create Dynamic Smartplaylist"          , "default":""                                   , "shares":""        , "mask":""                                , "type":1    , "multi":False},
                     {"idx":16, "label":LANGUAGE(32194)                    , "label2":"Import directory paths from STRM"      , "default":""                                   , "shares":"files"   , "mask":".strm"                           , "type":1    , "multi":False},
-                    {"idx":17, "label":LANGUAGE(32206)                    , "label2":"Media from basic playlists"            , "default":""                                   , "shares":""        , "mask":"|".join(ALT_PLAYLISTS)           , "type":1    , "multi":False},
+                    {"idx":17, "label":LANGUAGE(32206)                    , "label2":"Media from basic playlists"            , "default":""                                   , "shares":""        , "mask":"|".join(BASIC_PLAYLISTS)           , "type":1    , "multi":False},
                     {"idx":18, "label":'%s %s'%(LANGUAGE(32198),'Folders'), "label2":""                                      , "default":""                                   , "shares":"files"   , "mask":mask                              , "type":type , "multi":multi},
                     {"idx":19, "label":'%s %s'%(LANGUAGE(32199),'Folders'), "label2":""                                      , "default":""                                   , "shares":"local"   , "mask":mask                              , "type":type , "multi":multi},
                     {"idx":20, "label":'%s %s'%(LANGUAGE(32200),'Folders'), "label2":""                                      , "default":""                                   , "shares":shares    , "mask":mask                              , "type":type , "multi":multi},
@@ -1660,8 +1651,9 @@ class Dialog:
             options.extend([opt for opt in opts if not opt.get('idx',-1) in exclude])
             options = setDictLST(options)
             if default: options.insert(0,{"idx":0, "label":LANGUAGE(32203), "label2":default, "default":default, "shares":shares, "mask":mask, "type":type, "multi":multi})
-            lizLST = poolit(__buildMenuItem)(sorted(options, key=itemgetter('idx')))
-       
+            
+            lizLST = list()
+            lizLST.extend(poolit(__buildMenuItem)(sorted(options, key=itemgetter('idx'))))
         select = self.selectDialog(lizLST, LANGUAGE(32089), multi=False)
         if select is None: return
         default = options[select]['default']
@@ -1692,8 +1684,9 @@ class Dialog:
 
     def multiBrowse(self, paths: list=[], header=ADDON_NAME, exclude=[], monitor=True):
         self.log('multiBrowse, IN paths = %s'%(paths))
-        def __buildListItem(label: str="", label2: str="", icon: str=COLOR_LOGO, paths: list=[], items: dict={}):
-            return self.listitems.buildMenuListItem(label, label2, icon, url='|'.join(paths), props=items)
+        def __buildListItem(item): #label: str="", label2: str="", icon: str=COLOR_LOGO, paths: list=[], items: dict={}
+            idx = pathLST.index(item)
+            return self.listitems.buildMenuListItem('%s|'%(idx+1), item, DUMMY_ICON.format(text=str(idx+1)), url='|'.join(item), props={'idx':idx+1})
 
         select  = -1
         epaths  = paths.copy()
@@ -1702,7 +1695,8 @@ class Dialog:
         while not self.monitor.abortRequested() and not select is None:
             with self.builtin.busy_dialog():
                 npath  = None
-                lizLST = [__buildListItem('%s|'%(idx+1),path,paths=[path],icon=DUMMY_ICON.format(text=str(idx+1)),items={'idx':idx+1}) for idx, path in enumerate(pathLST) if path]
+                lizLST = list()
+                lizLST.extend(poolit(__buildListItem)(pathLST))
                 lizLST.insert(0,__buildListItem('[COLOR=white][B]%s[/B][/COLOR]'%(LANGUAGE(32100)),LANGUAGE(33113),icon=ICON,items={'key':'add','idx':0}))
                 if len(pathLST) > 0 and epaths != pathLST: lizLST.insert(1,__buildListItem('[COLOR=white][B]%s[/B][/COLOR]'%(LANGUAGE(32101)),LANGUAGE(33114),icon=ICON,items={'key':'save'}))
             

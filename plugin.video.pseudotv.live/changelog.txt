@@ -1,28 +1,40 @@
-v.0.6.3
-- Removed "AutoTune" settings tab, replaced with "Auto Tuning" wizard under "Channels".
-- Interleaving option added to "Global" and "Advanced Rules" to enable/disable round-robin interleaving; see wiki for details.
-- Improved Bonjour multi-room discovery.
-- Improved IPTV-Simple configuratoin and refresh.
-- Improved Playback when filenames have changed.
+### NOTICE: The wizard branch is in alpha; things will break! ####
+v.0.6.5-wizard
+- Improved HTTP server, strengthen gzip compression support.
+
+v.0.6.4-wizard
+- Advanced channel rules tweaked to include default values when channel rules are incorrectly configured.
+- Advanced channel rule "Quota" (498) and "PageLimit" (499) merged into a single rule "PageLimit & Padding".
+- Introduced a "Client Only" setting in "Options". This mode restricts background services to bare essentials (for PseudoTV instances not hosting channels).
+- Added "Detect Playlist Changes" setting in "Options". Any modifications to Kodi Playlists (Smartplaylist,Nodes), Basic Playlists trigger a full channel rebuild.
+- Implemented a "Force Rebuild" rule in Advanced Channel settings, ensuring channels rebuild with every update.
+- Overhauled threading and queue management for improved efficiency.
+- Miscellaneous tweaks and enhancements.
+
+v.0.6.3-wizard
+- Eliminated the "AutoTune" tab to be replaced it with an "Auto Tuning" wizard in "Channels" (Work In Progress).
+- Added an interleaving toggle for both "Global" and "Advanced Rules", allowing round-robin channel interleaving; see the wiki for more info.
+- Enhanced Bonjour multi-room detection.
+- Improved IPTV-Simple setup and refresh process.
+- Refined playback handling when file names change.
 
 v.0.6.2
-- Optimized background logo tasks to prevent potential deadlocks.
-- Resolved repeated "Offline" server notifications.
-- Corrected an issue where channels failed to switch or load correctly.
-- Added CPU/IO Benchmark to Utility Menu.
-- Fixed Reoccurring welcome prompt.
-- Fixed Failed library parsing inadvertently clearing autotuned channels.
-- Improved background logo parsing.
-- Fixed Channel Manager not saving paths.
-- Fixed Utility Menu options not behaving properly.
-- Fixed Issue where missing resource packs crashed channel manger.
-- Tweaked Channel building to assure equal content parsing between paths.
-- Added New Advanced Channel Rules:
-  - Page Limit
-- Added Channel bug transparency setting and Advanced Overlay Rule.
-- Tweaked Advanced Overlay Rules and removed redundant settings to limit confusion. Stack multiple rules to restore previous functionality. 
-  - This may required users to delete their existing rules; save, then re-add them.
-  - Affected Rules:
+- Optimized logo processing tasks to avoid deadlocks.
+- Fixed recurring "Offline" server alerts.
+- Addressed issues where channels failed to properly switch or load.
+- Added a CPU/IO Benchmark tool to the Utility Menu.
+- Resolved persistent welcome prompts.
+- Fixed a bug where failed library parsing could clear auto-tuned channels.
+- Improved logo processing in the background.
+- Corrected Channel Manager path-saving issues.
+- Fixed inconsistent behavior in Utility Menu options.
+- Fixed a crash in Channel Manager when resource packs were missing.
+- Adjusted channel building logic to ensure consistent content parsing across paths.
+- Added a new Advanced Channel Rule: Page Limit.
+- Introduced channel bug transparency controls and an Advanced Overlay Rule.
+- Updated Advanced Overlay Rules—removed redundant options for clarity; you can now stack multiple rules to recreate previous behaviors.
+  - Note: You may need to delete, save, and re-add your current rules.
+  - Impacted Rules:
     - All Overlay Rules
     - Duration Options
     - Include Options
@@ -30,7 +42,7 @@ v.0.6.2
     - Limits & Sort Methods
     - Even Show Distribution
     - Force Episode Ordering
-
+	
 v.0.6.1
 - Improved logo detection.
 - Possible Fix for channel content not changing.

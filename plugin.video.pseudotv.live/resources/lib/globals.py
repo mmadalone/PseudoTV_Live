@@ -237,11 +237,11 @@ def hasFile(file):
 def diffRuntime(dur, roundto=15):
     def ceil_dt(dt, delta):
         return dt + (datetime.datetime.min - dt) % delta
-    now = datetime.datetime.fromtimestamp(dur)
+    now = epochTime(dur,tz=False)
     return (ceil_dt(now, datetime.timedelta(minutes=roundto)) - now).total_seconds()
 
 def roundTimeDown(dt, offset=30): # round the given time down to the nearest
-    n = datetime.datetime.fromtimestamp(dt)
+    n = epochTime(dt,tz=False)
     delta = datetime.timedelta(minutes=offset)
     if n.minute > (offset-1): n = n.replace(minute=offset, second=0, microsecond=0)
     else: n = n.replace(minute=0, second=0, microsecond=0)
@@ -255,7 +255,7 @@ def roundTimeUp(dt=None, roundTo=60):
    
 def strpTime(datestring, format=DTJSONFORMAT): #convert pvr infolabel datetime string to datetime obj, thread safe!
     try:              return datetime.datetime.strptime(datestring, format)
-    except TypeError: return datetime.datetime.fromtimestamp(time.mktime(time.strptime(datestring, format)))
+    except TypeError: return epochTime(time.mktime(time.strptime(datestring, format)),tz=False)
     except:           return ''
    
 def epochTime(timestamp, tz=True): #convert pvr json datetime string to datetime obj

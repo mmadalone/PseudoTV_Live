@@ -298,6 +298,22 @@ class JSONRPC:
         return (result.get('item', {}) or result.get('items', []))
 
 
+    def getClients(self):
+        param = {"method":"PVR.GetClients","params":{}}
+        return self.sendJSON(param).get('result',{}).get('clients', [])
+
+
+    def getChannelGroups(self, radio=False):
+        param = {"method":"PVR.GetChannelGroups","params":{"channeltype":{True:'radio',False:'tv'}[radio]}}
+        return self.sendJSON(param).get('result',{}).get('channelgroups', [])
+        
+
+    def getChannelGroupDetails(self, id):
+        param = {"method":"PVR.GetChannelGroupDetails","params":{"channeltype":{"channelgroupid":id},"properties":self.getEnums("PVR.Fields.Channel", type='items')}}
+        return self.sendJSON(param).get('result',{}).get('channelgroupdetails', [])
+        PVR.Fields.Channel
+        
+        
     def getPVRChannels(self, radio=False):
         param = {"method":"PVR.GetChannels","params":{"channelgroupid":{True:'allradio',False:'alltv'}[radio],"properties":self.getEnums("PVR.Fields.Channel", type='items')}}
         return self.sendJSON(param).get('result',{}).get('channels', [])
@@ -649,7 +665,8 @@ class JSONRPC:
                     
             broadcasts = self.getPVRBroadcasts(pvritem.get('channelid',{}))
             [_parseBroadcast(broadcast) for broadcast in broadcasts]
-            pvritem['broadcastnext'] = channelItem.get('broadcastnext',pvritem['broadcastnext'])
+            pvritem['broadcastpast'] = sorted(channelItem.get('broadcastpast',[]), key=itemgetter('starttime'))
+            pvritem['broadcastnext'] = sorted(channelItem.get('broadcastnext',pvritem['broadcastnext']), key=itemgetter('starttime'))
             self.log('matchChannel: __extend, broadcastnext = %s entries'%(len(pvritem['broadcastnext'])))
             return pvritem
             
@@ -657,18 +674,19 @@ class JSONRPC:
         cacheResponse = (self.cache.get(cacheName, checksum=PROPERTIES.getInstanceID(), json_data=True) or {})
         if not cacheResponse:
             pvrItem = __match()
-            if pvrItem:
-                if extend: pvrItem = __extend(pvrItem)
-                cacheResponse = self.cache.set(cacheName, pvrItem, checksum=PROPERTIES.getInstanceID(), expiration=datetime.timedelta(seconds=15), json_data=True)
-            else: return {}
+            if pvrItem and extend: pvrItem = __extend(pvrItem)
+            cacheResponse = self.cache.set(cacheName, pvrItem, checksum=PROPERTIES.getInstanceID(), expiration=datetime.timedelta(seconds=15), json_data=True)
         return cacheResponse
         
         
     def getNextItem(self, citem={}, nitem={}): #return next broadcast ignoring fillers
-        if not nitem: nitem = decodePlot(BUILTIN.getInfoLabel('NextPlot','VideoPlayer'))
-        nextitems = sorted(self.matchChannel(citem.get('name',''), citem.get('id',''), citem.get('radio',False)).get('broadcastnext',[]), key=itemgetter('starttime'))
-        for nextitem in nextitems:
-            if not isFiller(nextitem): return decodePlot(nextitem.get('plot',''))
+        nextitems = self.matchChannel(citem.get('name',''), citem.get('id',''), citem.get('radio',False)).get('broadcastnext',[])
+        for idx, nextitem in enumerate(nextitems):
+            item = decodePlot(nextitem.get('plot',''))
+            if item.get('start') == nitem.get('start',str(random.random())) and item.get('id') == nitem.get('id',random.random()):
+                for next in nextitems[idx:]:
+                    if self.service.monitor.waitForAbort(0.0001): break
+                    elif not isFiller(next): return decodePlot(next.get('plot',''))
         return nitem
         
 

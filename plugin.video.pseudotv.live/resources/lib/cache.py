@@ -44,7 +44,7 @@ class Service:
     def _interrupt(self) -> bool:
         return xbmcgui.Window(10000).getProperty('%s.pendingInterrupt'%(ADDON_ID)) == "true"
     def _suspend(self) -> bool:
-        return xbmcgui.Window(10000).getProperty('%s.suspendActivity'%(ADDON_ID)) == "true"
+        return xbmcgui.Window(10000).getProperty('%s.pendingSuspend'%(ADDON_ID)) == "true"
 
 class Cache:
     lock    = Lock()

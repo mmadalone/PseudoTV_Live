@@ -68,6 +68,9 @@ class Plugin:
         else:
             self.sysInfo["seek"] = -1
             self.sysInfo["progresspercentage"] = -1
+            listitem.setProperty('startoffset', str(0)) #secs
+            infoTag = ListItemInfoTag(listitem,'video')
+            infoTag.set_resume_point({'ResumeTime':0,'TotalTime':(self.sysInfo['duration'] * 60)})
         return listitem
             
             
@@ -166,7 +169,7 @@ class Plugin:
             elif self.sysInfo.get('now') and self.sysInfo.get('vid'):
                 for pos, nextitem in enumerate(nextitems):
                     fitem = decodePlot(nextitem.get('plot',{}))
-                    ntime = datetime.datetime.fromtimestamp(float(self.sysInfo.get('now')))
+                    ntime = epochTime(float(self.sysInfo.get('now')),tz=False)
                     if ntime >= strpTime(nextitem.get('starttime')) and ntime < strpTime(nextitem.get('endtime')) and chid == fitem.get('citem',{}).get('id',str(random.random())):
                         found = True
                         self.log('[%s] getPVRItems found matching starttime'%(chid))
@@ -299,21 +302,6 @@ class Plugin:
             self._resolveURL(False, xbmcgui.ListItem())
 
 
-
-
-    # @contextmanager
-    # def preparingPlayback(self, found, listitem):
-        # if found and self.playCheck():
-            # try: yield (found, listitem)
-            # finally: PROPERTIES.setEXTProperty('%s.lastPlayed.sysInfo'%(ADDON_ID),encodeString(dumpJSON(self.sysInfo)))
-        # else: 
-            # yield self.playError()
-        
-
-
-
-
-       
     def _resolveURL(self, found, listitem):
         xbmcplugin.setResolvedUrl(int(self.sysARG[1]), *self.playCheck(found, listitem))
         
@@ -332,7 +320,6 @@ class Plugin:
                 fitem = self.sysInfo.get('fitem',{})
                 if fitem.get('type') == 'episode':
                     episodes = self.jsonRPC.getEpisode(fitem.get('tvshowid'),fitem.get('season'),fitem.get('episode'))
-                    print('__findMissing episodes',episodes)
                     for episode in episodes:
                         if episode == episode.get('episode',-1) and episode.get('file'):
                             self.log('[%s] playCheck, __findMissing episodedb found file = %s'%(self.sysInfo.get('citem',{}).get('id'),episode.get('file','')))
@@ -341,7 +328,6 @@ class Plugin:
                             
                 elif fitem.get('type') == 'movie':
                     movies = self.jsonRPC.getMovie(fitem.get('uniqueid'),fitem.get('title'),fitem.get('year'))
-                    print('__findMissing movies',movies)
                     for movie in movies:
                         if uniqueid.get('tmdb') == movie.get('uniqueid').get('tmdb') and movie.get('file'):
                             self.log('[%s] playCheck, __findMissing moviedb found file = %s'%(self.sysInfo.get('citem',{}).get('id'),movie.get('file','')))
@@ -353,7 +339,6 @@ class Plugin:
                     folder, filename = os.path.split(fitem.get('file',file))
                     items, limits, errors = self.jsonRPC.getDirectory({"directory":folder,"media": "video"})
                     for item in items:
-                        print('__findMissing search',item)
                         if item.get('file','').endswith(tuple(VIDEO_EXTS)):
                             season, episode = parseSE(item.get('file',''))
                             if oSeason and oEpisode and (oSeason == season and oEpisode == episode):

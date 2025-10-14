@@ -162,11 +162,11 @@ msgid "ZeroConf"
 msgstr ""
 
 msgctxt "#30036"
-msgid "Minimum Guide Days"
+msgid "Minimum (Past) Guide Days"
 msgstr ""
 
 msgctxt "#30037"
-msgid "Maximum Guide Days"
+msgid "Maximum (Future) Guide Days"
 msgstr ""
 
 msgctxt "#30038"
@@ -406,7 +406,7 @@ msgid "Genre:"
 msgstr ""
 
 msgctxt "#30097"
-msgid "Port %s is In-Use! Port %s Available\n All PseudoTV Instances must be configured to use the same port."
+msgid "Port %s is In-Use! Port %s is available on this instance\n All PseudoTV Instances must be configured to use the same port."
 msgstr ""
 
 msgctxt "#30098"
@@ -698,7 +698,7 @@ msgid "Visit Project Wiki"
 msgstr ""
 
 msgctxt "#30169"
-msgid "OSD Display Time"
+msgid "Channel information (OSD) display time"
 msgstr ""
 
 msgctxt "#30170"
@@ -879,6 +879,10 @@ msgstr ""
 
 msgctxt "#30213"
 msgid "Client Only"
+msgstr ""
+
+msgctxt "#30214"
+msgid "Detect Playlist Changes"
 msgstr ""
 
 # Skin - strings 31000 thru 31999 reserved for skins
@@ -1282,7 +1286,7 @@ msgid "Validating"
 msgstr ""
 
 msgctxt "#32099"
-msgid "This may take a moment"
+msgid ""
 msgstr ""
 
 msgctxt "#32100"
@@ -1910,6 +1914,10 @@ msgctxt "#32258"
 msgid "Parser"
 msgstr ""
 
+msgctxt "#32259"
+msgid "Changed"
+msgstr ""
+
 
 # Help - strings 33000 thru 33999 reserved for common strings used in add-ons
 
@@ -1978,7 +1986,7 @@ msgid "Artwork changes will propagate slowly over time and are not instantaneous
 msgstr ""
 
 msgctxt "#33036"
-msgid "Set in Kodi PVR & LiveTV Settings"
+msgid "Kodi PVR & LiveTV"
 msgstr ""
 
 msgctxt "#33038"
@@ -2335,7 +2343,7 @@ msgid "This Instance of PseudoTV only runs as a client, with no channels configu
 msgstr ""
 
 msgctxt "#33214"
-msgid "Default Sort Method for all channels, overridden per channel by SmartPlaylist, DynamicPlaylist and Adv. Channel rules."
+msgid "Force Channel rebuilding when Playlist changes are detected"
 msgstr ""
 
 msgctxt "#33215"

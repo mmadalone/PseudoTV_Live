@@ -49,7 +49,7 @@ class Autotune:
         return channels
 
 
-    def _runTune(self, prompt: bool=False, rebuild: bool=False, dia=None):
+    def _runTune(self, prompt: bool=False, rebuild: bool=False, dia=None):      
         customChannels = self.getCustom()
         autoChannels   = self.getAutotuned()
         hasLibrary     = PROPERTIES.hasLibrary()
@@ -71,7 +71,7 @@ class Autotune:
             retval = DIALOG.yesnoDialog(message=msg,customlabel=opt)
             if   retval == 1: dia = DIALOG.progressBGDialog(header='%s, %s'%(ADDON_NAME,LANGUAGE(32021))) #Yes
             elif retval == 2: #Custom
-                with BUILTIN.busy_dialog(), PROPERTIES.interruptActivity():
+                with BUILTIN.busy_dialog():
                     menu = [LISTITEMS.buildMenuListItem(LANGUAGE(30107),LANGUAGE(33310),url='special://home/addons/%s/resources/lib/utilities.py, Channel_Manager'%(ADDON_ID))]
                     if hasM3U:     menu.append(LISTITEMS.buildMenuListItem(LANGUAGE(32257),LANGUAGE(32256),url='special://home/addons/%s/resources/lib/autotune.py, Recover_M3U'%(ADDON_ID)))
                     if hasBackup:  menu.append(LISTITEMS.buildMenuListItem(LANGUAGE(32112),LANGUAGE(32111),url='special://home/addons/%s/resources/lib/backup.py, Recover_Backup'%(ADDON_ID)))
@@ -94,7 +94,7 @@ class Autotune:
         
         def _match(enabledItems):
             for item in enabledItems:
-                for idx, liz in enumerate(lizlst):
+                for idx, liz in enumerate(lizLST):
                     if item.get('name','').lower() == liz.getLabel().lower():
                         yield idx
 
@@ -102,7 +102,7 @@ class Autotune:
             for item in items:
                 item['enabled'] = False #disable everything before selecting new items.
                 for select in selects:
-                    if item.get('name','').lower() == lizlst[select].getLabel().lower():
+                    if item.get('name','').lower() == lizLST[select].getLabel().lower():
                         item['enabled'] = True
             self.library.setLibrary(ATtype, items)
            
@@ -110,8 +110,9 @@ class Autotune:
         if len(items) == 0 and (not rebuildChannels and not autoSelect): 
             if SETTINGS.getSettingBool('Debug_Enable'): DIALOG.notificationDialog(LANGUAGE(32018)%(ATtype))
             return
-        
-        lizlst = poolit(__buildMenuItem)(items)
+            
+        lizLST = list()
+        lizLST.extend(poolit(__buildMenuItem)(items))
         if rebuildChannels:#rebuild channels.json entries
             selects = list(_match(self.library.getEnabled(ATtype)))
         elif autoSelect:#build sample channels
@@ -120,54 +121,54 @@ class Autotune:
             else: 
                 selects = list(range(0,len(items)))
         else:
-            selects = DIALOG.selectDialog(lizlst,LANGUAGE(32017)%(ATtype),preselect=list(_match(self.library.getEnabled(ATtype))))
+            selects = DIALOG.selectDialog(lizLST,LANGUAGE(32017)%(ATtype),preselect=list(_match(self.library.getEnabled(ATtype))))
         
         if not selects is None: _set(ATtype, selects)
         return self.buildAUTOTUNE(ATtype, self.library.getEnabled(ATtype))
         
         
     def buildAUTOTUNE(self, ATtype: str, items: list=[]):
-        if not list: return
         def buildAvailableRange(existing):
             # create number array for given type, excluding existing channel numbers.
             if existing: existingNUMBERS = [eitem.get('number') for eitem in existing if eitem.get('number',0) > 0] # existing channel numbers
             else:        existingNUMBERS = []
-            
             start = ((CHANNEL_LIMIT+1)*(AUTOTUNE_TYPES.index(ATtype)+1))
             stop  = (start + CHANNEL_LIMIT)
             self.log('buildAUTOTUNE, ATtype = %s, range = %s-%s, existingNUMBERS = %s'%(ATtype,start,stop,existingNUMBERS))
             return [num for num in range(start,stop) if num not in existingNUMBERS]
-      
-        existingAUTOTUNE = self.channels.popChannels(ATtype,self.getAutotuned())
-        usesableNUMBERS  = iter(buildAvailableRange(existingAUTOTUNE)) # available channel numbers
-        for item in items:
-            music = isRadio(item)
-            citem = self.channels.getTemplate()
-            citem.update({"id"      : "",
-                          "type"    : ATtype,
-                          "number"  : 0,
-                          "name"    : getChannelSuffix(item['name'], ATtype),
-                          "logo"    : item.get('logo',LOGO),
-                          "path"    : item.get('path',''),
-                          "group"   : [item.get('type','')],
-                          "rules"   : item.get('rules',{}),
-                          "catchup" : ('vod' if not music else ''),
-                          "radio"   : music,
-                          "favorite": True})
-                          
-            match, eitem = self.channels.findAutotuned(citem, channels=existingAUTOTUNE)
-            if match is None: #new autotune
-                citem['id']       = getChannelID(citem['name'],citem['path'],citem['number']) #generate new channelid
-                citem['number']   = next(usesableNUMBERS,0) #first available channel number
-                PROPERTIES.setUpdateChannels(citem['id'])
-            else: #update existing autotune
-                citem['id']       = eitem.get('id')
-                citem['number']   = eitem.get('number')
-                citem['logo']     = chkLogo(eitem.get('logo',''),citem.get('logo',LOGO))
-                citem['favorite'] = eitem.get('favorite',False)
-            self.log('[%s] buildAUTOTUNE, number = %s, match = %s'%(citem['id'],citem['number'],match))
-            self.channels.addChannel(citem)
-        return self.channels.setChannels()
+            
+        with PROPERTIES.interruptActivity():
+            if not list: return
+            existingAUTOTUNE = self.channels.popChannels(ATtype,self.getAutotuned())
+            usesableNUMBERS  = iter(buildAvailableRange(existingAUTOTUNE)) # available channel numbers
+            for item in items:
+                music = isRadio(item)
+                citem = self.channels.getTemplate()
+                citem.update({"id"      : "",
+                              "type"    : ATtype,
+                              "number"  : 0,
+                              "name"    : getChannelSuffix(item['name'], ATtype),
+                              "logo"    : item.get('logo',LOGO),
+                              "path"    : item.get('path',''),
+                              "group"   : [item.get('type','')],
+                              "rules"   : item.get('rules',{}),
+                              "catchup" : ('vod' if not music else ''),
+                              "radio"   : music,
+                              "favorite": True})
+                              
+                match, eitem = self.channels.findAutotuned(citem, channels=existingAUTOTUNE)
+                if match is None: #new autotune
+                    citem['id']       = getChannelID(citem['name'],citem['path'],citem['number']) #generate new channelid
+                    citem['number']   = next(usesableNUMBERS,0) #first available channel number
+                    citem['changed']  = True
+                else: #update existing autotune
+                    citem['id']       = eitem.get('id')
+                    citem['number']   = eitem.get('number')
+                    citem['logo']     = chkLogo(eitem.get('logo',''),citem.get('logo',LOGO))
+                    citem['favorite'] = eitem.get('favorite',False)
+                self.log('[%s] buildAUTOTUNE, number = %s, match = %s'%(citem['id'],citem['number'],match))
+                self.channels.addChannel(citem)
+            return self.channels.setChannels()
        
 
     def recoverM3U(self, autotune={}):
@@ -202,4 +203,4 @@ class Autotune:
             elif param == None: return
             return SETTINGS.openSettings(ctl)
         
-if __name__ == '__main__': Autotune(sys.argv).run()
+if __name__ == '__main__': timerit(Autotune(sys.argv).run)(0.1)

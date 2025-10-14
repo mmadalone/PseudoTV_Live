@@ -33,7 +33,7 @@ class Backup:
         
 
     def getFileDate(self, file: str) -> str:
-        try:    return datetime.datetime.fromtimestamp(pathlib.Path(FileAccess.translatePath(file)).stat().st_mtime).strftime(BACKUP_TIME_FORMAT)
+        try:    return epochTime(pathlib.Path(FileAccess.translatePath(file)).stat().st_mtime,tz=False).strftime(BACKUP_TIME_FORMAT)
         except: return LANGUAGE(32105) #Unknown
         
         
@@ -96,4 +96,4 @@ class Backup:
             if   param == 'Recover_Backup': self.recoverChannels()
             elif param == 'Backup_Channels':  self.backupChannels()
         
-if __name__ == '__main__': Backup(sys.argv).run()
+if __name__ == '__main__': timerit(Backup(sys.argv).run)(0.1)

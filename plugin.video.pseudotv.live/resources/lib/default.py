@@ -91,4 +91,4 @@ if __name__ == '__main__':
     Returns:
         None
     """
-    _run(sys.argv, fitem=decodePlot(BUILTIN.getInfoLabel('Plot')), nitem=decodePlot(BUILTIN.getInfoLabel('NextPlot')))
+    _run(sys.argv, decodePlot(BUILTIN.getInfoLabel('Plot')), decodePlot(BUILTIN.getInfoLabel('NextPlot')))

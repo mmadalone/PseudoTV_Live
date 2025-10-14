@@ -131,84 +131,91 @@ class Multiroom:
                 self.log('addServer, payload changed = %s'%(changed))
 
 
-    def delServer(self, servers={}):
-        self.log('delServer')
-        def __build(idx, payload):
+    def _delServer(self, servers={}):
+        self.log('_delServer')
+        def __buildMenuItem(payload):
+            idx = list(servers.values()).index(payload)
             return LISTITEMS.buildMenuListItem(payload.get('name'),'%s - %s: Channels (%s)'%(LANGUAGE(32211)%({True:'green',False:'red'}[payload.get('online',False)],{True:LANGUAGE(32158),False:LANGUAGE(32253)}[payload.get('online',False)]),payload.get('host'),len(payload.get('channels',[]))),icon=DUMMY_ICON.format(text=str(idx+1)),url=dumpJSON(payload))
       
         with BUILTIN.busy_dialog():
             if not servers: servers = self.getDiscovery()
-            lizlst  = [__build(idx, server) for idx, server in enumerate(list(servers.values()))]
+            lizLST = list()
+            lizLST.extend(poolit(__buildMenuItem)(list(servers.values())))
 
-        selects = DIALOG.selectDialog(lizlst,LANGUAGE(32183))
+        selects = DIALOG.selectDialog(lizLST,LANGUAGE(32183))
         if not selects is None:
             with BUILTIN.busy_dialog():
-                if self.setDiscovery(self._chkServers([servers.pop(liz.getLabel()) for idx, liz in enumerate(lizlst) if not idx in selects])):
+                if self.setDiscovery(self._chkServers([servers.pop(liz.getLabel()) for idx, liz in enumerate(lizLST) if not idx in selects])):
                     return DIALOG.notificationDialog(LANGUAGE(30046))
 
 
-    def selServer(self):
-        self.log('selServer')
-        def __build(idx, payload): #build menu item
+    def _selServer(self):
+        self.log('_selServer')
+        def __buildMenuItem(payload): #build menu item
+            idx = list(servers.values()).index(payload)
             return LISTITEMS.buildMenuListItem(payload.get('name'),'%s - %s: Channels (%s)'%(LANGUAGE(32211)%({True:'green',False:'red'}[payload.get('online',False)],{True:LANGUAGE(32158),False:LANGUAGE(32253)}[payload.get('online',False)]),payload.get('host'),len(payload.get('channels',[]))),icon=DUMMY_ICON.format(text=str(idx+1)),url=dumpJSON(payload))
       
         with BUILTIN.busy_dialog():
             servers = self.getDiscovery()
-            lizlst  = [__build(idx, server) for idx, server in enumerate(list(servers.values()))]
-            if len(lizlst) > 0: lizlst.insert(0,LISTITEMS.buildMenuListItem('[COLOR=white][B]- %s[/B][/COLOR]'%(LANGUAGE(30046)),LANGUAGE(33046))) #remove server menu item
+            lizLST  = list()
+            lizLST.extend(poolit(__buildMenuItem)(list(servers.values())))
+            if len(lizLST) > 0: lizLST.insert(0,LISTITEMS.buildMenuListItem('[COLOR=white][B]- %s[/B][/COLOR]'%(LANGUAGE(30046)),LANGUAGE(33046))) #remove server menu item
             else: return
             
-        selects = DIALOG.selectDialog(lizlst,LANGUAGE(30130),preselect=[idx for idx, listitem in enumerate(lizlst) if loadJSON(listitem.getPath()).get('enabled',False)])
-        if not selects is None:
-            if 0 in selects: return self.delServer(servers)
-            else:
-                with BUILTIN.busy_dialog():
-                    changes = False
-                    for idx, liz in enumerate(lizlst):
-                        if   idx == 0: continue
-                        elif idx in selects:
-                            instancePath = SETTINGS.hasPVRInstance(liz.getLabel())
-                            if not servers[liz.getLabel()].get('enabled',False):
-                                changes = True
-                                DIALOG.notificationDialog(LANGUAGE(30099)%(liz.getLabel()))
-                                servers[liz.getLabel()]['enabled'] = True
-                            if not instancePath: 
-                                if SETTINGS.setPVRRemote(servers[liz.getLabel()].get('host'),liz.getLabel(),cache=True): PROPERTIES.setPropTimer('chkPVRRefresh')
-                        else:
-                            if servers[liz.getLabel()].get('enabled',False):
-                                DIALOG.notificationDialog(LANGUAGE(30100)%(liz.getLabel()))
-                                changes = True
-                                servers[liz.getLabel()]['enabled'] = False
-                            if instancePath: FileAccess.delete(instancePath)
-                    if changes: self.setDiscovery(self._chkServers(servers))
+        if not PROPERTIES.isRunning('_selServer'):
+            with PROPERTIES.chkRunning('_selServer'):
+                selects = DIALOG.selectDialog(lizLST,LANGUAGE(30130),preselect=[idx for idx, listitem in enumerate(lizLST) if loadJSON(listitem.getPath()).get('enabled',False)])
+                if not selects is None:
+                    if 0 in selects: return self._delServer(servers)
+                    else:
+                        changed = False
+                        for idx, liz in enumerate(lizLST):
+                            with BUILTIN.busy_dialog():
+                                if   idx == 0: continue
+                                elif idx in selects:
+                                    if not servers[liz.getLabel()].get('enabled',False):
+                                        changed = True
+                                        servers[liz.getLabel()]['enabled'] = True
+                                        DIALOG.notificationDialog(LANGUAGE(30099)%(liz.getLabel()))
+                                    if not SETTINGS.hasPVRInstance(liz.getLabel()): 
+                                        if SETTINGS.setPVRRemote(servers[liz.getLabel()].get('host'),liz.getLabel(),cache=True):
+                                            timerit(PROPERTIES.setPropTimer)(FIFTEEN,['chkPVRRefresh'])
+                                else:
+                                    if servers[liz.getLabel()].get('enabled',False):
+                                        changed = True
+                                        servers[liz.getLabel()]['enabled'] = False
+                                        DIALOG.notificationDialog(LANGUAGE(30100)%(liz.getLabel()))
+                                    try: FileAccess.delete(SETTINGS.hasPVRInstance(liz.getLabel()))
+                                    except: pass
+                        if changed: self.setDiscovery(self._chkServers(servers))
 
 
-    def enableZeroConf(self):
-        self.log('enableZeroConf')
+    def _chkZeroConf(self):
+        self.log('_chkZeroConf')
         if SETTINGS.getSetting('ZeroConf_Status') == '[COLOR=red][B]%s[/B][/COLOR]'%(LANGUAGE(32253)):
             if BUILTIN.getInfoLabel('Platform.Windows','System'): #prompt windows users to dl bonjour service.
                 BUILTIN.executescript('special://home/addons/%s/resources/lib/utilities.py, Show_ZeroConf_QR'%(ADDON_ID))
             if DIALOG.yesnoDialog(message=LANGUAGE(30129)):
-                with PROPERTIES.interruptActivity():
+                with PROPERTIES.suspendActivity():
                     if self.jsonRPC.setSettingValue("services.zeroconf",True,queue=False):
                         DIALOG.notificationDialog(LANGUAGE(32219)%(LANGUAGE(30035)))
                         self._chkDiscovery()
         else: DIALOG.notificationDialog(LANGUAGE(32219)%(LANGUAGE(30034)))
                     
             
-    def run(self):
+    def _run(self):
         try:    param = self.sysARG[1]
         except: param = None
         if param == 'Enable_ZeroConf': 
             ctl = (5,1)
-            self.enableZeroConf()
+            self._chkZeroConf()
         elif param == 'Select_Server': 
             ctl = (5,11)
-            self.selServer()
+            self._selServer()
         elif param == 'Remove_server': 
             ctl = (5,12)
         return SETTINGS.openSettings(ctl)
 
 
-if __name__ == '__main__': Multiroom(sys.argv).run()
+if __name__ == '__main__': timerit(Multiroom(sys.argv)._run)(0.1)
     

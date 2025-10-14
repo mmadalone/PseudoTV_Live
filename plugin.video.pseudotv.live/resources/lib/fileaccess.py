@@ -42,6 +42,14 @@ class FileAccess:
         
         
     @staticmethod
+    def _getShortPath(path, max_parts=3):
+        parts = path.split(os.sep)
+        if len(parts) > max_parts:
+            return f"...{os.sep}{os.path.join(*parts[-max_parts:])}"
+        return path
+        
+        
+    @staticmethod
     def listdir(path):
         return xbmcvfs.listdir(path)
 

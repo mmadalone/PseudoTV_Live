@@ -159,8 +159,8 @@ class Library:
             self.pHeader = '%s, %s %s'%(ADDON_NAME,LANGUAGE(32028),LANGUAGE(32041))
             self.pDialog = DIALOG.progressBGDialog(header=self.pHeader)
             
-            if (self.service._interrupt() or self.service._suspend()) and PROPERTIES.hasFirstRun():
-                self.log("updateLibrary, _interrupt")
+            if (self.service._interrupt() or self.service._suspend()):
+                self.log("updateLibrary, _interrupt/_suspend")
                 complete = False
                 self.pDialog  = DIALOG.progressBGDialog(self.pCount, self.pDialog, '%s: %s'%(LANGUAGE(32144),LANGUAGE(32213)), self.pHeader)
                 break

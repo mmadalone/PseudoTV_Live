@@ -103,7 +103,7 @@ class XMLTVS:
                 
     def resetData(self):
         self.log('resetData')
-        return {'date'                : datetime.datetime.fromtimestamp(float(time.time())).strftime(DTFORMAT),
+        return {'date'                : epochTime(float(time.time()),tz=False).strftime(DTFORMAT),
                 'generator-info-name' : self.cleanString('%s Guidedata'%(ADDON_NAME)),
                 'generator-info-url'  : self.cleanString(ADDON_ID),
                 'source-info-name'    : self.cleanString(ADDON_NAME),
@@ -149,7 +149,7 @@ class XMLTVS:
     def loadStopTimes(self, channels: list=[], programmes: list=[], fallback=None):
         if not channels:   channels   = self.getChannels()
         if not programmes: programmes = self.getProgrammes()
-        if not fallback:   fallback   = datetime.datetime.fromtimestamp(roundTimeDown(getUTCstamp(),offset=60)).strftime(DTFORMAT)
+        if not fallback:   fallback   = epochTime(roundTimeDown(getUTCstamp(),offset=60),tz=False).strftime(DTFORMAT)
         
         for channel in channels:
             try: 
@@ -166,7 +166,7 @@ class XMLTVS:
     def hasProgrammes(self, channels: list=[], programmes: list=[], now=None):
         if not channels:   channels   = self.getChannels()
         if not programmes: programmes = self.getProgrammes()
-        if not now: now   = datetime.datetime.fromtimestamp(roundTimeDown(getUTCstamp(),offset=60)).strftime(DTFORMAT)
+        if not now: now = epochTime(roundTimeDown(getUTCstamp(),offset=60),tz=False).strftime(DTFORMAT)
         
         for channel in channels:
             try: 
@@ -206,7 +206,7 @@ class XMLTVS:
 
 
     def cleanProgrammes(self, programmes: list) -> list:
-        now = (datetime.datetime.fromtimestamp(float(getUTCstamp())) - datetime.timedelta(days=MIN_GUIDEDAYS)) #allow some old programmes to avoid empty cells
+        now = (epochTime(float(getUTCstamp()),tz=False) - datetime.timedelta(days=MIN_GUIDEDAYS)) #allow some old programmes to avoid empty cells
         holiday = Seasonal().getHoliday()
         
         def __filterProgrammes(program):
@@ -349,8 +349,8 @@ class XMLTVS:
                  'category'    : [(self.cleanString(genre.replace(LANGUAGE(32105),'Undefined')),LANG) for genre in item['categories']],
                  'title'       : [(self.cleanString(item['title']), LANG)],
                  'desc'        : [(encodePlot(self.cleanString(item['desc']),item['fitem']), LANG) if encodeDESC else (self.cleanString(item['desc']), LANG)],
-                 'stop'        : (datetime.datetime.fromtimestamp(float(item['stop'])).strftime(DTFORMAT)),
-                 'start'       : (datetime.datetime.fromtimestamp(float(item['start'])).strftime(DTFORMAT)),
+                 'stop'        : (epochTime(float(item['stop']),tz=False).strftime(DTFORMAT)),
+                 'start'       : (epochTime(float(item['start']),tz=False).strftime(DTFORMAT)),
                  'icon'        : [{'src': item['thumb']}],
                  'length'      : {'units': 'seconds', 'length': str(item['length'])}}
                         
@@ -489,7 +489,7 @@ class XMLTVS:
                 for key in list(set(epggenres)):
                     gen = doc.createElement('genre')
                     gen.setAttribute('genreId',epggenres[key].get('genreId'))
-                    gen.appendChild(doc.createTextNode(key.title().replace('Tv','TV').replace('Nr','NR').replace('Na','NA')))
+                    gen.appendChild(doc.createTextNode(key.title()))
                     root.appendChild(gen)
                     
                 try:

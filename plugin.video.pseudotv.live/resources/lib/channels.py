@@ -26,8 +26,10 @@ class Channels:
     def __init__(self):
         self.log('__init__')
         self.channelDATA = getJSON(CHANNELFLE_DEFAULT)
-        self.channelTEMP = getJSON(CHANNEL_ITEM)
-        self.channelDATA.update(self._load())
+        self.channelTEMP = self.channelDATA.get('channels',[{}]).pop(0)
+        self.channelRULE = self.channelTEMP.pop('rules')
+        self.channelTEMP['rules'] = dict()
+        self.channelDATA.update(self.loadChannels())
         
         
     def log(self, msg, level=xbmc.LOGDEBUG):
@@ -105,6 +107,12 @@ class Channels:
         PROPERTIES.setChannels(len(channels)>0)
         return self._save()
 
+    
+    def loadChannels(self):
+        channelDATA = self._load()
+        SETTINGS.setSetting('Select_Channels','[B]%s[/B] Channels'%(len(channelDATA['channels'])))
+        return channelDATA
+        
     
     def getImports(self) -> list:
         return self.channelDATA.get('imports',[])

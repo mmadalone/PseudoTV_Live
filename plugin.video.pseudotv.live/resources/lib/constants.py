@@ -42,7 +42,7 @@ PLAYER              = xbmc.Player
 #constants
 FIFTEEN             = 15    #unit
 DISCOVERY_TIMER     = 60    #secs
-SUSPEND_TIMER       = 2     #secs
+SUSPEND_TIMER       = 15    #secs
 DISCOVER_INTERVAL   = 30    #secs
 MIN_EPG_DURATION    = 10800 #secs
 ONNEXT_TIMER        = 15
@@ -63,13 +63,14 @@ FILLER_LIMIT        = 250
 QUEUE_CHUNK         = 25
 M3U_REFRESH         = 15
 
+PRE_POST_ROLL_TYPES = ['Pre-Roll',
+                       'Post-Roll']           
+
 FILLER_TYPE         = ['Rating',
                        'Bumper',
                        'Advert',
-                       'Trailer',
-                       'Pre-Roll',
-                       'Post-Roll']
-
+                       'Trailer']
+                       
 FILLER_TYPES        = ['Ratings',
                        'Bumpers',
                        'Adverts',
@@ -135,7 +136,10 @@ HTML_ESCAPE         = {"&": "&amp;",
                        ">": "&gt;",
                        "<": "&lt;"}    
 
-ALT_PLAYLISTS       = [".cue",
+KODI_PLAYLISTS      = [".xsp", #smartplaylist
+                       ".xml"] #node
+                                           
+BASIC_PLAYLISTS     = [".cue",
                        ".m3u",
                        ".m3u8",
                        ".strm",
@@ -214,10 +218,7 @@ BING_WAV            = os.path.join(SFX_LOC,'bing.wav')
 NOTE_WAV            = os.path.join(SFX_LOC,'notify.wav')
 
 #remotes
-IMPORT_ASSET        = os.path.join(ADDON_PATH,'remotes','asset.json')
-RULEFLE_ITEM        = os.path.join(ADDON_PATH,'remotes','rule.json')
-CHANNEL_ITEM        = os.path.join(ADDON_PATH,'remotes','channel.json')
-M3UFLE_DEFAULT      = os.path.join(ADDON_PATH,'remotes','m3u.json')
+M3UFLE_ITEM         = os.path.join(ADDON_PATH,'remotes','m3u.json')
 SEASONS             = os.path.join(ADDON_PATH,'remotes','seasons.json')
 HOLIDAYS            = os.path.join(ADDON_PATH,'remotes','holidays.json')
 GROUPFLE_DEFAULT    = os.path.join(ADDON_PATH,'remotes','groups.xml')

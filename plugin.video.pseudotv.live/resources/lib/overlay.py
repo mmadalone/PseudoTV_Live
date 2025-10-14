@@ -42,8 +42,7 @@ class Background(xbmcgui.WindowXMLDialog):
         self.player = kwargs.get('player', None)
         self.citem  = self.player.playingItem.get('citem',{})
         self.fitem  = self.player.playingItem.get('fitem',{})
-        self.nitem  = self.player.jsonRPC.getNextItem(self.citem,self.player.playingItem.get('nitem'))
-      
+        self.nitem  = self.player.playingItem.get('nitem',{})
       
     def log(self, msg, level=xbmc.LOGDEBUG):
         return log('%s: %s'%(self.__class__.__name__,msg),level)
@@ -92,11 +91,13 @@ class Restart(xbmcgui.WindowXMLDialog):
         xbmcgui.WindowXMLDialog.__init__(self, *args, **kwargs)
         self.player  = kwargs.get('player', None)
         self.monitor = self.player.service.monitor
+        self.citem   = self.player.playingItem.get('citem',{})
+        self.fitem   = self.player.playingItem.get('fitem',{})
         
-        if bool(self.player.restartPercentage) and self.player.playingItem.get('fitem'):
+        if bool(self.player.restartPercentage) and self.fitem:
             progress = self.player.getPlayerProgress()
             self.log("__init__, restartPercentage = %s, progress = %s"%(self.player.restartPercentage, progress))
-            if (progress >= self.player.restartPercentage and progress < self.player.maxProgress) and not isFiller(self.player.playingItem.get('fitem',{})):
+            if (progress >= self.player.restartPercentage and progress < self.player.maxProgress):
                 self.doModal()
                 
                 
@@ -123,7 +124,7 @@ class Restart(xbmcgui.WindowXMLDialog):
                 if (self.monitor.waitForAbort(0.5) or self._isVisible(control) or self.closing): break
                     
             while not self.monitor.abortRequested():
-                if (self.monitor.waitForAbort(0.5) or wait < 0 or self.closing or not self.player.isPlaying()): break
+                if (self.monitor.waitForAbort(0.5) or wait < 0 or self.closing or not self.player.isPlayingPseudoTV()): break
                 else:
                     prog = int((abs(wait-tot)*100)//tot)
                     if prog > 0: control.setAnimations([('Conditional', 'effect=zoom start=%s,100 end=%s,100 time=1000 center=%s,100 condition=True'%((prog-20),(prog),xpos))])
@@ -143,12 +144,12 @@ class Restart(xbmcgui.WindowXMLDialog):
         self.closing = True
         if actionId in ACTION_SELECT_ITEM and self.getFocusId(40001): 
             if   self.player.playingItem.get('isPlaylist',False): self.player.seekTime(0)
-            elif self.player.playingItem.get('fitem'): 
+            elif self.fitem: 
                 with BUILTIN.busy_dialog():
-                    liz = LISTITEMS.buildItemListItem(self.player.playingItem.get('fitem',{}))
+                    liz = LISTITEMS.buildItemListItem(self.fitem)
                     liz.setProperty('sysInfo',encodeString(dumpJSON(self.player.playingItem)))
                     self.player.stop()
-                timerit(self.player.play)(1.0,[self.player.playingItem.get('fitem',{}).get('catchup-id'),liz])
+                timerit(self.player.play)(1.0,[self.fitem.get('catchup-id'),liz])
             else: DIALOG.notificationDialog(LANGUAGE(30154))
         elif actionId == ACTION_MOVE_UP:       BUILTIN.executebuiltin('AlarmClock(up,Action(up),.5,true,false)')
         elif actionId == ACTION_MOVE_DOWN:     BUILTIN.executebuiltin('AlarmClock(down,Action(down),.5,true,false)')
@@ -172,6 +173,8 @@ class Overlay():
         self.jsonRPC    = self.player.jsonRPC
         self.runActions = self.player.runActions
         self.resources  = Resources(service=self.service)
+        self.citem      = self.player.playingItem.get('citem',{})
+        
         self.window     = xbmcgui.Window(12005) 
         self.window_w, self.window_h = WH
         
@@ -190,6 +193,7 @@ class Overlay():
         try:    self.channelBugX, self.channelBugY = eval(SETTINGS.getSetting("Channel_Bug_Position_XY")) #user
         except: self.channelBugX, self.channelBugY = abs(int(self.window_w // 9) - self.window_w) - 128, abs(int(self.window_h // 16) - self.window_h) - 128 #auto        
 
+        
         
     def log(self, msg, level=xbmc.LOGDEBUG):
         return log('%s: %s'%(self.__class__.__name__,msg),level)
@@ -234,8 +238,8 @@ class Overlay():
             
             
     def open(self):
-        if self.player.playingItem.get('citem',{}):
-            self.runActions(RULES_ACTION_OVERLAY_OPEN, self.player.playingItem.get('citem',{}), inherited=self)
+        if self.citem:
+            self.runActions(RULES_ACTION_OVERLAY_OPEN, self.citem, inherited=self)
             self.log("open, enableVignette = %s, enableChannelBug = %s"%(self.enableVignette, self.enableChannelBug))
             if self.enableVignette:
                 window_h, window_w = (self.window.getHeight(), self.window.getWidth())
@@ -250,7 +254,7 @@ class Overlay():
                 self.channelBug = xbmcgui.ControlImage(self.channelBugX, self.channelBugY, 128, 128, ' ', aspectRatio=2)
                 self._addControl(self.channelBug)
                 
-                logo = self.player.playingItem.get('citem',{}).get('logo',(BUILTIN.getInfoLabel('Art(icon)','Player') or LOGO))
+                logo = self.citem.get('logo',(BUILTIN.getInfoLabel('Art(icon)','Player') or LOGO))
                 if   self.forceBugDiffuse:        self.channelBug.setColorDiffuse(self.channelBugColor)
                 elif self.resources.isMono(logo): self.channelBug.setColorDiffuse(self.channelBugColor)
                 self.channelBug.setImage(logo)
@@ -265,7 +269,7 @@ class Overlay():
         self._delControl(self.vignette)
         self._delControl(self.channelBug)
         if self.vinView != self.defaultView: timerit(self.jsonRPC.setViewMode)(0.5,[self.defaultView])
-        self.runActions(RULES_ACTION_OVERLAY_CLOSE, self.player.playingItem.get('citem',{}), inherited=self)
+        # self.runActions(RULES_ACTION_OVERLAY_CLOSE, self.citem, inherited=self) #debug NoneType, RULES_ACTION_OVERLAY_CLOSE obsolete? 
         
         
 class OnNext(xbmcgui.WindowXMLDialog):
@@ -277,7 +281,8 @@ class OnNext(xbmcgui.WindowXMLDialog):
     
     def __init__(self, *args, **kwargs):
         xbmcgui.WindowXMLDialog.__init__(self, *args, **kwargs)
-        self.player     = kwargs.get('player' , None)
+        self.player     = kwargs.get('player', None)
+        self.nitem      = kwargs.get('next', {})
         self.onNextMode = kwargs.get('mode' , SETTINGS.getSettingInt('OnNext_Mode'))
         self.onNextPosition = kwargs.get('position' , SETTINGS.getSetting("OnNext_Position_XY"))
         
@@ -286,7 +291,6 @@ class OnNext(xbmcgui.WindowXMLDialog):
         
         self.citem      = self.player.playingItem.get('citem',{})
         self.fitem      = self.player.playingItem.get('fitem',{})
-        self.nitem      = self.jsonRPC.getNextItem(self.citem,self.player.playingItem.get('nitem'))
                 
         self.window     = xbmcgui.Window(12005) 
         self.window_w, self.window_h = WH #self.window_h, self.window_w = (self.window.getHeight(), self.window.getWidth())
@@ -296,14 +300,13 @@ class OnNext(xbmcgui.WindowXMLDialog):
     
         self.log('__init__, enableOnNext = %s, onNextMode = %s, onNextX = %s, onNextY = %s'%(bool(self.onNextMode),self.onNextMode,self.onNextX,self.onNextY))
         
-        if not isFiller(self.fitem):
-            self.totalTime = int(self.player.getPlayerTime() * (self.player.maxProgress / 100))
-            self.threshold = abs((self.totalTime - (self.totalTime * .75)) - (ONNEXT_TIMER*3))
-            self.remaining = floor(self.totalTime - self.player.getPlayedTime())
-            self.intTime   = roundupDIV(self.threshold,3)
-            self.log('__init__, totalTime = %s, threshold = %s, remaining = %s, intTime = %s'%(self.totalTime,self.threshold,self.remaining,self.intTime))
-            if self.remaining >= self.intTime:
-                self.doModal()
+        self.totalTime = int(self.player.getPlayerTime() * (self.player.maxProgress / 100))
+        self.threshold = abs((self.totalTime - (self.totalTime * .75)) - (ONNEXT_TIMER*3))
+        self.remaining = floor(self.totalTime - self.player.getPlayedTime())
+        self.intTime   = roundupDIV(self.threshold,3)
+        self.log('__init__, totalTime = %s, threshold = %s, remaining = %s, intTime = %s'%(self.totalTime,self.threshold,self.remaining,self.intTime))
+        if self.remaining >= self.intTime:
+            self.doModal()
         
         
     def log(self, msg, level=xbmc.LOGDEBUG):
@@ -311,8 +314,6 @@ class OnNext(xbmcgui.WindowXMLDialog):
 
         
     def onInit(self):
-        def __chkCitem():
-            return sorted(self.citem) == sorted(self.player.playingItem.get('citem',{}))
         try:
             self.log('onInit, citem = %s\nfitem = %ss\nnitem = %s'%(self.citem,self.fitem,self.nitem))
             if self.onNextMode in [1,2]: 
@@ -354,7 +355,7 @@ class OnNext(xbmcgui.WindowXMLDialog):
                     show = ONNEXT_TIMER*2
                     while not self.monitor.abortRequested() and not self.closing:
                         self.log('onInit, showing (%s)'%(show))
-                        if self.monitor.waitForAbort(0.5) or not self.player.isPlaying() or show < 1 or not __chkCitem(): break
+                        if self.monitor.waitForAbort(0.5) or not self.player.isPlayingPseudoTV() or show < 1: break
                         else: show -= 1
                         
                     self.onNext_Text.setVisible(False)
@@ -366,7 +367,7 @@ class OnNext(xbmcgui.WindowXMLDialog):
             wait = self.intTime*2
             while not self.monitor.abortRequested() and not self.closing:
                 self.log('onInit, waiting (%s)'%(wait))
-                if self.monitor.waitForAbort(0.5) or not self.player.isPlaying() or wait < 1 or not __chkCitem(): break
+                if self.monitor.waitForAbort(0.5) or not self.player.isPlayingPseudoTV() or wait < 1: break
                 else: wait -= 1
                         
         except Exception as e: self.log("onInit, failed! %s"%(e), xbmc.LOGERROR)

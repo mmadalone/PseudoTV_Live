@@ -45,7 +45,7 @@ class XSP:
         
     
     def isDXSP(self, path: str) -> bool:
-        if '?xsp=' in path.lower(): return True
+        if 'db://' in path.lower() and '?xsp=' in path.lower(): return True
         return False
         
         

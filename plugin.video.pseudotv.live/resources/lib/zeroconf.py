@@ -1247,7 +1247,7 @@ class Zeroconf(object):
         self.reaper = Reaper(self)
 
     def isLoopback(self):
-        return self.intf.startswith("127.0.0.1")
+        return self.intf.startswith("0.0.0.0")
 
     def isLinklocal(self):
         return self.intf.startswith("169.254.")

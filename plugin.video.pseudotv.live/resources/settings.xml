@@ -30,17 +30,6 @@
                         <close>true</close>
                     </control>
                 </setting>
-				<setting id="Run_Autotune" type="string" label="30210" help="" parent="Select_Channels">
-					<level>0</level>
-					<default/>
-					<constraints>
-						<allowempty>true</allowempty>
-					</constraints>
-					<control type="button" format="action">
-						<data>RunScript(special://home/addons/plugin.video.pseudotv.live/resources/lib/autotune.py, Run_Wizard)</data>
-						<close>true</close>
-					</control>
-				</setting>
                 <setting id="Default_Channels" type="string" label="30172" help="33172" parent="Select_Channels">
                     <level>3</level>
                     <default>Auto</default>
@@ -57,6 +46,17 @@
                         <close>true</close>
                     </control>
                 </setting>
+				<setting id="Run_Autotune" type="string" label="30210" help="" parent="Select_Channels">
+					<level>0</level>
+					<default/>
+					<constraints>
+						<allowempty>true</allowempty>
+					</constraints>
+					<control type="button" format="action">
+						<data>RunScript(special://home/addons/plugin.video.pseudotv.live/resources/lib/autotune.py, Run_Wizard)</data>
+						<close>true</close>
+					</control>
+				</setting>
                 <setting id="Backup_Channels" type="string" label="32110" help="33110" parent="Select_Channels">
                     <level>2</level>
                     <constraints>
@@ -223,6 +223,11 @@
                             <condition operator="is" setting="Enable_Fillers">true</condition>
                         </dependency>
                     </dependencies>
+                </setting>
+                <setting id="Enable_Changed" type="boolean" label="30214" help="33214">
+                    <level>2</level>
+                    <default>true</default>
+                    <control type="toggle"/>
                 </setting>
                 <setting id="Clean_Recordings" type="boolean" label="30149" help="33148">
                     <level>3</level>
@@ -555,6 +560,8 @@
                     </dependencies>
                     <control type="toggle"/>
                 </setting>
+            </group>
+            <group id="4" label="33036">
                 <setting id="Min_Days" type="integer" label="30036" help="33036">
                     <level>3</level>
                     <enable>false</enable>
@@ -762,50 +769,6 @@
                         <data/>
                     </control>
                 </setting>
-                <setting id="Remote_NAME" type="string" label="30203" parent="Remote_Status">
-                    <level>0</level>
-                    <default/>
-                    <enable>false</enable>
-                    <constraints>
-                        <allowempty>true</allowempty>
-                    </constraints>
-                    <control type="edit" format="string">
-                        <heading/>
-                    </control>
-                </setting>
-                <setting id="Remote_M3U" type="string" label="30094" parent="Remote_Status">
-                    <level>0</level>
-                    <default/>
-                    <enable>false</enable>
-                    <constraints>
-                        <allowempty>true</allowempty>
-                    </constraints>
-                    <control type="edit" format="string">
-                        <heading/>
-                    </control>
-                </setting>
-                <setting id="Remote_XMLTV" type="string" label="30095" parent="Remote_Status">
-                    <level>0</level>
-                    <default/>
-                    <enable>false</enable>
-                    <constraints>
-                        <allowempty>true</allowempty>
-                    </constraints>
-                    <control type="edit" format="string">
-                        <heading/>
-                    </control>
-                </setting>
-                <setting id="Remote_GENRE" type="string" label="30096" parent="Remote_Status">
-                    <level>0</level>
-                    <default/>
-                    <enable>false</enable>
-                    <constraints>
-                        <allowempty>true</allowempty>
-                    </constraints>
-                    <control type="edit" format="string">
-                        <heading/>
-                    </control>
-                </setting>
                 <setting id="TCP_PORT" type="integer" label="30098" help="33097" parent="Remote_Status">
                     <level>3</level>
                     <default>50001</default>
@@ -820,6 +783,50 @@
                             <condition operator="is" setting="Debug_Enable">true</condition>
                         </dependency>
                     </dependencies>
+                </setting>
+                <setting id="Remote_NAME" type="string" label="30203">
+                    <level>0</level>
+                    <default/>
+                    <enable>false</enable>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading/>
+                    </control>
+                </setting>
+                <setting id="Remote_M3U" type="string" label="30094">
+                    <level>0</level>
+                    <default/>
+                    <enable>false</enable>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading/>
+                    </control>
+                </setting>
+                <setting id="Remote_XMLTV" type="string" label="30095">
+                    <level>0</level>
+                    <default/>
+                    <enable>false</enable>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading/>
+                    </control>
+                </setting>
+                <setting id="Remote_GENRE" type="string" label="30096">
+                    <level>0</level>
+                    <default/>
+                    <enable>false</enable>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading/>
+                    </control>
                 </setting>
             </group>
             <group id="2" label="30103">
