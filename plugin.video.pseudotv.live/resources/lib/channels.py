@@ -38,7 +38,7 @@ class Channels:
 
     def _load(self, file=CHANNELFLEPATH) -> dict:
         channelDATA = getJSON(file)
-        self.log('_load, channels = %s'%(len(channelDATA.get('channels',[]))))
+        self.log('_load, file = %s\nchannels = %s'%(file,len(channelDATA.get('channels',[]))))
         return channelDATA
     
     
@@ -59,7 +59,7 @@ class Channels:
     def _save(self, file=CHANNELFLEPATH) -> bool:
         self.channelDATA['uuid']     = SETTINGS.getMYUUID()
         self.channelDATA['channels'] = self.sortChannels(self.channelDATA['channels'])
-        self.log('_save, channels = %s'%(len(self.channelDATA['channels'])))
+        self.log('_save, file = %s\nchannels = %s'%(file,len(self.channelDATA['channels'])))
         return setJSON(file,self.channelDATA)
 
         
@@ -110,7 +110,7 @@ class Channels:
     
     def loadChannels(self):
         channelDATA = self._load()
-        SETTINGS.setSetting('Select_Channels','[B]%s[/B] Channels'%(len(channelDATA['channels'])))
+        SETTINGS.setSetting('Select_Channels','[B]%s[/B] Channels'%(len(channelDATA.get('channels',[]))))
         return channelDATA
         
     

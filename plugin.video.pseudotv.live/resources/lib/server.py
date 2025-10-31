@@ -124,7 +124,6 @@ class MyHandler(BaseHTTPRequestHandler):
                         return self.send_response(200, "OK")
                     #filelist w/resume - paused channel rule
                     elif self.path.lower().startswith('/filelist') and incoming.get('payload'):
-                        print('do_POST',os.path.join(TEMP_LOC,self.path.replace('/filelist/','')),incoming.get('payload'))
                         if setJSON(os.path.join(TEMP_LOC,self.path.replace('/filelist/','')),incoming.get('payload')):
                             DIALOG.notificationDialog(LANGUAGE(30085)%(LANGUAGE(30060),incoming.get('name',ADDON_NAME)))
                         return self.send_response(200, "OK")

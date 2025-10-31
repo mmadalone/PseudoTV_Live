@@ -64,7 +64,7 @@ QUEUE_CHUNK         = 25
 M3U_REFRESH         = 15
 
 PRE_POST_ROLL_TYPES = ['Pre-Roll',
-                       'Post-Roll']           
+                       'Post-Roll']
 
 FILLER_TYPE         = ['Rating',
                        'Bumper',

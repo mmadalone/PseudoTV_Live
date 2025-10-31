@@ -52,6 +52,7 @@ class Player(xbmc.Player):
     Player() Trigger Order
     Player: onPlayBackStarted
     Player: onAVChange (if playing)
+    Player: onPlayBackEnded (if playing)
     Player: onAVStarted
     Player: onPlayBackSeek (if seek)
     Player: onAVChange (if changed)
@@ -66,6 +67,7 @@ class Player(xbmc.Player):
         self.monitor   = monitor
         self.jsonRPC   = service.jsonRPC
         
+        
     def log(self, msg, level=xbmc.LOGDEBUG):
         return log('%s: %s'%(self.__class__.__name__,msg),level)
 
@@ -76,12 +78,13 @@ class Player(xbmc.Player):
         
 
     def onAVChange(self):
-        self.log('onAVChange, pendingItem = %s'%(self.pendingItem))
+        self.log('onAVChange, playingItem = %s'%(self.playingItem))
 
         
     def onAVStarted(self):
-        self._onPlay({'invoked':-1,'pending':False,'playingItem':self.getplayingItem()})
+        self.pendingItem.update({'invoked':-1,'pending':False,'playingItem':self.getplayingItem()})
         self.log('onAVStarted, pendingItem = %s'%(self.pendingItem))
+        self._onPlay(self.pendingItem.get('playingItem',{}))
         
                 
     def onPlayBackSeek(self, seek_time=None, seek_offset=None): #Kodi bug? `OnPlayBackSeek` no longer called by player during seek, issue limited to pvr?
@@ -89,24 +92,27 @@ class Player(xbmc.Player):
     
     
     def onPlayBackError(self):
-        self._onError({'invoked':-1,'pending':False,'playingItem':{}})
-        self.log('onPlayBackError, pendingItem = %s'%(self.pendingItem))
+        self.log('onPlayBackError, playingItem = %s'%(self.playingItem))
+        self.pendingItem.update({'invoked':-1,'pending':False,'playingItem':{}})
+        self._onError(self.playingItem)
         
         
     def onPlayBackEnded(self):
-        self._onChange({'invoked':-1,'pending':False,'playingItem':{}})
-        self.log('onPlayBackEnded, pendingItem = %s'%(self.pendingItem))
+        self.log('onPlayBackEnded, playingItem = %s'%(self.playingItem))
+        self.pendingItem.update({'invoked':-1,'pending':False,'playingItem':{}})
+        self._onChange(self.playingItem)
         
         
     def onPlayBackStopped(self):
-        self._onStop({'invoked':-1,'pending':False,'playingItem':{}})
-        self.log('onPlayBackStopped, pendingItem = %s'%(self.pendingItem))
+        self.log('onPlayBackStopped, playingItem = %s'%(self.playingItem))
+        self.pendingItem.update({'invoked':-1,'pending':False,'playingItem':{}})
+        self._onStop(self.playingItem)
 
 
+    @timeit
     def getplayingItem(self):
         def __update(id, citem={}): #playingItem from listitem maybe outdated, check with channels.json for fresh citem.
-            channels = self.service.tasks.getVerifiedChannels()
-            for item in channels:
+            for item in self.service.channels:
                 if item.get('id',random.random()) == id: 
                     return combineDicts(citem,item)
             return citem
@@ -121,7 +127,6 @@ class Player(xbmc.Player):
             playingItem.update({'citem':combineDicts(playingItem.get('citem',{}),__update(playingItem.get('citem',{}).get('id'))),'runtime':int(self.getPlayerTime())}) #still needed for adv. rules?
             if not playingItem.get('fitem'):    playingItem.update({'fitem':decodePlot(BUILTIN.getInfoLabel('Plot','VideoPlayer'))})
             if not playingItem.get('nitem'):    playingItem.update({'nitem':decodePlot(BUILTIN.getInfoLabel('NextPlot','VideoPlayer'))})
-            if not playingItem.get('callback'): playingItem['callback'] = self.jsonRPC.getCallback(playingItem)
             PROPERTIES.setEXTProperty('%s.lastPlayed.sysInfo'%(ADDON_ID),encodeString(dumpJSON(playingItem)))
         return playingItem
       
@@ -165,12 +170,12 @@ class Player(xbmc.Player):
 
 
     def isPlayingFiller(self):
-        if self.isPlaying(): return any(genre in PRE_POST_ROLL_TYPES for genre in BUILTIN.getInfoLabel('Genre(comma)','VideoPlayer').split(','))
+        if self.isPlaying(): return isFiller({'genres':BUILTIN.getInfoLabel('Genre(comma)','VideoPlayer').split(',')})
         else:                return True
         
         
     def isNextFiller(self):
-        if self.isPlaying(): return any(genre in PRE_POST_ROLL_TYPES for genre in BUILTIN.getInfoLabel('NextGenre(comma)','VideoPlayer').split(','))
+        if self.isPlaying(): return isFiller({'genres':BUILTIN.getInfoLabel('NextGenre(comma)','VideoPlayer').split(',')})
         else:                return True
 
 
@@ -189,15 +194,13 @@ class Player(xbmc.Player):
         self.showSubtitles(state)
 
 
-    def _onPlay(self, pendingItem={}):
+    def _onPlay(self, playingItem={}):
         self.toggleBackground(False)
         self.toggleOverlay(False)
         self.toggleRestart(False)
         self.toggleOnNext(False)
         self.toggleInfo(False)
-        self.pendingItem.update(pendingItem)
         self.lastSubState = BUILTIN.isSubtitle()
-        playingItem = self.pendingItem.get('playingItem',{})
         if self.isPlayingPseudoTV():
             oldInfo = self.playingItem
             newChan = oldInfo.get('chid',random.random()) != playingItem.get('chid')
@@ -211,53 +214,49 @@ class Player(xbmc.Player):
             else: #New Program/Same Channel
                 self.playingItem = playingItem
                 if playingItem.get('radio',False): 
-                    timerit(BUILTIN.executebuiltin)(0.5,['Action(back)'])
-                    timerit(BUILTIN.executebuiltin)(1.0,['ReplaceWindow(visualisation)'])
+                    BUILTIN.executebuiltin('Action(back)')
+                    BUILTIN.executebuiltin('ReplaceWindow(visualisation)')
                 elif playingItem.get('isPlaylist',False): 
-                    timerit(BUILTIN.executebuiltin)(0.5,['ReplaceWindow(fullscreenvideo)'])
+                    BUILTIN.executebuiltin('ReplaceWindow(fullscreenvideo)')
                 self.toggleInfo(self.infoOnChange)
             self.jsonRPC.quePlaycount(oldInfo.get('fitem',{}),self.rollbackPlaycount)
             self.jsonRPC._setRuntime(playingItem.get('fitem',{}),playingItem.get('runtime'),self.saveDuration)
 
             
-    def _onChange(self, pendingItem={}):
+    def _onChange(self, playingItem={}):
         self.toggleOverlay(False)
         self.toggleRestart(False)
         self.toggleOnNext(False)
         self.toggleInfo(False)
-        self.pendingItem.update(pendingItem)
-        if self.playingItem:
-            if not self.playingItem.get('isPlaylist',False):
+        if playingItem:
+            if not playingItem.get('isPlaylist',False):
                 self.toggleBackground(self.enableOverlay)
-                BUILTIN.executebuiltin('PlayMedia(%s)'%(self.playingItem.get('callback')))
-                self.log('_onChange, [%s], isPlaylist = %s, callback = %s'%(self.playingItem.get('citem',{}).get('id'),self.playingItem.get('isPlaylist',False),self.playingItem.get('callback')))
-            self.playingItem = self._runActions(RULES_ACTION_PLAYER_CHANGE, self.playingItem.get('citem',{}), self.playingItem, inherited=self)
+                threadit(BUILTIN.executebuiltin)('PlayMedia(%s)'%(playingItem.get('callback')))
+                self.log('_onChange, [%s], isPlaylist = %s, callback = %s'%(playingItem.get('citem',{}).get('id'),playingItem.get('isPlaylist',False),playingItem.get('callback')))
+            self._runActions(RULES_ACTION_PLAYER_CHANGE, playingItem.get('citem',{}), playingItem, inherited=self)
         else:
             self.toggleBackground(False)
         
         
-    def _onStop(self, pendingItem={}):
-        self.pendingItem.update(pendingItem)
-        self.log('_onStop, id = %s'%(self.playingItem.get('citem',{}).get('id')))
+    def _onStop(self, playingItem={}):
+        self.log('_onStop, id = %s'%(playingItem.get('citem',{}).get('id')))
         self.toggleInfo(False)
         self.toggleOnNext(False)
         self.toggleRestart(False)
         self.toggleOverlay(False)
         self.toggleBackground(False)
-        if self.playingItem:
+        if playingItem:
             PROPERTIES.setTrakt(False)
-            self.jsonRPC.quePlaycount(self.playingItem.get('fitem',{}),self.rollbackPlaycount)
-            if self.playingItem.get('isPlaylist',False): xbmc.PlayList(xbmc.PLAYLIST_VIDEO).clear()
-            self.playingItem = self._runActions(RULES_ACTION_PLAYER_STOP, self.playingItem.get('citem',{}), self.playingItem, inherited=self)
-        self.playingItem = {} #reset
+            self.jsonRPC.quePlaycount(playingItem.get('fitem',{}),self.rollbackPlaycount)
+            if playingItem.get('isPlaylist',False): xbmc.PlayList(xbmc.PLAYLIST_VIDEO).clear()
+            self._runActions(RULES_ACTION_PLAYER_STOP, playingItem.get('citem',{}), playingItem, inherited=self)
         
 
-    def _onError(self, pendingItem={}): #todo evaluate potential for error handling.
+    def _onError(self, playingItem={}): #todo evaluate potential for error handling.
         self.log('_onError, playing file = %s'%(self.getPlayerFile()))
         if self.isPseudoTV() and SETTINGS.getSettingBool('Debug_Enable'):
             DIALOG.notificationDialog(LANGUAGE(32000))
-            BUILTIN.executebuiltin('Number(0)')
-            self._onStop(pendingItem)
+            self._onStop(playingItem)
             
             
     def _runActions(self, action, citem={}, parameter=None, inherited=None):
@@ -283,13 +282,25 @@ class Player(xbmc.Player):
         return not bool(cnx)
 
 
+    @timeit
     def _onIdle(self):
         self.log('_onIdle')
+        def __chkPlayback():
+            if self.pendingItem.get('invoked',-1) > 0:
+                if not BUILTIN.isBusyDialog() and (time.time() - self.pendingItem.get('invoked',-1)) > 60:
+                    self.onPlayBackError()
+
         def __chkBackground():
             remaining = floor(self.getRemainingTime())
             if floor(remaining) <= (OSD_TIMER*2):
                 self.log('__chkBackground, remaining = %s'%(remaining))
                 self.toggleBackground(self.enableOverlay)
+
+        def __chkCallback():
+            if not self.playingItem.get('callback'):
+                self.playingItem['callback'] = self.jsonRPC.getCallback(self.playingItem)
+                self.log('__chkCallback, callback = %s'%(self.playingItem['callback']))
+                PROPERTIES.setEXTProperty('%s.lastPlayed.sysInfo'%(ADDON_ID),encodeString(dumpJSON(self.playingItem)))
 
         def __chkResumeTime():
             if not self.isPlayingFiller() and self.playingItem.get('isPlaylist',False):
@@ -300,11 +311,6 @@ class Player(xbmc.Player):
                               "updated":{'instance':SETTINGS.getFriendlyName(),'time':getUTCstamp()}}
                     self.playingItem.setdefault('resume',{}).update(resume)
                     self.log('__chkResumeTime, resume = %s'%(self.playingItem.get('resume')))
-
-        def __chkPlayback():
-            if self.pendingItem.get('invoked',-1) > 0:
-                if not BUILTIN.isBusyDialog() and (time.time() - self.pendingItem.get('invoked',-1)) > 60:
-                    self.onPlayBackError()
 
         def __chkOverlay():
             played = ceil(self.getPlayedTime())
@@ -330,9 +336,10 @@ class Player(xbmc.Player):
                         
         if not PROPERTIES.isRunning('_onIdle'):
             with PROPERTIES.chkRunning('_onIdle'):
+                __chkPlayback()
                 __chkBackground()
                 __chkResumeTime()
-                __chkPlayback()
+                __chkCallback()
                 __chkOverlay()
                 __chkOnNext()
                 __chkSleep()
@@ -393,14 +400,16 @@ class Monitor(xbmc.Monitor):
     idleTime  = 0
     isIdle    = False
     isRunning = False
-    
+
     def __init__(self, service=None):
         self.log('__init__')
         xbmc.Monitor.__init__(self)
-        self.service  = service
-        self.jsonRPC  = service.jsonRPC
-        self.player   = Player(service,self)
-        self.FIFOQUE  = CustomQueue(fifo=True, service=service)
+        self.service    = service
+        self.jsonRPC    = service.jsonRPC
+        self.player     = Player(service,self)
+        self.FIFOQUE    = CustomQueue(fifo=True, service=service)
+        self.idleThread = Thread(target=self._start)
+        self.idleThread.daemon = True
         
         
     def log(self, msg, level=xbmc.LOGDEBUG):
@@ -412,6 +421,7 @@ class Monitor(xbmc.Monitor):
         
 
     def _start(self):
+        self.log('_start') 
         if not self.isRunning:
             self.isRunning = True
             while not self.abortRequested():
@@ -422,7 +432,7 @@ class Monitor(xbmc.Monitor):
         
     def _chkIdle(self):
         self.idleTime = BUILTIN.getIdle()
-        self.isIdle   = bool(self.idleTime) | self.idleTime > FIFTEEN
+        self.isIdle   = bool(self.idleTime) | self.idleTime > OSD_TIMER
         self.log('_chkIdle, isIdle = %s, idleTime = %s'%(self.isIdle, self.idleTime))
         if self.isIdle: self.player._onIdle()
             
@@ -444,6 +454,7 @@ class Monitor(xbmc.Monitor):
             
     def _updateServiceSettings(self):
         self.log('_updateServiceSettings')
+        self.service.channels = self.service.tasks.getVerifiedChannels()
         self.service.settings = self.service.tasks.chkSettingsChange(self.service.settings) #check for settings change, take action if needed
         
         
@@ -464,11 +475,13 @@ class Monitor(xbmc.Monitor):
         
         
 class Service():
+    channels         = []
     isClient         = SETTINGS.getSettingBool('Enable_Client')
     pendingSuspend   = PROPERTIES.setPendingSuspend(False)
     pendingInterrupt = PROPERTIES.setPendingInterrupt(False)
     pendingShutdown  = PROPERTIES.setPendingShutdown(False)
     pendingRestart   = PROPERTIES.setPendingRestart(False)
+    
 
     def __init__(self):
         self.log('__init__')        
@@ -531,9 +544,9 @@ class Service():
         
 
     def _initialize(self):
-        timerit(self.monitor._start)(0.5)
-        if self.isClient: self.tasks._client()
-        else:             self.tasks._host()
+        self.monitor.idleThread.start()
+        if self.isClient: self._que(self.tasks._client,1)
+        else:             self._que(self.tasks._host,1)
 
 
     def _start(self):

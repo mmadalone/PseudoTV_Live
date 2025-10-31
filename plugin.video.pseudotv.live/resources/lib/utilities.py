@@ -234,9 +234,10 @@ def buildMenu(select=None):
 def openChannelManager(chnum: int=1):
     log('Utilities: openChannelManager, chnum = %s'%(chnum))
     try:
-        from manager import Manager
-        chmanager = Manager(MANAGER_XML, ADDON_PATH, "default", channel=chnum)
-        del chmanager
+        with BUILTIN.busy_dialog():
+            from manager import Manager
+            chmanager = Manager(MANAGER_XML, ADDON_PATH, "default", channel=chnum)
+            del chmanager
     except Exception as e: 
         log('Utilities: openChannelManager, failed! %s'%(e), xbmc.LOGERROR)
         DIALOG.notificationDialog(LANGUAGE(30079))
@@ -327,4 +328,4 @@ def run(sysARG):
             
         return SETTINGS.openSettings(ctl)
 
-if __name__ == '__main__': executeit(run)(sys.argv)
+if __name__ == '__main__': threadit(run)(sys.argv)

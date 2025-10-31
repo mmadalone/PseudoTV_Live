@@ -612,8 +612,9 @@ class JSONRPC:
                         self.setSettingValue("services.devicename",friendly,queue=False)
                         self.log('inputFriendlyName, setting device name = %s'%(friendly))
         return friendly
-            
-            
+           
+           
+    @timeit
     def getCallback(self, sysInfo={}):
         self.log('[%s] getCallback, mode = %s, radio = %s, isPlaylist = %s'%(sysInfo.get('chid'),sysInfo.get('mode'),sysInfo.get('radio',False),sysInfo.get('isPlaylist',False)))
         def _matchJSON():#requires 'pvr://' json whitelisting
@@ -680,13 +681,16 @@ class JSONRPC:
         
         
     def getNextItem(self, citem={}, nitem={}): #return next broadcast ignoring fillers
-        nextitems = self.matchChannel(citem.get('name',''), citem.get('id',''), citem.get('radio',False)).get('broadcastnext',[])
-        for idx, nextitem in enumerate(nextitems):
-            item = decodePlot(nextitem.get('plot',''))
-            if item.get('start') == nitem.get('start',str(random.random())) and item.get('id') == nitem.get('id',random.random()):
-                for next in nextitems[idx:]:
-                    if self.service.monitor.waitForAbort(0.0001): break
-                    elif not isFiller(next): return decodePlot(next.get('plot',''))
+        if (citem.get('name','') and citem.get('id','')):
+            nextitems = self.matchChannel(citem.get('name',''), citem.get('id',''), citem.get('radio',False)).get('broadcastnext',[])
+            for idx, nextitem in enumerate(nextitems):
+                if self.service.monitor.waitForAbort(0.0001): break
+                else:
+                    item = decodePlot(nextitem.get('plot',''))
+                    if item.get('start') == nitem.get('start',str(random.random())) and item.get('id') == nitem.get('id',random.random()):
+                        for next in nextitems[idx:]:
+                            if self.service.monitor.waitForAbort(0.0001): break
+                            elif not isFiller(next): return decodePlot(next.get('plot',''))
         return nitem
         
 

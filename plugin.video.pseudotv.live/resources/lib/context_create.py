@@ -44,7 +44,7 @@ class Create:
                     if path is None: return
                     channelData['changed'] = True
                     channelData['path'] = [path.strip('/')] 
-                    channelData['id'] = getChannelID(channelData['name'], channelData['path'], channelData['number'])
+                    channelData['id'] = getChannelID(channelData['name'], channelData['path'], channelData['number'], SETTINGS.getMYUUID())
                     manager.channels.addChannel(channelData)
                     manager.channels.setChannels()
                     manager.closeManager()

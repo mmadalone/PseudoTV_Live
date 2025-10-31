@@ -333,7 +333,7 @@ class M3U:
         ritem['media-size']    = str(fitem.get('size',0))
         ritem['media-dir']     = ''#todo optional add parent directory via user prompt?
         ritem['group']         = ['%s (%s)'%(group,ADDON_NAME)]
-        ritem['id']            = getRecordID(ritem['name'], (fitem.get('originalfile') or fitem.get('file','')), ritem['number'])
+        ritem['id']            = getRecordID(ritem['name'], (fitem.get('originalfile') or fitem.get('file','')), ritem['number'], SETTINGS.getMYUUID())
         ritem['url']           = DVR_URL.format(addon=ADDON_ID,title=quoteString(ritem['label']),chid=quoteString(ritem['id']),vid=quoteString(encodeString((fitem.get('originalfile') or fitem.get('file','')))),seek=seek,duration=fitem.get('duration',0))#fitem.get('catchup-id','')
         return ritem
         

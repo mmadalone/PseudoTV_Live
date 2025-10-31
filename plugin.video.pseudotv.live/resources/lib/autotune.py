@@ -158,7 +158,7 @@ class Autotune:
                               
                 match, eitem = self.channels.findAutotuned(citem, channels=existingAUTOTUNE)
                 if match is None: #new autotune
-                    citem['id']       = getChannelID(citem['name'],citem['path'],citem['number']) #generate new channelid
+                    citem['id']       = getChannelID(citem['name'],citem['path'],citem['number'],SETTINGS.getMYUUID()) #generate new channelid
                     citem['number']   = next(usesableNUMBERS,0) #first available channel number
                     citem['changed']  = True
                 else: #update existing autotune

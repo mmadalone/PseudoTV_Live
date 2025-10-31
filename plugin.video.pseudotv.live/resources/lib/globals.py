@@ -137,26 +137,16 @@ def requestURL(url, params={}, payload={}, header=HEADER, timeout=FIFTEEN, json_
         if payload: response = session.post(url, data=dumpJSON(payload), headers=headers, timeout=timeout)
         else:       response = session.get(url, params=params, headers=headers, timeout=timeout)
         response.raise_for_status()  # Raise an exception for HTTP errors
-        log("Globals: requestURL, url = %s, status = %s"%(url,response.status_code))
+        log("Globals: requestURL, url = %s, status = %s\npayload = %s"%(url,response.status_code,payload))
         complete = True
 
         if json_data: results = response.json()
         else:         results = response.content
         if results and cache: return __setCache(cacheKey,results,json_data,cache,checksum,life)
         else:                 return results 
-        
-    except requests.exceptions.ConnectionError as e:
-        log("Globals: requestURL, failed! Error connecting to the server: %s"%('Returning cache' if cache else 'No Response'))
+    except Exception as e: 
+        log("Globals: requestURL, failed! %s, An error occurred: %s"%('Returning cache' if cache else 'No Response', e))
         return __getCache(cacheKey,json_data,cache,checksum) if cache else __error(json_data)
-        
-    except requests.exceptions.HTTPError as e:
-        log("Globals: requestURL, failed! HTTP error occurred: %s"%('Returning cache' if cache else 'No Response'))
-        return __getCache(cacheKey,json_data,cache,checksum) if cache else __error(json_data)
-        
-    except Exception as e:
-        log("Globals: requestURL, failed! An error occurred: %s"%(e), xbmc.LOGERROR)
-        return __error(json_data)
-        
     finally:
         if not complete and payload:
             queueURL({"url":url, "params":params, "payload":payload, "header":header, "timeout":timeout, "json_data":json_data, "cache":cache, "checksum":checksum, "life":life}) #retry post
@@ -183,14 +173,16 @@ def diffLSTDICT(old, new):
     set2 = {dumpJSON(d, sortkey=True) for d in new}
     return {"added": [loadJSON(s) for s in set2 - set1], "removed": [loadJSON(s) for s in set1 - set2]}
 
-def getChannelID(name, path, number):
+def getChannelID(name, path, number, uuid=None):
+    if uuid is None: uuid = SETTINGS.getMYUUID()
     if isinstance(path, list): path = '|'.join(path)
-    tmpid = '%s.%s.%s.%s'%(number, name, hashlib.md5(path.encode(DEFAULT_ENCODING)),SETTINGS.getMYUUID())
+    tmpid = '%s.%s.%s.%s'%(number, name, hashlib.md5(path.encode(DEFAULT_ENCODING)),uuid)
     return '%s@%s'%((binascii.hexlify(tmpid.encode(DEFAULT_ENCODING))[:32]).decode(DEFAULT_ENCODING),slugify(ADDON_NAME))
     
-def getRecordID(name, path, number):
+def getRecordID(name, path, number, uuid=None):
+    if uuid is None: uuid = SETTINGS.getMYUUID()
     if isinstance(path, list): path = '|'.join(path)
-    tmpid = '%s.%s.%s.%s'%(number, name, hashlib.md5(path.encode(DEFAULT_ENCODING)),SETTINGS.getMYUUID())
+    tmpid = '%s.%s.%s.%s'%(number, name, hashlib.md5(path.encode(DEFAULT_ENCODING)),uuid)
     return '%s@%s'%((binascii.hexlify(tmpid.encode(DEFAULT_ENCODING))[:16]).decode(DEFAULT_ENCODING),slugify(ADDON_NAME))
 
 def splitYear(label):
@@ -237,11 +229,11 @@ def hasFile(file):
 def diffRuntime(dur, roundto=15):
     def ceil_dt(dt, delta):
         return dt + (datetime.datetime.min - dt) % delta
-    now = epochTime(dur,tz=False)
+    now = datetime.datetime.fromtimestamp(dur)
     return (ceil_dt(now, datetime.timedelta(minutes=roundto)) - now).total_seconds()
 
 def roundTimeDown(dt, offset=30): # round the given time down to the nearest
-    n = epochTime(dt,tz=False)
+    n = datetime.datetime.fromtimestamp(dt)
     delta = datetime.timedelta(minutes=offset)
     if n.minute > (offset-1): n = n.replace(minute=offset, second=0, microsecond=0)
     else: n = n.replace(minute=0, second=0, microsecond=0)
@@ -255,7 +247,7 @@ def roundTimeUp(dt=None, roundTo=60):
    
 def strpTime(datestring, format=DTJSONFORMAT): #convert pvr infolabel datetime string to datetime obj, thread safe!
     try:              return datetime.datetime.strptime(datestring, format)
-    except TypeError: return epochTime(time.mktime(time.strptime(datestring, format)),tz=False)
+    except TypeError: return datetime.datetime.fromtimestamp(ime.mktime(time.strptime(datestring, format)))
     except:           return ''
    
 def epochTime(timestamp, tz=True): #convert pvr json datetime string to datetime obj
@@ -460,7 +452,7 @@ def isCenterlized():
                 
 def isFiller(item={}):
     for genre in item.get('genre',[]):
-        if genre.lower() in ['pre-roll','post-roll']: return True
+        if genre.lower() in PRE_POST_ROLL_TYPES: return True
     return False
 
 def isShort(item={}, minDuration=SETTINGS.getSettingInt('Seek_Tolerance')):

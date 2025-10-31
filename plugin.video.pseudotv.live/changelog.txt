@@ -1,4 +1,6 @@
 ### NOTICE: The wizard branch is in alpha; things will break! ####
+v.0.6.6-wizard
+
 v.0.6.5-wizard
 - Improved HTTP server, strengthen gzip compression support.
 

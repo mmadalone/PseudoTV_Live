@@ -271,7 +271,7 @@ class Plugin:
             if len(listitems) > 0: 
                 playlist = self._cuePlaylist(chid, listitems, pltype=xbmc.PLAYLIST_MUSIC, shuffle=True)
                 BUILTIN.executewindow('ReplaceWindow(visualisation)',delay=OSD_TIMER)
-                BUILTIN.executebuiltin('Dialog.Close(all)')
+                # BUILTIN.executebuiltin('Dialog.Close(all)')
                 PLAYER().play(playlist,windowed=True)
             self._resolveURL(False, xbmcgui.ListItem())
 
@@ -284,7 +284,7 @@ class Plugin:
                 playlist = self._cuePlaylist(chid, listitems,shuffle=False)
                 if BUILTIN.getInfoBool('Playing','Player'): BUILTIN.executebuiltin('PlayerControl(Stop)')
                 BUILTIN.executewindow('ReplaceWindow(fullscreenvideo)',delay=OSD_TIMER)
-                BUILTIN.executebuiltin("Dialog.Close(all)")
+                # BUILTIN.executebuiltin("Dialog.Close(all)")
                 PLAYER().play(playlist,windowed=True)
             self._resolveURL(False, xbmcgui.ListItem())
 
@@ -297,7 +297,7 @@ class Plugin:
                 playlist = self._cuePlaylist(chid, listitems,shuffle=False)
                 if BUILTIN.getInfoBool('Playing','Player'): BUILTIN.executebuiltin('PlayerControl(Stop)')
                 BUILTIN.executewindow(OSD_TIMER,['ReplaceWindow(fullscreenvideo)'])
-                BUILTIN.executebuiltin("Dialog.Close(all)")
+                # BUILTIN.executebuiltin("Dialog.Close(all)")
                 PLAYER().play(playlist,windowed=True)
             self._resolveURL(False, xbmcgui.ListItem())
 

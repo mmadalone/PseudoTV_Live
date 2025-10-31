@@ -1693,15 +1693,12 @@ class PauseRule(BaseRule): #Finial RULES [3000-~]
     def _getPlaylist(self, id):
         resume   = self._getResume(id)
         filelist = self._getFilelist(id)
-        print('_getPlaylist resume',resume)
         if len(filelist) > 0:
             for idx, item in enumerate(filelist):
-                print('_getPlaylist',idx,item.get('file'))
                 if item.get('file') == resume.get('file',-1):
                     resume.update({'idx':0})
                     item['resume'] = resume
                     filelist = filelist[idx:]
-                    print('_getPlaylist found match',idx,filelist[0].get('file'))
                     if self._set(id, filelist, resume): break
         self.log('[%s] runAction, _getPlaylist: filelist = %s, resume = %s'%(id,len(filelist),resume))
         return filelist

@@ -219,7 +219,7 @@ class Settings:
             del jsonRPC
             if not item: item = {'file':baseURL}
         self.log('openGuide, opening %s'%(item.get('file',baseURL)))
-        self.builtin.executebuiltin("Dialog.Close(all)") 
+        # self.builtin.executebuiltin("Dialog.Close(all)") 
         self.builtin.executebuiltin("ReplaceWindow(TVGuide,%s)"%(item.get('file',baseURL)))
                     
     #GET
@@ -416,7 +416,7 @@ class Settings:
         if inclChannels: 
             from channels    import Channels
             payload['channels'] = Channels().getChannels()
-        payload['updated'] = epochTime(time.time(),tz=False).strftime(DTFORMAT)
+        payload['updated'] = datetime.datetime.fromtimestamp(time.time()).strftime(DTFORMAT)
         payload['md5']     = getMD5(dumpJSON(payload))
         return payload
     
