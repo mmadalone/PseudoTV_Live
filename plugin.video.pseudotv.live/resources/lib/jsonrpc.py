@@ -23,6 +23,8 @@ from videoparser import VideoParser
 class Service:
     player  = PLAYER()
     monitor = MONITOR()
+    def _shutdown(self, wait=0.0001) -> bool:
+        return PROPERTIES.isPendingShutdown()
     def _interrupt(self) -> bool:
         return PROPERTIES.isPendingInterrupt()
     def _suspend(self) -> bool:
@@ -590,7 +592,7 @@ class JSONRPC:
             iters = cycle(files)
             while not self.service.monitor.abortRequested() and (len(files) < page and len(files) > 0):
                 item = next(iters).copy()
-                if   self.service.monitor.waitForAbort(0.0001): break
+                if   self.service._shutdown(0.0001): break
                 elif self.getDuration(item.get('file'),item) == 0:
                     try: files.pop(files.index(item))
                     except: break
@@ -666,8 +668,10 @@ class JSONRPC:
                     
             broadcasts = self.getPVRBroadcasts(pvritem.get('channelid',{}))
             [_parseBroadcast(broadcast) for broadcast in broadcasts]
-            pvritem['broadcastpast'] = sorted(channelItem.get('broadcastpast',[]), key=itemgetter('starttime'))
-            pvritem['broadcastnext'] = sorted(channelItem.get('broadcastnext',pvritem['broadcastnext']), key=itemgetter('starttime'))
+            try:    pvritem['broadcastpast'] = sorted(channelItem.get('broadcastpast',[]), key=itemgetter('starttime'))
+            except: pvritem['broadcastpast'] = channelItem.get('broadcastpast',[])
+            try:    pvritem['broadcastnext'] = sorted(channelItem.get('broadcastnext',pvritem['broadcastnext']), key=itemgetter('starttime'))
+            except: pvritem['broadcastnext'] = channelItem.get('broadcastnext',pvritem['broadcastnext'])
             self.log('matchChannel: __extend, broadcastnext = %s entries'%(len(pvritem['broadcastnext'])))
             return pvritem
             
@@ -684,12 +688,12 @@ class JSONRPC:
         if (citem.get('name','') and citem.get('id','')):
             nextitems = self.matchChannel(citem.get('name',''), citem.get('id',''), citem.get('radio',False)).get('broadcastnext',[])
             for idx, nextitem in enumerate(nextitems):
-                if self.service.monitor.waitForAbort(0.0001): break
+                if self.service._shutdown(0.0001): break
                 else:
                     item = decodePlot(nextitem.get('plot',''))
                     if item.get('start') == nitem.get('start',str(random.random())) and item.get('id') == nitem.get('id',random.random()):
                         for next in nextitems[idx:]:
-                            if self.service.monitor.waitForAbort(0.0001): break
+                            if self.service._shutdown(0.0001): break
                             elif not isFiller(next): return decodePlot(next.get('plot',''))
         return nitem
         

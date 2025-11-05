@@ -35,6 +35,18 @@ class FileAccess:
 
 
     @staticmethod
+    @contextmanager
+    def stream(filename, mode='r', encoding=DEFAULT_ENCODING):
+        """
+        A context manager/decorator that opens a file stream, 
+        yields the file object, and ensures it's closed.
+        """
+        fle = FileAccess.open(filename, mode, encoding)
+        try: yield fle
+        finally: fle.close()
+
+
+    @staticmethod
     def _getFolderPath(path):
         head, tail  = os.path.split(path)
         last_folder = os.path.basename(head)

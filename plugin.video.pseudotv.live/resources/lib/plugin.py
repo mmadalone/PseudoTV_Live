@@ -93,7 +93,7 @@ class Plugin:
 
     def getPausedItems(self, name, chid):
         self.log('[%s] getPausedItems'%(chid))
-        def __buildfItem(idx, item):
+        def __buildfItem(item):
             if 'citem' in item: item.pop('citem')
             sysInfo = self.sysInfo.copy()
             sysInfo['isPlaylist'] = True
@@ -107,7 +107,7 @@ class Plugin:
                 infoTag = ListItemInfoTag(listitem, 'video')
                 infoTag.set_resume_point({'ResumeTime':seektime, 'TotalTime':runtime * 60})
                 
-            sysInfo.update({'fitem':item,'resume':{"idx":idx}})
+            sysInfo.update({'fitem':item,'resume':{"idx":nextitems.index(item)}})
             listitem.setProperty("IsPlayable","true")
             listitem.setProperty('sysInfo',encodeString(dumpJSON(sysInfo)))
             return listitem
@@ -116,19 +116,20 @@ class Plugin:
         if nextitems:
             nextitems = nextitems[:SETTINGS.getSettingInt('Page_Limit')]# list of upcoming items, truncate for speed
             self.log('[%s] getPausedItems, building nextitems (%s)'%(chid, len(nextitems)))
-            return [__buildfItem(idx, nextitem) for idx, nextitem in enumerate(nextitems)]
+            with PROPERTIES.setBackgroundLabel('Building Playlist...') as setLabel:
+                return poolit(__buildfItem)(nextitems) #[__buildfItem(idx, nextitem) for idx, nextitem in enumerate(nextitems)]
         else: DIALOG.notificationDialog(LANGUAGE(32000))
         return []
     
         
     def getPVRItems(self, name: str, chid: str) -> list:
         self.log('[%s] getPVRItems, chname = %s'%(chid,name))
-        def __buildfItem(idx, item):
+        def __buildfItem(item):
             sysInfo = self.sysInfo.copy()
             nowitem = decodePlot(item.get('plot',''))
             if 'citem' in nowitem: nowitem.pop('citem')
             nowitem['pvritem'] = item
-            sysInfo.update({'fitem':nowitem,'position':idx})
+            sysInfo.update({'fitem':nowitem,'position':nextitems.index(item)})
             
             try: #next broadcast
                 nextitem = decodePlot(nextitems[idx+1][1].get('plot',''))
@@ -194,7 +195,8 @@ class Plugin:
                 nextitems = nextitems[:SETTINGS.getSettingInt('Page_Limit')]# list of upcoming items, truncate for speed
                 nextitems.insert(0,nowitem)
                 self.log('[%s] getPVRItems, building nextitems (%s)'%(chid,len(nextitems)))
-                return [__buildfItem(idx, item) for idx, item in enumerate(nextitems)]
+                with PROPERTIES.setBackgroundLabel('Building Playlist...') as setLabel:
+                    return poolit(__buildfItem)(nextitems) #[__buildfItem(idx, item) for idx, item in enumerate(nextitems)]
             else: DIALOG.notificationDialog(LANGUAGE(32164))
         else: DIALOG.notificationDialog(LANGUAGE(32000))
         return [xbmcgui.ListItem()]
@@ -202,7 +204,7 @@ class Plugin:
 
     def playTV(self, name: str, chid: str):
         self.log('[%s] playTV'%(chid))
-        with PROPERTIES.suspendActivity():
+        with BUILTIN.busy_dialog(), PROPERTIES.suspendActivity():
             if self.sysInfo.get('fitem') and (self.sysInfo.get('fitem').get('file','-1') == self.sysInfo.get('vid','0')): #-> live
                 listitem = self._setResume(chid, LISTITEMS.buildItemListItem(self.sysInfo['fitem']))
             else:
@@ -212,7 +214,7 @@ class Plugin:
 
     def playLive(self, name: str, chid: str, vid: str):
         self.log('[%s] playLive, name = %s'%(chid, name))
-        with PROPERTIES.suspendActivity():
+        with BUILTIN.busy_dialog(), PROPERTIES.suspendActivity():
             if self.sysInfo.get('fitem').get('file','-1') == vid:#-> live playback from UI incl. listitem
                 listitem = self._setResume(chid, LISTITEMS.buildItemListItem(self.sysInfo['fitem']))
                 self._resolveURL(True, listitem)
@@ -239,7 +241,7 @@ class Plugin:
 
     def playBroadcast(self, name: str, chid: str, vid: str): #-> catchup-source
         self.log('[%s] playBroadcast'%(chid))
-        with PROPERTIES.suspendActivity():
+        with BUILTIN.busy_dialog(), PROPERTIES.suspendActivity():
             if self.sysInfo.get('fitem'): #-> catchup-id called via ui "play programme"
                 listitem = LISTITEMS.buildItemListItem(self.sysInfo.get('fitem'))
             else:
@@ -251,26 +253,27 @@ class Plugin:
             
     def playVOD(self, title: str, vid: str): #-> catchup-id
         self.log('[%s] playVOD, title = %s'%(vid,title))
-        with PROPERTIES.suspendActivity():
+        with BUILTIN.busy_dialog(), PROPERTIES.suspendActivity():
             self._resolveURL(True, LISTITEMS.buildItemListItem(self.sysInfo.get('fitem')))
 
 
     def playDVR(self, title: str, vid: str): #-> catchup-id
         self.log('[%s] playDVR, title = %s'%(vid, title))
-        with PROPERTIES.suspendActivity():
+        with BUILTIN.busy_dialog(), PROPERTIES.suspendActivity():
             self._resolveURL(True, self._setResume(vid, LISTITEMS.buildItemListItem(self.sysInfo.get('fitem'))))
 
 
     def playRadio(self, name: str, chid: str, vid: str):
         self.log('[%s] playRadio'%(chid))
-        def __buildfItem(idx, item: dict={}):
+        def __buildfItem(item: dict={}):
             return LISTITEMS.buildItemListItem(item, 'music')
-        with PROPERTIES.suspendActivity():
+        with BUILTIN.busy_dialog(), PROPERTIES.suspendActivity():
             items = randomShuffle(self.getRadioItems(name, chid, vid))
-            listitems = [__buildfItem(idx, item) for idx, item in enumerate(items)]
+            with PROPERTIES.setBackgroundLabel('Building Playlist...') as setLabel:
+                listitems = poolit(__buildfItem)(items) #[__buildfItem(idx, item) for idx, item in enumerate(items)]
             if len(listitems) > 0: 
                 playlist = self._cuePlaylist(chid, listitems, pltype=xbmc.PLAYLIST_MUSIC, shuffle=True)
-                BUILTIN.executewindow('ReplaceWindow(visualisation)',delay=OSD_TIMER)
+                # BUILTIN.executewindow('ReplaceWindow(visualisation)',delay=OSD_TIMER,condition=BUILTIN.isPlaying)
                 # BUILTIN.executebuiltin('Dialog.Close(all)')
                 PLAYER().play(playlist,windowed=True)
             self._resolveURL(False, xbmcgui.ListItem())
@@ -278,12 +281,12 @@ class Plugin:
 
     def playPlaylist(self, name: str, chid: str):
         self.log('[%s] playPlaylist'%(chid))
-        with PROPERTIES.suspendActivity():
+        with BUILTIN.busy_dialog(), PROPERTIES.suspendActivity():
             listitems = self.getPVRItems(name, chid)
             if len(listitems) > 0: 
                 playlist = self._cuePlaylist(chid, listitems,shuffle=False)
                 if BUILTIN.getInfoBool('Playing','Player'): BUILTIN.executebuiltin('PlayerControl(Stop)')
-                BUILTIN.executewindow('ReplaceWindow(fullscreenvideo)',delay=OSD_TIMER)
+                # BUILTIN.executewindow('ReplaceWindow(fullscreenvideo)',delay=OSD_TIMER,condition=BUILTIN.isPlaying)
                 # BUILTIN.executebuiltin("Dialog.Close(all)")
                 PLAYER().play(playlist,windowed=True)
             self._resolveURL(False, xbmcgui.ListItem())
@@ -291,12 +294,12 @@ class Plugin:
 
     def playPaused(self, name: str, chid: str):
         self.log('[%s] playPaused'%(chid))
-        with PROPERTIES.suspendActivity():
+        with BUILTIN.busy_dialog(), PROPERTIES.suspendActivity():
             listitems = self.getPausedItems(name, chid)
             if len(listitems) > 0: 
                 playlist = self._cuePlaylist(chid, listitems,shuffle=False)
                 if BUILTIN.getInfoBool('Playing','Player'): BUILTIN.executebuiltin('PlayerControl(Stop)')
-                BUILTIN.executewindow(OSD_TIMER,['ReplaceWindow(fullscreenvideo)'])
+                # BUILTIN.executewindow(OSD_TIMER,['ReplaceWindow(fullscreenvideo)',False,False,BUILTIN.isPlaying])
                 # BUILTIN.executebuiltin("Dialog.Close(all)")
                 PLAYER().play(playlist,windowed=True)
             self._resolveURL(False, xbmcgui.ListItem())

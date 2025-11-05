@@ -182,22 +182,16 @@ def _runFillers():
     return PROPERTIES.setPropTimer('chkFillers')
 
 
-def _runLibrary():
-    PROPERTIES.setPropertyBool('ForceLibrary',True)
-    PROPERTIES.setEpochTimer('chkLibrary')
-    DIALOG.notificationDialog('Utilities: %s %s'%(LANGUAGE(30199),LANGUAGE(30200)))
-
-
 def _runAutotune():
     log('Utilities: _runAutotune')
     SETTINGS.setAutotuned(False)
-    PROPERTIES.setEpochTimer('chkChannels')
+    PROPERTIES.setEpochTimer('chkChannels')#trigger channel building
+    PROPERTIES.setPropTimer('chkChannels')#trigger channel building
      
      
 def _runUpdate(full=False):
     log('Utilities: _runUpdate, full = %s'%(full))
-    if full: PROPERTIES.setEpochTimer('chkLibrary')
-    PROPERTIES.setEpochTimer('chkChannels')
+    PROPERTIES.setPropTimer('chkChannels')
            
 
 def buildMenu(select=None):
@@ -234,7 +228,7 @@ def buildMenu(select=None):
 def openChannelManager(chnum: int=1):
     log('Utilities: openChannelManager, chnum = %s'%(chnum))
     try:
-        with BUILTIN.busy_dialog():
+        with BUILTIN.busy_dialog(lock=True):
             from manager import Manager
             chmanager = Manager(MANAGER_XML, ADDON_PATH, "default", channel=chnum)
             del chmanager
@@ -245,8 +239,8 @@ def openChannelManager(chnum: int=1):
     
 def openPositionUtil(idx):
     log('Utilities: openPositionUtil, idx = %s'%(idx))
-    if not PROPERTIES.isRunning('OVERLAY_UTILITY'):
-        with PROPERTIES.chkRunning('OVERLAY_UTILITY'):
+    if not PROPERTIES.isRunning('Utilities.openPositionUtil'):
+        with PROPERTIES.chkRunning('Utilities.openPositionUtil'):
             with BUILTIN.busy_dialog():
                 from overlaytool import OverlayTool
             overlaytool = OverlayTool(OVERLAYTOOL_XML, ADDON_PATH, "default", Focus_IDX=idx)

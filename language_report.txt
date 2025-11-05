@@ -1,7 +1,8 @@
 Language IDS w\empty strings: {
     "32033": "",
     "32099": "",
-    "33130": ""
+    "33130": "",
+    "33220": ""
 }
 
 
@@ -177,6 +178,8 @@ Language IDS not found in py files, possibly only in xml: {
     "30183": "Interleave TV & Movies after Ordering",
     "30189": "Last Position",
     "30198": "Enable Threaded Queue Executor",
+    "30199": "Request",
+    "30200": "Received",
     "30201": "JSONRPC Wait",
     "30203": "Name:",
     "30204": "Enable CPU Benchmark",
@@ -187,6 +190,12 @@ Language IDS not found in py files, possibly only in xml: {
     "30212": "Notifications During Playback",
     "30213": "Client Only",
     "30214": "Detect Playlist Changes",
+    "30215": "Integrations",
+    "30217": "Open-router API-Key",
+    "30218": "Use generative artwork",
+    "30219": "Allow A.I. Integration",
+    "30220": "A.I. artwork prompt",
+    "30221": "remove.bg API-Key",
     "32004": "TV Networks",
     "32005": "TV Shows",
     "32006": "TV Genres",
@@ -327,6 +336,8 @@ Language IDS not found in py files, possibly only in xml: {
     "33212": "Notifications During Playback",
     "33213": "This Instance of PseudoTV only runs as a client, with no channels configured locally.",
     "33214": "Force Channel rebuilding when Playlist changes are detected",
+    "33219": "[COLOR=red][B]Warning!! [/B][/COLOR]PseudoTV is not responsible for excessive API usage or any charges incurred from A.I. services.\\nUsers are advised to configure their platforms carefully to manage usage.",
+    "33220": "",
     "33308": "Install Log Uploader.",
     "33309": "Submit debugging log for review to http://paste.kodi.tv."
 }

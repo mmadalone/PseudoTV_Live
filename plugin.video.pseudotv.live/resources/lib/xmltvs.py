@@ -77,7 +77,7 @@ class XMLTVS:
             except Exception as e:
                 self.log("_save, failed!", xbmc.LOGERROR)
                 DIALOG.notificationDialog(LANGUAGE(32000))
-            self.buildGenres()
+        self.buildGenres()
         return self._reload()
         
         
@@ -439,8 +439,7 @@ class XMLTVS:
         
         
     def buildGenres(self):
-        self.log('buildGenres') #todo custom user color selector.
-        def parseGenres(plines):
+        def __parseGenres(plines):
             epggenres = {}
             for line in plines:
                 try:    
@@ -455,47 +454,48 @@ class XMLTVS:
                             epgdata['name'] = name
                             epggenres[name.lower()] = epgdata
                 except: continue
+            self.log('buildGenres, __parseGenres: epggenres = %s'%(epggenres.keys())) #todo custom user color selector.
             return epggenres
 
-        def matchGenres(epggenres,  programmes=[]):
+        def __matchGenres(genres,  programmes=[]):
             for program in programmes:
                 categories = [cat[0] for cat in program.get('category',[])]
                 catcombo   = '/'.join(categories)
                 for category in categories:
-                    match = epggenres.get(category.lower())
-                    if match and not epggenres.get(catcombo.lower()):
-                        epggenres[catcombo.lower()] = match
+                    match = genres.get(category.lower())
+                    if match and not genres.get(catcombo.lower()):
+                        genres[catcombo.lower()] = match
                         break
-            return dict(sorted(sorted(list(epggenres.items()), key=lambda v:v[1]['name']), key=lambda v:v[1]['genreId']))
+            return dict(sorted(sorted(list(genres.items()), key=lambda v:v[1]['name']), key=lambda v:v[1]['genreId']))
             
-        def getGenres(file):
-            fle = FileAccess.open(file, "r")
-            dom = parse(fle)
-            fle.close()
-            return parseGenres(dom.getElementsByTagName('genre'))
-        
-        if FileAccess.exists(GENREFLE_DEFAULT): 
-            try:
-                doc  = Document()
-                root = doc.createElement('genres')
-                doc.appendChild(root)
-                name = doc.createElement('name')
-                name.appendChild(doc.createTextNode('%s'%(ADDON_NAME)))
-                root.appendChild(name)
+        def __getGenres(file=GENREFLE_DEFAULT):
+            if FileAccess.exists(file): 
+                fle = FileAccess.open(file, "r")
+                dom = parse(fle)
+                fle.close()
+                return __parseGenres(dom.getElementsByTagName('genre'))
+            return {}
+            
+        try:
+            doc  = Document()
+            root = doc.createElement('genres')
+            doc.appendChild(root)
+            name = doc.createElement('name')
+            name.appendChild(doc.createTextNode('%s'%(ADDON_NAME)))
+            root.appendChild(name)
+            
+            epggenres = __getGenres(GENREFLEPATH)
+            epggenres.update(self.pool.executors(__matchGenres,**{'epggenres':__getGenres(),'programmes':self.XMLTVDATA.get('programmes',[])}))
+            for key in list(set(epggenres)):
+                gen = doc.createElement('genre')
+                gen.setAttribute('genreId',epggenres[key].get('genreId'))
+                gen.appendChild(doc.createTextNode(key.title()))
+                root.appendChild(gen)
                 
-                if FileAccess.exists(GENREFLEPATH): epggenres = getGenres(GENREFLEPATH)
-                else:                               epggenres = {}
-                epggenres.update(self.pool.executors(matchGenres,**{'epggenres':getGenres(GENREFLE_DEFAULT),'programmes':self.XMLTVDATA.get('programmes',[])}))
-                for key in list(set(epggenres)):
-                    gen = doc.createElement('genre')
-                    gen.setAttribute('genreId',epggenres[key].get('genreId'))
-                    gen.appendChild(doc.createTextNode(key.title()))
-                    root.appendChild(gen)
-                    
-                try:
-                    with FileLock():
-                        xmlData = FileAccess.open(GENREFLEPATH, "w")
-                        xmlData.write(doc.toprettyxml(indent='  ',encoding=DEFAULT_ENCODING))
-                        xmlData.close()
-                except Exception as e: self.log("buildGenres failed! %s"%(e), xbmc.LOGERROR)
+            try:
+                with FileLock():
+                    xmlData = FileAccess.open(GENREFLEPATH, "w")
+                    xmlData.write(doc.toprettyxml(indent='  ',encoding=DEFAULT_ENCODING))
+                    xmlData.close()
             except Exception as e: self.log("buildGenres failed! %s"%(e), xbmc.LOGERROR)
+        except Exception as e: self.log("buildGenres failed! %s"%(e), xbmc.LOGERROR)

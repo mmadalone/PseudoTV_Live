@@ -33,6 +33,8 @@ class Service:
     player  = PLAYER()
     monitor = MONITOR()
     jsonRPC = JSONRPC()
+    def _shutdown(self, wait=0.0001) -> bool:
+        return PROPERTIES.isPendingShutdown()
     def _interrupt(self) -> bool:
         return PROPERTIES.isPendingInterrupt()
     def _suspend(self) -> bool:
@@ -166,8 +168,8 @@ class Builder:
             self.log('__setProgrammes')
             return self.xmltv._save() & self.m3u._save()
         
-        if not PROPERTIES.isRunning('builder.build'):
-            with PROPERTIES.legacy(), PROPERTIES.chkRunning('builder.build'):
+        if not PROPERTIES.isRunning('Builder.build'):
+            with PROPERTIES.legacy(), PROPERTIES.chkRunning('Builder.build'):
                 channels = self.getVerifiedChannels(channels)
                 if len(channels) > 0:
                     complete = True
@@ -279,7 +281,7 @@ class Builder:
         if len(tmpList) > 0:
             iters = cycle(fileList)
             while not self.service.monitor.abortRequested() and tmpList[-1].get('stop') <= (now + MIN_EPG_DURATION):
-                if   self.service.monitor.waitForAbort(0.0001): break
+                if   self.service._shutdown(0.0001): break
                 elif tmpList[-1].get('stop') >= (now + MIN_EPG_DURATION): 
                     self.log("[%s] addScheduling, OUT fileList = %s, stop = %s"%(citem['id'],len(tmpList),tmpList[-1].get('stop')))
                     break
@@ -502,7 +504,7 @@ class Builder:
                         item['duration']     = dur
                         item['media']        = media
                         item['originalpath'] = path #use for path sorting/playback verification 
-                        item['friendly']     = SETTINGS.getFriendlyName()
+                        item['friendly']     = PROPERTIES.getFriendlyName()
                         item['remote']       = PROPERTIES.getRemoteHost()
                         
                         if item.get("year",0) == 1601: item['year'] = 0 #detect kodi bug that sets a fallback year to 1601 https://github.com/xbmc/xbmc/issues/15554

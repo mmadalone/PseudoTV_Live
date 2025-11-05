@@ -101,7 +101,7 @@ class Tasks():
         self.log('chkPVRBackend')
         if SETTINGS.hasAddon(PVR_CLIENT_ID,True,True,True,True):
             if not SETTINGS.hasPVRInstance():
-                SETTINGS.setPVRRemote(PROPERTIES.getRemoteHost(), SETTINGS.getFriendlyName())
+                SETTINGS.setPVRRemote(PROPERTIES.getRemoteHost(), PROPERTIES.getFriendlyName())
 
 
     def chkQueTimer(self):
@@ -111,11 +111,12 @@ class Tasks():
         self._chkEpochTimer('chkDiscovery'    , self.chkDiscovery     , 300)
         self._chkEpochTimer('chkChannels'     , self.chkChannels      , 3600)
         
-        self._chkEpochTimer('chkFiles'        , self.chkFiles         , 300)
+        self._chkEpochTimer('chkFiles'        , self.chkFiles         , 900)
         self._chkEpochTimer('chkURLQUE'       , self.chkURLQUE        , 300)
         self._chkEpochTimer('chkJSONQUE'      , self.chkJSONQUE       , 300)
         self._chkEpochTimer('chkLOGOQUE'      , self.chkLOGOQUE       , 600)
 
+        self._chkPropTimer('chkChannels'      , self.chkChannels      , 1)
         self._chkPropTimer('chkPVRRefresh'    , self.chkPVRRefresh    , 1)
         
         
@@ -124,7 +125,7 @@ class Tasks():
         epoch = int(time.time())
         if epoch >= nextrun:
             self.log('_chkEpochTimer, key = %s, last run %s' % (key, epoch - nextrun))
-            PROPERTIES.setPropertyInt(key, (epoch + runevery))
+            PROPERTIES.setEpochTimer(key, (epoch + runevery))
             self.service._que(func, priority, *args, **kwargs)
 
 
@@ -209,8 +210,8 @@ class Tasks():
 
 
     def chkLOGOQUE(self):
-        if not PROPERTIES.isRunning('chkLOGOQUE'):
-            with PROPERTIES.chkRunning('chkLOGOQUE'):
+        if not PROPERTIES.isRunning('Tasks.chkLOGOQUE'):
+            with PROPERTIES.chkRunning('Tasks.chkLOGOQUE'):
                 updated   = False
                 resources = Library(service=self.service).resources
                 queuePool = (SETTINGS.getCacheSetting('queueLOGO', json_data=True) or {})
@@ -235,8 +236,8 @@ class Tasks():
 
 
     def chkJSONQUE(self):
-        if not PROPERTIES.isRunning('chkJSONQUE'):
-            with PROPERTIES.chkRunning('chkJSONQUE'):
+        if not PROPERTIES.isRunning('Tasks.chkJSONQUE'):
+            with PROPERTIES.chkRunning('Tasks.chkJSONQUE'):
                 queuePool = (SETTINGS.getCacheSetting('queueJSON', json_data=True) or {})
                 params = queuePool.get('params',[])
                 for i in list(range(QUEUE_CHUNK)):
@@ -253,8 +254,8 @@ class Tasks():
 
 
     def chkURLQUE(self):
-        if not PROPERTIES.isRunning('chkURLQUE'):
-            with PROPERTIES.chkRunning('chkURLQUE'):
+        if not PROPERTIES.isRunning('Tasks.chkURLQUE'):
+            with PROPERTIES.chkRunning('Tasks.chkURLQUE'):
                 queuePool = (SETTINGS.getCacheSetting('queueURL', json_data=True) or {})
                 params = queuePool.get('params',[])
                 for i in list(range(QUEUE_CHUNK)):
@@ -276,8 +277,8 @@ class Tasks():
             self.log('chkPVRRefresh, __toggle = %s'%(state))
             self.service.jsonRPC.sendJSON({"method":"Addons.SetAddonEnabled","params":{"addonid":PVR_CLIENT_ID,"enabled":state}})
             
-        if not PROPERTIES.isRunning('chkPVRRefresh'):
-            with PROPERTIES.chkRunning('chkPVRRefresh'):
+        if not PROPERTIES.isRunning('Tasks.chkPVRRefresh'):
+            with PROPERTIES.chkRunning('Tasks.chkPVRRefresh'):
                 self.service._que(self.http._restart,1)
                 if brute:
                     if not BUILTIN.isPlaying() and BUILTIN.getInfoBool('AddonIsEnabled(%s)'%(PVR_CLIENT_ID),'System'):
@@ -294,7 +295,7 @@ class Tasks():
             for setting, value in list(settings.items()):
                 actions = {'User_Folder'  :{'func':self.setUserPath            ,'kwargs':{'old':value,'new':nSettings.get(setting)}},
                            'Debug_Enable' :{'func':self.jsonRPC.toggleShowLog  ,'kwargs':{'state':SETTINGS.getSettingBool('Debug_Enable')}},
-                           'TCP_PORT'     :{'func':SETTINGS.setPVRRemote       ,'kwargs':{'host':PROPERTIES.getRemoteHost(),'instance':SETTINGS.getFriendlyName()}},}
+                           'TCP_PORT'     :{'func':SETTINGS.setPVRRemote       ,'kwargs':{'host':PROPERTIES.getRemoteHost(),'instance':PROPERTIES.getFriendlyName()}},}
                            
                 if nSettings.get(setting) != value and actions.get(setting):
                     action = actions.get(setting)

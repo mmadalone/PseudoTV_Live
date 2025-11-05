@@ -48,6 +48,7 @@ def _run(sysARG, fitem: dict={}, nitem: dict={}):
     with BUILTIN.busy_dialog(), PROPERTIES.suspendActivity():
         params = dict(urllib.parse.parse_qsl(sysARG[2][1:].replace('.pvr','')))
         mode = (params.get("mode") or 'guide')
+        params['mode']       = mode
         params['radio']      = mode == "radio"
         params['fitem']      = fitem
         params['nitem']      = nitem
@@ -58,7 +59,7 @@ def _run(sysARG, fitem: dict={}, nitem: dict={}):
         params['isPlaylist'] = bool(SETTINGS.getSettingInt('Playback_Method'))
         log("Default: run, params = %s"%(params))
         
-        if   PROPERTIES.isRunning('chkPVRRefresh'): DIALOG.notificationDialog(LANGUAGE(32166))
+        if   PROPERTIES.isRunning('Tasks.chkPVRRefresh'): DIALOG.notificationDialog(LANGUAGE(32166))
         elif mode == 'live':
             if params.get('start') == '{utc}' or str(BUILTIN.getInfoLabel('ChannelNumber')) == '0':
                 PROPERTIES.setPropTimer('chkPVRRefresh')
@@ -73,8 +74,8 @@ def _run(sysARG, fitem: dict={}, nitem: dict={}):
         elif mode == 'resume':                  threadit(Plugin(sysARG, sysInfo=params).playPaused)(params["name"],params["chid"])
         elif mode == 'broadcast':               threadit(Plugin(sysARG, sysInfo=params).playBroadcast)(params["name"],params["chid"],params["vid"])
         elif mode == 'radio':                   threadit(Plugin(sysARG, sysInfo=params).playRadio)(params["name"],params["chid"],params["vid"])
-        elif mode == 'guide'                and SETTINGS.hasAddon(PVR_CLIENT_ID,install=True,enable=True): SETTINGS.openGuide()
-        elif mode == 'settings'             and SETTINGS.hasAddon(PVR_CLIENT_ID,install=True,enable=True): SETTINGS.openSettings()
+        elif mode == 'guide'                and SETTINGS.hasAddon(PVR_CLIENT_ID,install=True,enable=True): return SETTINGS.openGuide()
+        elif mode == 'settings'             and SETTINGS.hasAddon(PVR_CLIENT_ID,install=True,enable=True): return SETTINGS.openSettings()
         else:                                   DIALOG.notificationDialog(LANGUAGE(32000))
         MONITOR().waitForAbort(float(SETTINGS.getSettingInt('RPC_Delay')/1000)) #delay to avoid thread crashes when fast channel changing ie PVR channel surfing.
         

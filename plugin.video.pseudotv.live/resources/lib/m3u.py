@@ -322,7 +322,7 @@ class M3U:
         if seek <= 0: group = LANGUAGE(30119)
         else:         group = LANGUAGE(30152)
         ritem = self.getMitem()
-        ritem['provider']      = '%s (%s)'%(ADDON_NAME,SETTINGS.getFriendlyName())
+        ritem['provider']      = '%s (%s)'%(ADDON_NAME,PROPERTIES.getFriendlyName())
         ritem['provider-type'] = 'addon'
         ritem['provider-logo'] = HOST_LOGO
         ritem['label']         = (fitem.get('showlabel') or '%s%s'%(fitem.get('label',''),' - %s'%(fitem.get('episodelabel','')) if fitem.get('episodelabel','') else ''))
@@ -346,7 +346,7 @@ class M3U:
         mitem['label']         = citem['name'] #todo channel manager opt to change channel 'label' leaving 'name' static for channelid purposes
         mitem['logo']          = citem['logo']
         mitem['realtime']      = False
-        mitem['provider']      = '%s (%s)'%(ADDON_NAME,SETTINGS.getFriendlyName())
+        mitem['provider']      = '%s (%s)'%(ADDON_NAME,PROPERTIES.getFriendlyName())
         mitem['provider-type'] = 'addon'
         mitem['provider-logo'] = HOST_LOGO
         

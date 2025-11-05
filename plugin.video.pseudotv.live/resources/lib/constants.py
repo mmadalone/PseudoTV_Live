@@ -207,6 +207,7 @@ SERVER_LOC          = os.path.join(SETTINGS_LOC,SERVERFLE)
 BACKUP_LOC          = os.path.join(SETTINGS_LOC,'backup')
 CACHE_LOC           = os.path.join(SETTINGS_LOC,'cache')
 TEMP_LOC            = os.path.join(SETTINGS_LOC,'temp')
+TEMP_IMAGE_LOC      = os.path.join(TEMP_LOC,'logos')
 
 #file paths
 SETTINGS_FLE        = os.path.join(SETTINGS_LOC,'settings.xml')

@@ -18,9 +18,10 @@
 
 # -*- coding: utf-8 -*-
 
-from globals    import *
-from functools  import reduce
-from seasonal   import Seasonal 
+from globals      import *
+from functools    import reduce
+from seasonal     import Seasonal
+from intergration import OpenRouter
 
 LOCAL_FOLDERS   = [LOGO_LOC, IMAGE_LOC]
 MUSIC_RESOURCE  = ["resource.images.musicgenreicons.text"]
@@ -32,6 +33,8 @@ class Service:
     player  = PLAYER()
     monitor = MONITOR()
     jsonRPC = JSONRPC()
+    def _shutdown(self, wait=0.0001) -> bool:
+        return PROPERTIES.isPendingShutdown()
     def _interrupt(self) -> bool:
         return PROPERTIES.isPendingInterrupt()
     def _suspend(self) -> bool:
@@ -51,6 +54,7 @@ class Resources:
         self.cache      = service.jsonRPC.cache
         self.baseURL    = service.jsonRPC.buildWebBase()
         self.remoteHost = PROPERTIES.getRemoteHost()
+        self.openRouter = OpenRouter(cache=self.cache)
         
         
     def log(self, msg, level=xbmc.LOGDEBUG):
@@ -58,8 +62,9 @@ class Resources:
 
 
     def getLogo(self, citem: dict, fallback=LOGO, auto=False) -> str:
-        if citem.get('name') == LANGUAGE(32002): logo = Seasonal().getHoliday().get('logo')   #seasonal
-        else:                                    logo = self.getLocalLogo(citem.get('name'))  #local
+        seasonal = citem.get('name') == LANGUAGE(32002)
+        logo = self.getLocalLogo(citem.get('name'))                                           #local
+        if not logo and seasonal:                logo = Seasonal().getHoliday().get('logo')   #seasonal
         if not logo:                             logo = self.getCachedLogo(citem)             #cache
         if not logo and auto:                    logo = self.getLogoResources(citem)          #resources
         if not logo and auto:                    logo = self.getTVShowLogo(citem.get('name')) #tvshow
@@ -82,8 +87,8 @@ class Resources:
         params = self.queuePool.setdefault('params',[])
         params.append(param)
         self.queuePool['params'] = setDictLST(params)
-        self.log("queueLOGO, saving = %s, param = %s"%(len(self.queuePool['params']),param))
-        timerit(SETTINGS.setCacheSetting)(5.0,['queueLOGO', self.queuePool, ADDON_VERSION, True])
+        self.log("queueLOGO, queuing = %s, param = %s"%(len(self.queuePool['params']),param))
+        timerit(SETTINGS.setCacheSetting)(FIFTEEN,['queueLOGO', self.queuePool, ADDON_VERSION, True])
             
             
     def getCachedLogo(self, citem, select=False):
@@ -153,14 +158,24 @@ class Resources:
 
     def getTVShowLogo(self, chname: str, select: bool=False) -> dict and None:
         self.log('getTVShowLogo, chname = %s, select = %s'%(chname,select))
+        logo      = ""
         logos     = []
         items     = self.jsonRPC.getTVshows()
+        keys      = ['clearlogo','logo','logos','clearart','icon']
         cacheName = 'getTVShowLogo.%s.%s'%(getMD5(chname),select)
         cacheResponse = self.cache.get(cacheName)
         if not cacheResponse:
             for item in items:
+                if chname.lower() == item.get('title','').lower():
+                    for key in keys:
+                        logo = item.get('art',{}).get(key,'').replace('image://DefaultFolder.png/','').rstrip('/')
+                        if logo:
+                            self.log('getTVShowLogo, found %s'%(logo))
+                            if select: logos.append(logo)
+                            else: return self.cache.set(cacheName, logo, expiration=datetime.timedelta(days=MAX_GUIDEDAYS))
+                            
+            for item in items:
                 if self.matchName(chname, item.get('title',''), auto=select):
-                    keys = ['clearlogo','logo','logos','clearart','icon']
                     for key in keys:
                         logo = item.get('art',{}).get(key,'').replace('image://DefaultFolder.png/','').rstrip('/')
                         if logo:
@@ -195,27 +210,29 @@ class Resources:
         return image
             
             
-    def isMono(self, file: str) -> bool:
-        if file.startswith('resource://') and (bool(set([match in file.lower() for match in ['transparent','white','mono']]))): return True
+    def isMono(self, file: str, mono: bool=False) -> bool:
+        if   file.startswith('resource://') and (bool(set([match in file.lower() for match in ['transparent','white','mono']]))): return True
+        elif file.startswith('http'): pass #todo dl to io then check
         elif SETTINGS.hasAddon('script.module.pil'):
             try:
                 from PIL import Image, ImageStat
                 file = unquoteString(file.replace('resource://','special://home/addons/').replace('image://','')).replace('\\','/')
-                mono = reduce(lambda x, y: x and y < 0.005, ImageStat.Stat(Image.open(FileAccess.open(file.encode('utf-8').strip(),'r'),mode='r')).var, True)
+                fle  = FileAccess.open(file.encode('utf-8').strip(), "rb")
+                img  = Image.open(io.BytesIO(fle.readBytes()))
+                fle.close()
+                mono = reduce(lambda x, y: x and y < 0.005, ImageStat.Stat(img).var, True)
                 self.log('isMono, mono = %s, file = %s'%(mono,file))  
-                return mono
             except Exception as e: self.log("isMono, failed! %s\nfile = %s"%(e,file), xbmc.LOGWARNING)
-        return False
+        return mono
         
         
-    def generate_placeholder(self, text, background_image_path=FileAccess.translatePath(os.path.join(MEDIA_LOC,'blank.png')), output_path=TEMP_LOC, font_path=FileAccess.translatePath(os.path.join('special://skin','fonts','NotoSans-Regular.ttf')), font_size=30, text_color=(255, 255, 255)):
+    def generate_placeholder(self, text, background_image_path=os.path.join(MEDIA_LOC,'blank.png'), font_path=FileAccess.translatePath(os.path.join('special://skin','fonts','NotoSans-Regular.ttf')), font_size=30, text_color=(255, 255, 255)):
         """
         Generates a placeholder image with text on a background image.
 
         Args:
             text: The text to display on the placeholder.
             background_image_path: Path to the background image.
-            output_path: Path to save the generated placeholder image.
             font_path: Path to the font file (optional).
             font_size: Font size for the text (optional).
             text_color: Color of the text (optional).
@@ -223,24 +240,20 @@ class Resources:
 
         if SETTINGS.hasAddon('script.module.pil'):
             from PIL import Image, ImageDraw, ImageFont
-            # Open the background image
-            background_image = Image.open(background_image_path)
-            # Create a drawing object
-            draw = ImageDraw.Draw(background_image)
-            # Choose a font
-            font = ImageFont.truetype(font_path, font_size)
-            # Calculate text size
-            text_width, text_height = draw.textsize(text, font)
-            # Calculate text position for centering 
-            x = (background_image.width - text_width) // 2
-            y = (background_image.height - text_height) // 2
-            # Draw the text on the image
-            draw.text((x, y), text, font=font, fill=text_color)
-            # Save the image
-            file_name = os.path.join(output_path,'%s.png'%(text))
-            fle = FileAccess.open(file_name,'wb')
-            background_image.save(fle,'png')
+            fle = FileAccess.open(background_image_path, "rb")
+            img = Image.open(io.BytesIO(fle.readBytes()))
             fle.close()
+            draw = ImageDraw.Draw(img)
+            font = ImageFont.truetype(font_path, font_size)
+            text_width, text_height = draw.textsize(text, font)
+            draw.text(((img.width - text_width) // 2, (img.height - text_height) // 2), text, font=font, fill=text_color)
+            img.save(os.path.join(xbmcvfs.translatePath(TEMP_IMAGE_LOC),'%s.png'%(text)), "PNG")
 
         # Example usage
         # generate_placeholder("Product Image", "background.jpg", "placeholder.jpg")
+        
+        
+    # def getAI(self, chname, select=False, model=SETTINGS.getSetting('OPENROUTER_IMAGE_MODEL'))
+        # if select: count = 5
+        # else:      count = 1
+        # # logos = self.openRouter.getImage(chname, count, model)

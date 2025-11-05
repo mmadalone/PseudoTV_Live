@@ -27,13 +27,19 @@ WH, WIN = BUILTIN.getResolution()
 class Busy(xbmcgui.WindowXMLDialog):
     def __init__(self, *args, **kwargs):
         xbmcgui.WindowXMLDialog.__init__(self, *args, **kwargs)
-        self.lock = kwargs.get('lock',False)
+        self.isLocked = kwargs.get('isLocked',False)
+        
+        
+    def onInit(self):
+        log('Busy: onInit, isLocked = %s'%(self.isLocked))
+        print({True:"C0FF0000",False:"FF01416b"}[self.isLocked])
+        self.getControl(41).setColorDiffuse({True:"0xC0FF0000",False:"0xFF01416b"}[self.isLocked])
 
 
     def onAction(self, act):
         actionId = act.getId()
-        log('Busy: onAction, actionId = %s, lock = %s'%(actionId,self.lock))
-        if not self.lock and actionId in ACTION_PREVIOUS_MENU: self.close()
+        log('Busy: onAction, actionId = %s, isLocked = %s'%(actionId,self.isLocked))
+        if not self.isLocked and actionId in ACTION_PREVIOUS_MENU: self.close()
         
 
 class Background(xbmcgui.WindowXMLDialog):
@@ -121,10 +127,10 @@ class Restart(xbmcgui.WindowXMLDialog):
             xpos = control.getX()
             
             while not self.monitor.abortRequested():
-                if (self.monitor.waitForAbort(0.5) or self._isVisible(control) or self.closing): break
+                if (self.service._shutdown(0.5) or self._isVisible(control) or self.closing): break
                     
             while not self.monitor.abortRequested():
-                if (self.monitor.waitForAbort(0.5) or wait < 0 or self.closing or not self.player.isPlayingPseudoTV()): break
+                if (self.service._shutdown(0.5) or wait < 0 or self.closing or not self.player.isPlayingPseudoTV()): break
                 else:
                     prog = int((abs(wait-tot)*100)//tot)
                     if prog > 0: control.setAnimations([('Conditional', 'effect=zoom start=%s,100 end=%s,100 time=1000 center=%s,100 condition=True'%((prog-20),(prog),xpos))])
@@ -323,7 +329,7 @@ class OnNext(xbmcgui.WindowXMLDialog):
                 nowTitle  = (self.fitem.get('label')     or BUILTIN.getInfoLabel('Title','VideoPlayer'))
                 nextTitle = (self.nitem.get('showlabel') or BUILTIN.getInfoLabel('NextTitle','VideoPlayer') or chname)
 
-                try: nextTime = epochTime(self.nitem['start']).strftime('%I:%M%p')
+                try: nextTime = epochTime(self.nitem['start'],tz=False).strftime('%I:%M%p')
                 except Exception as e: 
                     self.log("__init__, nextTime failed! %s\nstart = %s"%(e,self.nitem.get('start')), xbmc.LOGERROR)
                     nextTime = BUILTIN.getInfoLabel('NextStartTime','VideoPlayer')
@@ -355,7 +361,7 @@ class OnNext(xbmcgui.WindowXMLDialog):
                     show = ONNEXT_TIMER*2
                     while not self.monitor.abortRequested() and not self.closing:
                         self.log('onInit, showing (%s)'%(show))
-                        if self.monitor.waitForAbort(0.5) or not self.player.isPlayingPseudoTV() or show < 1: break
+                        if self.service._shutdown(0.5) or not self.player.isPlayingPseudoTV() or show < 1: break
                         else: show -= 1
                         
                     self.onNext_Text.setVisible(False)
@@ -367,7 +373,7 @@ class OnNext(xbmcgui.WindowXMLDialog):
             wait = self.intTime*2
             while not self.monitor.abortRequested() and not self.closing:
                 self.log('onInit, waiting (%s)'%(wait))
-                if self.monitor.waitForAbort(0.5) or not self.player.isPlayingPseudoTV() or wait < 1: break
+                if self.service._shutdown(0.5) or not self.player.isPlayingPseudoTV() or wait < 1: break
                 else: wait -= 1
                         
         except Exception as e: self.log("onInit, failed! %s"%(e), xbmc.LOGERROR)

@@ -881,7 +881,74 @@
                 </setting>
             </group>
         </category>
-        <category id="Miscellaneous" label="30000" help="33000">
+		<category id="integration" label="30215" help="">
+            <group id="1" label="30216">
+                <setting id="Allow_Artificial_Intelligence" type="boolean" label="30219" help="33219">
+                    <level>2</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="Open_Router_APIKEY" type="string" label="30217" help="" parent="Allow_Artificial_Intelligence">
+                    <level>2</level>
+                    <default/>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <dependencies>
+                        <dependency type="enable">
+							<condition operator="is" setting="Allow_Artificial_Intelligence">true</condition>
+                        </dependency>
+                    </dependencies>
+                    <control type="edit" format="string">
+                        <heading/>
+						<hidden>true</hidden>
+                    </control>
+                </setting>
+                <setting id="Enable_Generative_Artwork" type="boolean" label="30218" help="" parent="Allow_Artificial_Intelligence">
+                    <level>2</level>
+                    <default>false</default>
+                    <dependencies>
+                        <dependency type="enable">
+							<condition operator="is" setting="Allow_Artificial_Intelligence">true</condition>
+                        </dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="Remove_BG_APIKEY" type="string" label="30221" help="33221" parent="Enable_Generative_Artwork">
+                    <level>2</level>
+                    <default/>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <dependencies>
+                        <dependency type="enable">
+							<condition operator="is" setting="Enable_Generative_Artwork">true</condition>
+                        </dependency>
+                    </dependencies>
+                    <control type="edit" format="string">
+                        <heading/>
+						<hidden>true</hidden>
+                    </control>
+                </setting>
+                <setting id="Gnerative_Artwork_Prompt" type="string" label="30220" help="33220" parent="Enable_Generative_Artwork">
+                    <level>3</level>
+                    <default>Title "{channel_name}" in the foreground and artwork that best reflects the title.</default>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <dependencies>
+                        <dependency type="enable">
+							<condition operator="is" setting="Enable_Generative_Artwork">true</condition>
+                        </dependency>
+                    </dependencies>
+                    <control type="edit" format="string">
+                        <heading/>
+						<hidden>true</hidden>
+                    </control>
+                </setting>
+            </group>
+        </category>
+        <category id="miscellaneous" label="30000" help="33000">
             <group id="1" label="30106">
                 <setting id="Utility_MENU" type="action" label="32126" help="">
                     <level>3</level>
