@@ -885,6 +885,34 @@ msgctxt "#30214"
 msgid "Detect Playlist Changes"
 msgstr ""
 
+msgctxt "#30215"
+msgid "Integrations"
+msgstr ""
+
+msgctxt "#30216"
+msgid "Artificial Intelligence"
+msgstr ""
+
+msgctxt "#30217"
+msgid "Open-router API-Key"
+msgstr ""
+
+msgctxt "#30218"
+msgid "Use generative artwork"
+msgstr ""
+
+msgctxt "#30219"
+msgid "Allow A.I. Integration"
+msgstr ""
+
+msgctxt "#30220"
+msgid "A.I. artwork prompt"
+msgstr ""
+
+msgctxt "#30221"
+msgid "remove.bg API-Key"
+msgstr ""
+
 # Skin - strings 31000 thru 31999 reserved for skins
 
 
@@ -1918,6 +1946,10 @@ msgctxt "#32259"
 msgid "Changed"
 msgstr ""
 
+msgctxt "#32260"
+msgid "Controls Temporarily Locked!"
+msgstr ""
+
 
 # Help - strings 33000 thru 33999 reserved for common strings used in add-ons
 
@@ -2348,6 +2380,14 @@ msgstr ""
 
 msgctxt "#33215"
 msgid "Interleave individual paths in sets of x *see wiki for details [0 Disabled]"
+msgstr ""
+
+msgctxt "#33219"
+msgid "[COLOR=red][B]Warning!! [/B][/COLOR]PseudoTV is not responsible for excessive API usage or any charges incurred from A.I. services.\nUsers are advised to configure their platforms carefully to manage usage."
+msgstr ""
+
+msgctxt "#33220"
+msgid ""
 msgstr ""
 
 msgctxt "#33228"

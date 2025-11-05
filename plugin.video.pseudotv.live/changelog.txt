@@ -1,5 +1,10 @@
 ### NOTICE: The wizard branch is in alpha; things will break! ####
+v.0.6.7-wizard
+- Introduced groundwork for Artificial Intelligence Integration (Currently Unavailable). 
+
 v.0.6.6-wizard
+- Improved Channel Manager Controls
+
 
 v.0.6.5-wizard
 - Improved HTTP server, strengthen gzip compression support.

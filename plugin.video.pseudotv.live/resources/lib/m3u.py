@@ -71,7 +71,7 @@ class M3U:
         return log('%s: %s'%(self.__class__.__name__,msg),level)
 
 
-    def _load(self, file=M3UFLEPATH):
+    def _load(self, file=M3UFLEPATH): # https://github.com/kodi-pvr/pvr.iptvsimple#supported-m3u-and-xmltv-elements
         self.log('_load, file = %s'%file)
         if file.startswith('http'):
             url  = file
@@ -86,7 +86,6 @@ class M3U:
             chCount = 0
             data    = {}
             filter  = []
-            
             for idx, line in enumerate(lines):
                 line = line.rstrip()
                 if line.startswith('#EXTM3U'):
@@ -164,6 +163,9 @@ class M3U:
                             elif nline.startswith('#EXTVLCOPT'):
                                 copt = re.compile('^#EXTVLCOPT:(.*)$', re.IGNORECASE).search(nline)
                                 if copt is not None:  mitem.setdefault('extvlcopt',[]).append(copt.group(1))
+                            elif nline.startswith('#WEBPROP'):
+                                web = re.compile('^#WEBPROP:(.*)$', re.IGNORECASE).search(nline)
+                                if web is not None:  mitem.setdefault('webprops',[]).append(web.group(1))
                             elif nline.startswith('#EXT-X-PLAYLIST-TYPE'):
                                 xplay = re.compile('^#EXT-X-PLAYLIST-TYPE:(.*)$', re.IGNORECASE).search(nline)
                                 if xplay is not None: mitem['x-playlist-type'] = xplay.group(1)
@@ -322,7 +324,7 @@ class M3U:
         if seek <= 0: group = LANGUAGE(30119)
         else:         group = LANGUAGE(30152)
         ritem = self.getMitem()
-        ritem['provider']      = '%s (%s)'%(ADDON_NAME,SETTINGS.getFriendlyName())
+        ritem['provider']      = '%s (%s)'%(ADDON_NAME,PROPERTIES.getFriendlyName())
         ritem['provider-type'] = 'addon'
         ritem['provider-logo'] = HOST_LOGO
         ritem['label']         = (fitem.get('showlabel') or '%s%s'%(fitem.get('label',''),' - %s'%(fitem.get('episodelabel','')) if fitem.get('episodelabel','') else ''))
@@ -346,7 +348,7 @@ class M3U:
         mitem['label']         = citem['name'] #todo channel manager opt to change channel 'label' leaving 'name' static for channelid purposes
         mitem['logo']          = citem['logo']
         mitem['realtime']      = False
-        mitem['provider']      = '%s (%s)'%(ADDON_NAME,SETTINGS.getFriendlyName())
+        mitem['provider']      = '%s (%s)'%(ADDON_NAME,PROPERTIES.getFriendlyName())
         mitem['provider-type'] = 'addon'
         mitem['provider-logo'] = HOST_LOGO
         

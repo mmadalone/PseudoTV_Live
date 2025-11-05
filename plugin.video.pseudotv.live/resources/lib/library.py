@@ -31,6 +31,8 @@ class Service:
     player  = PLAYER()
     monitor = MONITOR()
     jsonRPC = JSONRPC()
+    def _shutdown(self, wait=0.0001) -> bool:
+        return PROPERTIES.isPendingShutdown()
     def _interrupt(self) -> bool:
         return PROPERTIES.isPendingInterrupt()
     def _suspend(self) -> bool:

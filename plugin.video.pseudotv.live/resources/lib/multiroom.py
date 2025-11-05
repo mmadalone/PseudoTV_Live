@@ -26,6 +26,8 @@ class Service:
     player  = PLAYER()
     monitor = MONITOR()
     jsonRPC = JSONRPC()
+    def _shutdown(self, wait=0.0001) -> bool:
+        return PROPERTIES.isPendingShutdown()
     def _interrupt(self) -> bool:
         return PROPERTIES.isPendingInterrupt()
     def _suspend(self) -> bool:
@@ -41,7 +43,7 @@ class Multiroom:
         self.cache      = service.jsonRPC.cache
         self.sysARG     = sysARG
         self.uuid       = SETTINGS.getMYUUID()
-        self.friendly   = SETTINGS.getFriendlyName()
+        self.friendly   = PROPERTIES.getFriendlyName()
         self.remoteHost = PROPERTIES.getRemoteHost()
 
 
@@ -102,33 +104,34 @@ class Multiroom:
 
     def getRemote(self, remote):
         self.log("getRemote, remote = %s"%(remote))
-        return requestURL(remote, header={'Accept':'application/json'}, json_data=True, cache=self.cache, checksum=self.uuid, life=datetime.timedelta(days=MAX_GUIDEDAYS))
+        return requestURL(remote, header={'Accept':'application/json'}, cache={"cache":self.cache, "json_data": False, "checksum":self.uuid, "life": datetime.timedelta(days=MAX_GUIDEDAYS)})
         
          
     def addServer(self, payload={}):
-        self.log('addServer, name = %s'%(payload.get('name')))
-        if payload and payload.get('name') and payload.get('host'):
-            payload['online'] = True
-            servers = self.getDiscovery()
-            server  = servers.get(payload.get('name'),{})
-            if not server: 
-                payload['enabled'] = not bool(SETTINGS.getSettingBool('Debug_Enable'))  #set enabled by default when not debugging.
-                self.log('addServer, adding server = %s'%(payload))
-                DIALOG.notificationDialog('%s: %s'%(LANGUAGE(32047),payload.get('name')))
-                servers[payload['name']] = payload
-            else:
-                payload['enabled'] = server.get('enabled',False)
-                if payload.get('md5',server.get('md5')) != server.get('md5'): 
-                    self.log('addServer, updating server = %s'%(server))
-                    servers.update({payload['name']:payload})
-            
-            if self.setDiscovery(self._chkServers(servers)):
-                instancePath = SETTINGS.hasPVRInstance(server.get('name'))
-                if       payload.get('enabled',False) and not instancePath: changed = SETTINGS.setPVRRemote(payload.get('host'),payload.get('name'),cache=True)
-                elif not payload.get('enabled',False) and instancePath:     changed = FileAccess.delete(instancePath)
-                else:                                                       changed = False
-                if changed: PROPERTIES.setPropTimer('chkPVRRefresh')
-                self.log('addServer, payload changed = %s'%(changed))
+        if isinstance(payload,dict):
+            self.log('addServer, name = %s'%(payload.get('name')))
+            if payload and payload.get('name') and payload.get('host'):
+                payload['online'] = True
+                servers = self.getDiscovery()
+                server  = servers.get(payload.get('name'),{})
+                if not server: 
+                    payload['enabled'] = not bool(SETTINGS.getSettingBool('Debug_Enable'))  #set enabled by default when not debugging.
+                    self.log('addServer, adding server = %s'%(payload))
+                    DIALOG.notificationDialog('%s: %s'%(LANGUAGE(32047),payload.get('name')))
+                    servers[payload['name']] = payload
+                else:
+                    payload['enabled'] = server.get('enabled',False)
+                    if payload.get('md5',server.get('md5')) != server.get('md5'): 
+                        self.log('addServer, updating server = %s'%(server))
+                        servers.update({payload['name']:payload})
+                
+                if self.setDiscovery(self._chkServers(servers)):
+                    instancePath = SETTINGS.hasPVRInstance(server.get('name'))
+                    if       payload.get('enabled',False) and not instancePath: changed = SETTINGS.setPVRRemote(payload.get('host'),payload.get('name'),cache=True)
+                    elif not payload.get('enabled',False) and instancePath:     changed = FileAccess.delete(instancePath)
+                    else:                                                       changed = False
+                    if changed: PROPERTIES.setPropTimer('chkPVRRefresh')
+                    self.log('addServer, payload changed = %s'%(changed))
 
 
     def _delServer(self, servers={}):
@@ -162,8 +165,8 @@ class Multiroom:
             if len(lizLST) > 0: lizLST.insert(0,LISTITEMS.buildMenuListItem('[COLOR=white][B]- %s[/B][/COLOR]'%(LANGUAGE(30046)),LANGUAGE(33046))) #remove server menu item
             else: return
             
-        if not PROPERTIES.isRunning('_selServer'):
-            with PROPERTIES.chkRunning('_selServer'):
+        if not PROPERTIES.isRunning('Multiroom._selServer'):
+            with PROPERTIES.chkRunning('Multiroom._selServer'):
                 selects = DIALOG.selectDialog(lizLST,LANGUAGE(30130),preselect=[idx for idx, listitem in enumerate(lizLST) if loadJSON(listitem.getPath()).get('enabled',False)])
                 if not selects is None:
                     if 0 in selects: return self._delServer(servers)

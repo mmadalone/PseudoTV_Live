@@ -41,6 +41,8 @@ def cacheit(expiration=datetime.timedelta(minutes=15), checksum=ADDON_VERSION, j
     
 class Service:
     monitor = MONITOR()
+    def _shutdown(self, wait=0.0001) -> bool:
+        return xbmcgui.Window(10000).getProperty('%s.pendingShutdown'%(ADDON_ID)) == "true"
     def _interrupt(self) -> bool:
         return xbmcgui.Window(10000).getProperty('%s.pendingInterrupt'%(ADDON_ID)) == "true"
     def _suspend(self) -> bool:
@@ -55,7 +57,7 @@ class Cache:
     @contextmanager
     def cacheLocker(self, wait=0.0001): #simplecache is not thread safe, threadlock not avoiding collisions? Hack/Lazy avoidance.
         while not self.service.monitor.abortRequested():
-            if self.service.monitor.waitForAbort(wait) or self.service._interrupt(): break
+            if self.service._shutdown(wait) or self.service._interrupt(): break
             elif xbmcgui.Window(10000).getProperty('%s.cacheLocker'%(ADDON_ID)) != 'true': break
         xbmcgui.Window(10000).setProperty('%s.cacheLocker'%(ADDON_ID),'true')
         try: yield

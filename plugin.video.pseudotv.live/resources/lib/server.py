@@ -54,8 +54,7 @@ class Discovery:
                     server = info.getServer()
                     self.zServers[server] = {'type':type,'name':name,'server':server,'host':'%s:%d'%(IP,info.getPort()),'bonjour':'http://%s:%s/%s'%(IP,SETTINGS.getSettingInt('TCP_PORT'),BONJOURFLE)}
                     self.log("addService, found zeroconf %s @ %s using bonjour %s"%(server,self.zServers[server]['host'],self.zServers[server]['bonjour']))
-                    self.multiroom.addServer(requestURL(self.zServers[server]['bonjour'],json_data=True))
-            
+                    self.multiroom.addServer(requestURL(self.zServers[server]['bonjour'],cache={'cache':SETTINGS.cache,'json_data':True, "life": datetime.timedelta(seconds=300)}))
             
     def __init__(self, service=None, multiroom=None):
         self.service   = service
@@ -68,8 +67,8 @@ class Discovery:
 
 
     def _run(self):
-        if not PROPERTIES.isRunning('Discovery'):
-            with PROPERTIES.chkRunning('Discovery'):
+        if not PROPERTIES.isRunning('Discovery._run'):
+            with PROPERTIES.chkRunning('Discovery._run'):
                 zconf = Zeroconf()
                 zcons = self.multiroom._getStatus()
                 self.log("_run, Multicast DNS Service waiting for (%s)"%(ZEROCONF_SERVICE))
@@ -167,11 +166,11 @@ class MyHandler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-type", content_type)
                 
-                if   file_path == '/favicon.ico': return self.send_response(204)  # 204 No Content
+                if   file_path == '/favicon.ico':                   return self.send_response(204)  # 204 No Content
                 elif file_path == f'/{M3UFLE.lower()}':             __sendFile(M3UFLEPATH, use_compression)
                 elif file_path == f'/{GENREFLE.lower()}':           __sendFile(GENREFLEPATH, use_compression)
                 elif file_path == f'/{XMLTVFLE.lower()}':           __sendFile(XMLTVFLEPATH, use_compression)
-                elif file_path.startswith(('/images/', '/logos/')): __sendFile(unquoteString(self.path).replace('/images/', '').replace('/logos/', ''), use_compression)
+                elif file_path.startswith(('/images/', '/logos/')): __sendFile(os.path.join(LOGO_LOC,unquoteString(self.path.replace('/images/','').replace('/logos/',''))), False)
                 else:
                     chunk = b''
                     if   file_path == f'/{BONJOURFLE.lower()}': chunk = dumpJSON(SETTINGS.getBonjour(inclChannels=True),idnt=4).encode(encoding=DEFAULT_ENCODING)
@@ -216,15 +215,15 @@ class HTTP:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 try:
                     s.bind((host, tmpPort))
-                    return False
+                    s.close()
+                    return True
                 except socket.error as e:
-                    if e.errno == errno.EADDRINUSE:
-                        return True
+                    if e.errno == errno.EADDRINUSE: return False
                     raise e
 
         tmpPort = port
-        while not self.monitor.abortRequested() and __isAvailable(host, tmpPort):
-            if self.monitor.waitForAbort(0.1): break
+        while not self.monitor.abortRequested() and not __isAvailable(host, tmpPort):
+            if self.service._shutdown(0.1): break
             else:
                 self.log(f"_chkPort {tmpPort} is in use. Trying next port.")
                 tmpPort += 1
@@ -271,7 +270,7 @@ class HTTP:
                     server = PROPERTIES.setRemoteHost('%s:%s'%(host,port))
                     
                     self.log("_start, starting server @ %s"%(server),xbmc.LOGINFO)
-                    SETTINGS.setSetting('Remote_NAME' ,SETTINGS.getFriendlyName())
+                    SETTINGS.setSetting('Remote_NAME' ,PROPERTIES.getFriendlyName())
                     SETTINGS.setSetting('Remote_M3U'  ,'http://%s/%s'%(server,M3UFLE))
                     SETTINGS.setSetting('Remote_XMLTV','http://%s/%s'%(server,XMLTVFLE))
                     SETTINGS.setSetting('Remote_GENRE','http://%s/%s'%(server,GENREFLE))
@@ -283,6 +282,6 @@ class HTTP:
                     self.httpd.daemon=True
                     self.httpd.start()
                     __update(silent)
-                except Exception as e: self.log("_start, startup Failed! %s"%(e), xbmc.LOGERROR)
+                except Exception as e: self.log("_start, startup failed! %s"%(e), xbmc.LOGERROR)
             elif self.service._shutdown(FIFTEEN): break
         return __stop(self.pendingRestart)

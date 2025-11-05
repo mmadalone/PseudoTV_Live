@@ -62,7 +62,7 @@ class OverlayTool(xbmcgui.WindowXMLDialog):
         try: 
             # self.runActions(RULES_ACTION_OVERLAY_OPEN, self.sysInfo.get('citem',{}), inherited=self)
             # if self.vinView != self.defaultView: timerit(self.jsonRPC.setViewMode)(0.1,[self.vinView])
-            if BUILTIN.getInfoBool('Playing','Player'): BUILTIN.executebuiltin('ActivateWindow(fullscreenvideo)')
+            if BUILTIN.getInfoBool('Playing','Player'): BUILTIN.executewindow('ActivateWindow(fullscreenvideo)')
             self.doModal()
         except Exception as e: 
             self.log("__init__, failed! %s"%(e), xbmc.LOGERROR)

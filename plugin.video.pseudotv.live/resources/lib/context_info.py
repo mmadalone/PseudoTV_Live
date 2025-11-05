@@ -39,7 +39,7 @@ class Browse:
                 path = '%s?xsp=%s'%(path,quoteString(unquoteString(params)))
             #todo create custom container window with channel listitems.
             log('Browse: target = %s, path = %s'%(media,path))
-        BUILTIN.executebuiltin('ReplaceWindow(%s,%s,return)'%(media,path))
+        BUILTIN.executewindow('ReplaceWindow(%s,%s,return)'%(media,path))
 
 class Match:
     SEARCH_SCRIPT  = None
@@ -67,7 +67,7 @@ class Match:
             # plugin://script.embuary.helper/?info=getsimilar&dbid=$INFO[ListItem.DBID]&type=tvshow&tag=HDR
             # plugin://script.embuary.helper/?info=getsimilar&dbid=$INFO[ListItem.DBID]&type=movie&tag=HDR
             # tag = optional, additional filter option to filter by library tag
-            BUILTIN.executebuiltin('ReplaceWindow(%s,%s,return)'%('%ss'%(fitem.get('media','video')),'plugin://%s/?info=getsimilar&dbid=%d&type=%s'%(self.SEARCH_SCRIPT,dbid,dbtype)))
+            BUILTIN.executewindow('ReplaceWindow(%s,%s,return)'%('%ss'%(fitem.get('media','video')),'plugin://%s/?info=getsimilar&dbid=%d&type=%s'%(self.SEARCH_SCRIPT,dbid,dbtype)))
         else:
             # - the addon is executed by another addon/skin: RunScript(script.globalsearch,searchstring=foo)
             # You can specify which categories should be searched (this overrides the user preferences set in the addon settings):

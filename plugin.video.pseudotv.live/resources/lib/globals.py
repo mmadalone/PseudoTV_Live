@@ -52,7 +52,7 @@ from kodi                import *
 from fileaccess          import FileAccess, FileLock
 from collections         import defaultdict, Counter, OrderedDict
 from six.moves           import urllib 
-from math                import ceil,  floor
+from math                import ceil, floor, sqrt
 from infotagger.listitem import ListItemInfoTag
 from requests.adapters   import HTTPAdapter, Retry
 
@@ -114,42 +114,40 @@ def setJSON(file, data):
         fle.close()
     return True
 
-def requestURL(url, params={}, payload={}, header=HEADER, timeout=FIFTEEN, json_data=False, cache=None, checksum=ADDON_VERSION, life=datetime.timedelta(minutes=15)):
-    def __error(json_data):
-        return {} if json_data else ""
-    
-    def __getCache(key,json_data,cache,checksum):
-        return (cache.get('requestURL.%s'%(key), checksum, json_data) or __error(json_data))
+def requestURL(url, params={}, payload={}, header=HEADER, timeout=FIFTEEN, cache=None, file=None):
+    #cache = {"cache":None, "json_data": False, "checksum":ADDON_VERSION, "life": datetime.timedelta(minutes=15)}
+    def __error(result={}):                                         return result
+    def __getCache(key, cache, json_data, checksum):                return (cache.get('requestURL.%s'%(getMD5(key)), checksum, json_data) or __error())
+    def __setCache(key, results, cache, json_data, checksum, life): return cache.set('requestURL.%s'%(getMD5(key)), results, checksum, life, json_data)
         
-    def __setCache(key,results,json_data,cache,checksum,life):
-        return cache.set('requestURL.%s'%(key), results, checksum, life, json_data)
-        
-    complete = False
-    cacheKey = '.'.join([url,dumpJSON(params),dumpJSON(payload),dumpJSON(header)])
+    results  = None
     session  = requests.Session()
     retries  = Retry(total=3, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
     adapter  = HTTPAdapter(max_retries=retries)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
+
     try:
         headers = HEADER.copy()
         headers.update(header)
-        if payload: response = session.post(url, data=dumpJSON(payload), headers=headers, timeout=timeout)
+        if payload: response = session.post(url, json=payload, files=file, headers=headers, timeout=timeout)
         else:       response = session.get(url, params=params, headers=headers, timeout=timeout)
         response.raise_for_status()  # Raise an exception for HTTP errors
-        log("Globals: requestURL, url = %s, status = %s\npayload = %s"%(url,response.status_code,payload))
-        complete = True
-
-        if json_data: results = response.json()
-        else:         results = response.content
-        if results and cache: return __setCache(cacheKey,results,json_data,cache,checksum,life)
-        else:                 return results 
+        try:    results = response.json()
+        except: results = response.content
+        if isinstance(results,bytes): results = results.decode(DEFAULT_ENCODING)
+        log("Globals: requestURL, url = %s, status = %s\nparams = %s\npayload = %s\nreturn type = %s"%(url,response.status_code,params,payload,type(results)))
+        
+        if results and not cache is None: 
+            return __setCache('.'.join([url,dumpJSON(params),dumpJSON(payload),dumpJSON(header)]), 
+                              results, cache["cache"], cache.get("json_data",False), cache.get("checksum",ADDON_VERSION), cache.get("life",datetime.timedelta(minutes=15)))
+        else: return results 
     except Exception as e: 
         log("Globals: requestURL, failed! %s, An error occurred: %s"%('Returning cache' if cache else 'No Response', e))
-        return __getCache(cacheKey,json_data,cache,checksum) if cache else __error(json_data)
-    finally:
-        if not complete and payload:
-            queueURL({"url":url, "params":params, "payload":payload, "header":header, "timeout":timeout, "json_data":json_data, "cache":cache, "checksum":checksum, "life":life}) #retry post
+        return __getCache('.'.join([url,dumpJSON(params),dumpJSON(payload),dumpJSON(header)]), 
+                          cache["cache"], cache.get("json_data",False), cache.get("checksum",ADDON_VERSION)) if cache else __error()
+    finally: #retry failed post
+        if not results and payload: queueURL({"url":url, "params":params, "payload":payload, "header":header, "timeout":timeout, "cache":cache})
 
 def queueURL(param):
     queuePool = (SETTINGS.getCacheSetting('queueURL', json_data=True) or {})
@@ -161,11 +159,12 @@ def queueURL(param):
 
 def setURL(url, file):
     try:
-        contents = requestURL(url)
-        fle = FileAccess.open(file, 'w')
-        fle.write(contents)
-        fle.close()
-        return FileAccess.exists(file)
+        with FileLock():
+            contents = requestURL(url)
+            fle = FileAccess.open(file, 'w')
+            fle.write(contents)
+            fle.close()
+            return FileAccess.exists(file)
     except Exception as e: log('Globals: setURL failed! %s\nurl = %s'%(e,url), xbmc.LOGERROR)
 
 def diffLSTDICT(old, new):

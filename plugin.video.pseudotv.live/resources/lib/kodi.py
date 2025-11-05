@@ -34,14 +34,7 @@ def slugify(s, lowercase=False):
   s = re.sub(r'[\s_-]+', '_', s)
   s = re.sub(r'^-+|-+$', '', s)
   return s
-        
-def convertString2Num(value):
-    from ast import literal_eval
-    try: return literal_eval(value)
-    except Exception as e:
-        log("convertString2Num, failed! value = %s %s"%(value,e), xbmc.LOGERROR)
-        return value
-    
+
 def encodeString(text):
     base64_bytes = base64.b64encode(zlib.compress(text.encode(DEFAULT_ENCODING)))
     return base64_bytes.decode(DEFAULT_ENCODING)
@@ -150,46 +143,24 @@ def getIDbyPath(url):
     return url
 
 class Settings:
-    cacheDB = Cache()
-    cache   = Cache(mem_cache=True)
+    monitor    = MONITOR()
+    cacheDB    = Cache()
+    cache      = Cache(mem_cache=True)
     
     def __init__(self):
         self.log('__init__')
-        
+        self.properties = Properties()
+        self.settings   = self.getRealSettings()
+
         
     def log(self, msg, level=xbmc.LOGDEBUG):
         log('%s: %s'%(self.__class__.__name__,msg),level)
     
-
-    @cacheit(expiration=datetime.timedelta(minutes=FIFTEEN))
-    def getIP(self, default='0.0.0.0'):
-        IP = (xbmc.getIPAddress() or gethostbyname(gethostname()) or default)
-        log('getIP, IP = %s'%(IP))
-        return IP
     
-    
-    def getRealSettings(self):
-        try:    return xbmcaddon.Addon(id=ADDON_ID)
+    def getRealSettings(self, id=ADDON_ID):
+        try:    return xbmcaddon.Addon(id)
         except: return REAL_SETTINGS
 
-
-    def hasAddon(self, id, install=False, enable=False, force=False, notify=False):
-        if '://' in id: id = getIDbyPath(id)
-        if self.builtin.getInfoBool('HasAddon(%s)'%(id),'System'):
-            if not self.builtin.getInfoBool('AddonIsEnabled(%s)'%(id),'System') and enable:
-                if not force:
-                    if not self.dialog.yesnoDialog(message=LANGUAGE(32156)%(id)):
-                        self.log('hasAddon, id = %s (Not Enabled!)'%(id))
-                        return
-                self.builtin.executebuiltin('EnableAddon(%s)'%(id),wait=True)
-            self.log('hasAddon, id = %s (Installed)'%(id))
-            return xbmcaddon.Addon(id)
-        elif install:
-            if self.builtin.executebuiltin('InstallAddon(%s)'%(id),wait=True):
-                return self.hasAddon(id, False, enable, force, notify)
-        elif notify: self.dialog.notificationDialog(LANGUAGE(32034)%(id))
-        self.log('hasAddon, id = %s (Not Installed!)'%(id))
-        
 
     def openSettings(self, ctl=(0,1), id=ADDON_ID):
         self.builtin.closeBusyDialog()
@@ -200,80 +171,59 @@ class Settings:
             xbmc.sleep(50)
             self.builtin.executebuiltin('SetFocus(%i)'%(ctl[1]-180))
 
- 
-    def openGuide(self, instance=ADDON_NAME):
-        def __match(label):
-            items, limits, errors = jsonRPC.getDirectory({"directory":baseURL})
-            for item in items:
-                if label.lower() == item.get('label','').lower(): return item
-            for item in items:
-                if item.get('label','').lower().startswith(instance.lower()): return item
-
-        with self.builtin.busy_dialog():
-            from jsonrpc import JSONRPC
-            jsonRPC = JSONRPC()
-            baseURL = 'pvr://channels/tv/'
-            for name in ['%s [All channels]'%(instance), instance, 'All channels']:
-                item = __match(name)
-                if item: break
-            del jsonRPC
-            if not item: item = {'file':baseURL}
-        self.log('openGuide, opening %s'%(item.get('file',baseURL)))
-        # self.builtin.executebuiltin("Dialog.Close(all)") 
-        self.builtin.executebuiltin("ReplaceWindow(TVGuide,%s)"%(item.get('file',baseURL)))
-                    
+   
     #GET
     def _getSetting(self, func, key):
         try: 
             value = func(key)
             self.log('%s, key = %s, value = %s'%(func.__name__,key,'%s...'%((str(value)[:128]))))
-            return value
-        except Exception as e: 
-            self.log("_getSetting, failed! %s - key = %s"%(e,key), xbmc.LOGERROR)
+        except Exception as e: self.log("_getSetting, failed! %s - key = %s"%(e,key), xbmc.LOGERROR)
+        return value
       
       
     def getSetting(self, key):
-        return self._getSetting(self.getRealSettings().getSetting,key)
+        return self._getSetting(self.settings.getSetting,key)
         
         
     def getSettingBool(self, key):
-        return self.getSetting(key).lower() == "true" 
-
-
-    def getSettingBoolList(self, key):
-        return [value.lower() == "true" for value in self.getSetting(key).split('|')]
+        return self._getSetting(self.settings.getSettingBool,key)
 
 
     def getSettingInt(self, key):
-        return convertString2Num(self.getSetting(key))
-              
-              
-    def getSettingIntList(self, key):
-        return [convertString2Num(value) for value in self.getSetting(key).split('|')]
+        return self._getSetting(self.settings.getSettingInt,key)
               
               
     def getSettingNumber(self, key): 
-        return convertString2Num(self.getSetting(key))
+        return self._getSetting(self.settings.getSettingNumber,key)
         
-
-    def getSettingNumberList(self, key):
-        return [convertString2Num(value) for value in self.getSetting(key).split('|')]
         
-
     def getSettingString(self, key):
-        return self.getSetting(key)
-  
-  
+        return self._getSetting(self.settings.getSettingString,key)
+
+
+    def getSettingFloat(self, key):
+        return float(self.getSetting(key))
+              
+              
     def getSettingList(self, key):
         return [value for value in self.getSetting(key).split('|')]
        
        
-    def getSettingFloat(self, key):
-        return float(convertString2Num(self.getSetting(key)))
-              
-              
+    def getSettingBoolList(self, key):
+        return [value.lower() == "true" for value in self.getSetting(key).split('|')]
+        
+        
+    def getSettingIntList(self, key):
+        return [int(value) for value in self.getSetting(key).split('|') if isinstance(value,int)]
+        
+        
+    def getSettingNumberList(self, key):
+        from ast import literal_eval
+        return [literal_eval(value) for value in self.getSetting(key).split('|')]
+        
+
     def getSettingFloatList(self, key):
-        return [convertString2Num(value) for value in self.getSetting(key).split('|')]
+        return [float(value) for value in self.getSetting(key).split('|') if isinstance(value,float)]
         
 
     def getSettingDict(self, key):
@@ -286,39 +236,12 @@ class Settings:
         else:      return value
         
         
-    def getAddonDetails(self, id):
-        try:
-            addon = xbmcaddon.Addon(id)
-            properties = ['name', 'version', 'summary', 'description', 'path', 'author', 'icon', 'disclaimer', 'fanart', 'changelog', 'id', 'profile', 'stars', 'type']
-            return dict([(property,addon.getAddonInfo(property)) for property in properties])    
-        except:
-            from jsonrpc import JSONRPC
-            return JSONRPC().getAddonDetails(id)
-
-
     def getEXTSetting(self, id, key):
-        return xbmcaddon.Addon(id).getSetting(key)
+        value = xbmcaddon.Addon(id).getSetting(key)
+        self.log('getEXTSetting, id = %s, key = %s, value = %s'%(id,key,'%s...'%((str(value)[:128]))))
+        return value
         
         
-    def getFriendlyName(self):
-        friendly = Properties().getProperty('INSTANCE_NAME')
-        if not friendly or friendly == LANGUAGE(32105):
-            from jsonrpc import JSONRPC
-            friendly = Properties().setProperty('INSTANCE_NAME', JSONRPC().inputFriendlyName())
-        return friendly
-        
-        
-    def getMYUUID(self):
-        friendly = self.getFriendlyName()
-        uuid = self.getCacheSetting('MY_UUID', checksum=friendly)
-        if not uuid: uuid = self.setCacheSetting('MY_UUID', genUUID(seed=self.getFriendlyName()), checksum=friendly)
-        return uuid
-
-        
-    def getResetChannels(self):
-        return (self.getCacheSetting('clearChannels') or [])
-
-
     #CLR
     def clrCacheSetting(self, key):
         self.cache.clear(key)
@@ -327,45 +250,43 @@ class Settings:
     #SET
     def _setSetting(self, func, key, value):
         try:
+            func(key, value)
             self.log('%s, key = %s, value = %s'%(func.__name__,key,'%s...'%((str(value)[:128]))))
-            return func(key, value)
-        except Exception as e: 
-            self.log("_setSetting, failed! %s - key = %s"%(e,key), xbmc.LOGERROR)
-            return False
+        except Exception as e: self.log("_setSetting, failed! %s - key = %s"%(e,key), xbmc.LOGERROR)
             
         
     def setSetting(self, key, value=""):  
-        if not isinstance(value,str): value = str(value)
-        if self.getSetting(key) != value: #Kodi setsetting() can tax system performance. i/o issue? block redundant saves.
-            return self._setSetting(self.getRealSettings().setSetting,key,value)
+        if self.getSetting(key) != str(value): #Kodi setsetting() can tax system performance. i/o issue? block unneeded saves.
+            self._setSetting(self.settings.setSetting,key,str(value))
+        return value
             
             
     def setSettingBool(self, key, value):
-        return self.setSetting(key,value)
+        return self._setSetting(self.settings.setSettingBool,key,value)
         
-                      
+        
+    def setSettingInt(self, key, value):  
+        return self._setSetting(self.settings.setSettingInt,key,value)
+                   
+                   
+    def setSettingNumber(self, key, value):  
+        return self._setSetting(self.settings.setSettingNumber,key,value)
+        
+             
+    def setSettingString(self, key, value):  
+        return self._setSetting(self.settings.setSettingString,key,value)
+
+
     def setSettingBoolList(self, key, value):
         return self.setSetting(key,('|').join(value))
-        
-           
-    def setSettingInt(self, key, value):  
-        return self.setSetting(key,value)
         
         
     def setSettingIntList(self, key, value):  
         return self.setSetting(key,('|').join(value))
          
             
-    def setSettingNumber(self, key, value):  
-        return self.setSetting(key,value)
-        
-            
     def setSettingNumberList(self, key, value):  
         return self.setSetting(key,('|').join(value))
-        
-            
-    def setSettingString(self, key, value):  
-        return self.setSetting(key,value)
         
 
     def setSettingList(self, key, values):
@@ -385,8 +306,68 @@ class Settings:
             
 
     def setEXTSetting(self, id, key, value):
+        self.log('setEXTSetting, id = %s, key = %s, value = %s'%(id,key,'%s...'%((str(value)[:128]))))
         return xbmcaddon.Addon(id).setSetting(key,value)
 
+
+    @cacheit(expiration=datetime.timedelta(minutes=FIFTEEN))
+    def getIP(self, default='0.0.0.0'):
+        IP = (xbmc.getIPAddress() or gethostbyname(gethostname()) or default)
+        log('getIP, IP = %s'%(IP))
+        return IP
+    
+    
+    def hasAddon(self, id, install=False, enable=False, force=False, notify=False):
+        if '://' in id: id = getIDbyPath(id)
+        if self.builtin.getInfoBool('HasAddon(%s)'%(id),'System'):
+            if not self.builtin.getInfoBool('AddonIsEnabled(%s)'%(id),'System') and enable:
+                if not force:
+                    if not self.dialog.yesnoDialog(message=LANGUAGE(32156)%(id)):
+                        self.log('hasAddon, id = %s (Not Enabled!)'%(id))
+                        return
+                if self.builtin.executebuiltin('EnableAddon(%s)'%(id),wait=True): self.monitor.waitForAbort(1.0)
+            self.log('hasAddon, id = %s (Installed)'%(id))
+            try:    return xbmcaddon.Addon(id)
+            except: return self.hasAddon(id, install, enable, force, notify=True)
+        elif install:
+            if self.builtin.executebuiltin('InstallAddon(%s)'%(id),wait=True):
+                return self.hasAddon(id, False, enable, force, notify)
+        elif notify: self.dialog.notificationDialog(LANGUAGE(32034)%(id))
+        self.log('hasAddon, id = %s (Not Installed!)'%(id))
+        
+        
+    def getAddonDetails(self, id=ADDON_ID):
+        try:
+            addon = xbmcaddon.Addon(id)
+            properties = ['name', 'version', 'summary', 'description', 'path', 'author', 'icon', 'disclaimer', 'fanart', 'changelog', 'id', 'profile', 'stars', 'type']
+            return dict([(property,addon.getAddonInfo(property)) for property in properties])    
+        except:
+            from jsonrpc import JSONRPC
+            return JSONRPC().getAddonDetails(id)
+
+
+    def getMYUUID(self):
+        friendly = self.properties.getFriendlyName()
+        uuid = self.getCacheSetting('MY_UUID', checksum=friendly)
+        if not uuid: uuid = self.setCacheSetting('MY_UUID', genUUID(seed=self.properties.getFriendlyName()), checksum=friendly)
+        return uuid
+
+
+    def openGuide(self, instance=ADDON_NAME):
+        def __match(match):
+            with self.builtin.busy_dialog():
+                for name in xbmcvfs.listdir('pvr://channels/tv/')[0]:
+                    if name.lower().startswith(quoteString(match.lower())):
+                        return match, 'pvr://channels/tv/%s'%(name)
+                return match, __match('All channels')
+            
+        if self.builtin.hasPVR():
+            instance, path = __match(instance)
+            self.log('openGuide, instance = %s, path = %s'%(instance,path))
+            if path: self.builtin.executewindow("ReplaceWindow(TVGuide,%s)"%(path),condition=partial(self.builtin.executebuiltin,key="Dialog.Close(all,true)"))
+            else:    self.builtin.executewindow("ReplaceWindow(TVGuide)")
+        else: self.builtin.executewindow("ReplaceWindow(Home)")
+        
 
     @cacheit(expiration=datetime.timedelta(minutes=5), json_data=True)
     def getBonjour(self, inclChannels=False):
@@ -398,7 +379,7 @@ class Settings:
                    'machine' :platform.machine(),
                    'platform':self.builtin.getInfoLabel('OSVersionInfo','System'),
                    'build'   :self.builtin.getInfoLabel('BuildVersion','System'),
-                   'name'    :self.getFriendlyName(),
+                   'name'    :self.properties.getFriendlyName(),
                    'host'    :self.property.getRemoteHost()}
                    
         payload['remotes']   = {'bonjour':'http://%s/%s'%(payload['host'],BONJOURFLE),
@@ -685,6 +666,141 @@ class Properties:
         log('%s: %s'%(self.__class__.__name__,msg),level)
 
 
+    def getInstanceID(self):
+        instanceID = self.getEXTProperty('%s.InstanceID'%(ADDON_ID))
+        if not instanceID: instanceID = self.setInstanceID()
+        return instanceID
+
+
+    def setInstanceID(self):
+        self._clearTrash(self.getEXTProperty('%s.InstanceID'%(ADDON_ID)))
+        return self.setEXTProperty('%s.InstanceID'%(ADDON_ID),getMD5(uuid.uuid4()))
+
+
+    def _clearTrash(self, instanceID=None): #clear abandoned properties after instanceID change
+        if instanceID is None: instanceID = self.getInstanceID()
+        tmpDCT = loadJSON(self.getEXTProperty('%s.TRASH'%(ADDON_ID)))
+        if instanceID in tmpDCT:
+            self.log('_clearTrash, instanceID = %s'%(instanceID))
+            tmpLST = tmpDCT.pop(instanceID)
+            for prop in tmpLST:
+                self.clrProperty(prop)
+                self.clrEXTProperty(prop)
+
+
+    def _setTrash(self, key): #catalog instance properties that are abandoned
+        instanceID = self.getInstanceID()
+        tmpDCT     = loadJSON(self.getEXTProperty('%s.TRASH'%(ADDON_ID)))
+        if key not in tmpDCT.setdefault(instanceID,[]): tmpDCT.setdefault(instanceID,[]).append(key)
+        self.setEXTProperty('%s.TRASH'%(ADDON_ID),dumpJSON(tmpDCT))
+        return key
+
+        
+    def _getKey(self, key, useInstance=True):
+        if self.winID == 10000 and not key.startswith(ADDON_ID): #create unique id
+            if useInstance: return self._setTrash('%s.%s.%s'%(ADDON_ID,key,self.getInstanceID()))
+            else:           return '%s.%s'%(ADDON_ID,key)
+        return key
+
+
+    #GET
+    def getProperty(self, key):
+        key   = self._getKey(key)
+        value = self.window.getProperty(key)
+        self.log('getProperty, id = %s, key = %s, value = %s'%(self.winID,key,'%s...'%(str(value)[:128])))
+        return value
+        
+        
+    def getPropertyBool(self, key):
+        return self.getProperty(key).lower() == "true"
+        
+        
+    def getPropertyInt(self, key, default=-1):
+        return int((self.getProperty(key) or default))
+            
+        
+    def getPropertyFloat(self, key, default=0.0):
+        return float((self.getProperty(key) or default))
+        
+        
+    def getPropertyList(self, key):
+        return self.getProperty(key).split('|')
+
+        
+    def getPropertyDict(self, key=''):
+        return loadJSON(decodeString(self.getProperty(key)))
+        
+        
+    def getEXTProperty(self, key):
+        value = xbmcgui.Window(10000).getProperty(key)
+        if not '.TRASH' in key: self.log('getEXTProperty, id = %s, key = %s, value = %s'%(10000,key,'%s...'%(str(value)[:128])))
+        return value
+        
+        
+    def getEXTPropertyBool(self, key):
+        return (self.getEXTProperty(key) or '').lower() == "true"
+        
+        
+    #CLEAR
+    def clrProperties(self):
+        self.log('clrProperties')
+        return self.window.clearProperties()
+        
+        
+    def clrProperty(self, key):
+        key = self._getKey(key)
+        self.log('clrProperty, id = %s, key = %s'%(self.winID,key))
+        return self.window.clearProperty(key)
+
+
+    def clrEXTProperty(self, key):
+        self.log('clrEXTProperty, id = %s, key = %s'%(10000,key))
+        return xbmcgui.Window(10000).clearProperty(key)
+        
+        
+    #SET
+    def setProperty(self, key, value):
+        key = self._getKey(key)
+        self.log('setProperty, id = %s, key = %s, value = %s'%(self.winID,key,'%s...'%((str(value)[:128]))))
+        self.window.setProperty(key, str(value))
+        return value
+        
+        
+    def setPropertyBool(self, key, value):
+        if value: self.setProperty(key, value)
+        else:     self.clrProperty(key)
+        return value
+        
+        
+    def setPropertyInt(self, key, value):
+        return self.setProperty(key, int(value))
+                
+                
+    def setPropertyFloat(self, key, value):
+        return self.setProperty(key, float(value))
+
+    
+    def setPropertyList(self, key, values):
+        return self.setProperty(key, '|'.join(values))
+        
+        
+    def setPropertyDict(self, key, value={}):
+        return self.setProperty(key, encodeString(dumpJSON(value)))
+        
+                
+    def setEXTProperty(self, key, value):
+        if not '.TRASH' in key: self.log('setEXTProperty, id = %s, key = %s, value = %s'%(10000,key,'%s...'%((str(value)[:128]))))
+        if value: xbmcgui.Window(10000).setProperty(key,str(value))
+        else:     self.clrEXTProperty(key)
+        return value
+        
+        
+    def setEXTPropertyBool(self, key, value):
+        if value: self.setEXTProperty(key,str(value).lower())
+        else:     self.clrEXTProperty(key)
+        return str(value).lower() == 'true'
+
+
     def setEpochTimer(self, key, time=0): #_chkEpochTimer trigger - Time = 0 == Run
         return self.setPropertyInt(key,time)
 
@@ -720,11 +836,11 @@ class Properties:
 
 
     def setRunning(self, key, state=True):
-        return self.setEXTPropertyBool('%s.Running.%s'%(ADDON_ID,key),state)
+        return self.setEXTPropertyBool('%s.%s.Running'%(ADDON_ID,key),state)
         
         
     def isRunning(self, key):
-        return self.getEXTPropertyBool('%s.Running.%s'%(ADDON_ID,key))
+        return self.getEXTPropertyBool('%s.%s.Running'%(ADDON_ID,key))
 
 
     def setInitRun(self, state=True):
@@ -804,8 +920,25 @@ class Properties:
 
 
     @contextmanager
+    def lockActivity(self, state=True):
+        if not self.isLockActivity():
+            self.setLockActivity(True)
+            try: yield
+            finally: self.setLockActivity(False)
+        else: yield
+
+
+    def setLockActivity(self, state=True): # context state
+        return self.setEXTPropertyBool('lockActivity',state)
+
+
+    def isLockActivity(self):# context state
+        return self.getEXTPropertyBool('lockActivity')
+
+
+    @contextmanager
     def interruptActivity(self): #quit background task
-        if not self.isInterruptActivity():
+        if not self.isInterruptActivity() and not self.isLockActivity():
             self.setInterruptActivity(True)
             try: yield
             finally: self.setInterruptActivity(False)
@@ -830,7 +963,7 @@ class Properties:
         
     @contextmanager
     def suspendActivity(self): #pause background task.
-        if not self.isSuspendActivity():
+        if not self.isSuspendActivity() and not self.isLockActivity():
             self.setSuspendActivity(True)
             try: yield
             finally: self.setSuspendActivity(False)
@@ -866,151 +999,22 @@ class Properties:
         return self.getEXTPropertyBool('PseudoTVRunning')
 
 
-    def setInstanceID(self):
-        self.clearTrash(self.getEXTProperty('%s.InstanceID'%(ADDON_ID)))
-        return self.setEXTProperty('%s.InstanceID'%(ADDON_ID),getMD5(uuid.uuid4()))
+    def getFriendlyName(self):
+        friendly = self.getProperty('INSTANCE_NAME')
+        if not friendly or friendly == LANGUAGE(32105):
+            from jsonrpc import JSONRPC
+            friendly = self.setProperty('INSTANCE_NAME', JSONRPC().inputFriendlyName())
+        return friendly
+        
+        
+    @contextmanager
+    def setBackgroundLabel(self, text):
+        self.setEXTProperty('%s.background.text'%(ADDON_ID),text)
+        try: yield 
+        finally:
+            self.clrEXTProperty('%s.background.text'%(ADDON_ID))
 
 
-    def getInstanceID(self):
-        instanceID = self.getEXTProperty('%s.InstanceID'%(ADDON_ID))
-        if not instanceID: instanceID = self.setInstanceID()
-        return instanceID
-
-
-    def getKey(self, key, useInstance=True):
-        if not isinstance(key,str): key = str(key)
-        if self.winID == 10000 and not key.startswith(ADDON_ID): #create unique id 
-            if useInstance: return self.setTrash('%s.%s.%s'%(ADDON_ID,key,self.getInstanceID()))
-            else:           return '%s.%s'%(ADDON_ID,key)
-        return key
-
-        
-    #CLEAR
-    def clrEXTProperty(self, key):
-        self.log('clrEXTProperty, id = %s, key = %s'%(10000,key))
-        return xbmcgui.Window(10000).clearProperty(key)
-        
-        
-    def clrProperties(self):
-        self.log('clrProperties')
-        return self.window.clearProperties()
-        
-        
-    def clrProperty(self, key):
-        key = self.getKey(key)
-        self.log('clrProperty, id = %s, key = %s'%(self.winID,key))
-        return self.window.clearProperty(key)
-
-
-    #GET
-    def getEXTProperty(self, key):
-        value = xbmcgui.Window(10000).getProperty(key)
-        if not '.TRASH' in key: self.log('getEXTProperty, id = %s, key = %s, value = %s'%(10000,key,'%s...'%(str(value)[:128])))
-        return value
-        
-        
-    def getEXTPropertyBool(self, key):
-        return (self.getEXTProperty(key) or '').lower() == "true"
-        
-        
-    def getProperty(self, key):
-        key   = self.getKey(key)
-        value = self.window.getProperty(key)
-        self.log('getProperty, id = %s, key = %s, value = %s'%(self.winID,key,'%s...'%(str(value)[:128])))
-        return value
-        
-        
-    def getPropertyList(self, key):
-        return self.getProperty(key).split('|')
-
-        
-    def getPropertyBool(self, key):
-        return self.getProperty(key).lower() == "true"
-        
-        
-    def getPropertyDict(self, key=''):
-        return loadJSON(decodeString(self.getProperty(key)))
-        
-        
-    def getPropertyInt(self, key, default=-1):
-        value = self.getProperty(key)
-        if value: return int(convertString2Num(value))
-        else:     return default
-            
-        
-    def getPropertyFloat(self, key, default=-1):
-        value = self.getProperty(key)
-        if value: return float(convertString2Num(value))
-        else:     return default
-        
-
-    #SET
-    def setEXTProperty(self, key, value):
-        if not '.TRASH' in key: self.log('setEXTProperty, id = %s, key = %s, value = %s'%(10000,key,'%s...'%((str(value)[:128]))))
-        if value: xbmcgui.Window(10000).setProperty(key,str(value))
-        else:     self.clrEXTProperty(key)
-        return value
-        
-        
-    def setEXTPropertyBool(self, key, value):
-        if value: self.setEXTProperty(key,str(value).lower())
-        else:     self.clrEXTProperty(key)
-        return str(value).lower() == 'true'
-        
-        
-    def setProperty(self, key, value):
-        key = self.getKey(key)
-        self.log('setProperty, id = %s, key = %s, value = %s'%(self.winID,key,'%s...'%((str(value)[:128]))))
-        self.window.setProperty(key, str(value))
-        return value
-        
-        
-    def setPropertyList(self, key, values):
-        return self.setProperty(key, '|'.join(values))
-        
-        
-    def setPropertyBool(self, key, value):
-        if value: self.setProperty(key, value)
-        else:     self.clrProperty(key)
-        return value
-        
-        
-    def setPropertyDict(self, key, value={}):
-        return self.setProperty(key, encodeString(dumpJSON(value)))
-        
-                
-    def setPropertyInt(self, key, value):
-        return self.setProperty(key, int(value))
-                
-                
-    def setPropertyFloat(self, key, value):
-        return self.setProperty(key, float(value))
-
-    
-    def setTrash(self, key): #catalog instance properties that are abandoned
-        instanceID = self.getInstanceID()
-        tmpDCT     = loadJSON(self.getEXTProperty('%s.TRASH'%(ADDON_ID)))
-        if key not in tmpDCT.setdefault(instanceID,[]): tmpDCT.setdefault(instanceID,[]).append(key)
-        self.setEXTProperty('%s.TRASH'%(ADDON_ID),dumpJSON(tmpDCT))
-        return key
-
-        
-    def clearTrash(self, instanceID=None): #clear abandoned properties after instanceID change
-        if instanceID is None: instanceID = self.getInstanceID()
-        tmpDCT = loadJSON(self.getEXTProperty('%s.TRASH'%(ADDON_ID)))
-        if instanceID in tmpDCT:
-            self.log('clearTrash, instanceID = %s'%(instanceID))
-            tmpLST = tmpDCT.pop(instanceID)
-            for prop in tmpLST:
-                self.clrProperty(prop)
-                self.clrEXTProperty(prop)
-
-
-    def __exit__(self):
-        self.log('__exit__')
-        self.clearTrash(self.getInstanceID())
-        
-        
 class ListItems:
     
     def log(self, msg, level=xbmc.LOGDEBUG):
@@ -1030,38 +1034,40 @@ class ListItems:
         
 
     def buildItemListItem(self, item, media='video', offscreen=False, playable=True):
-        info       = item.copy()
-        art        = (info.pop('art'              ,{}) or {})
-        cast       = (info.pop('cast'             ,[]) or [])
-        uniqueid   = (info.pop('uniqueid'         ,{}) or {})
-        streamInfo = (info.pop('streamdetails'    ,{}) or {})
-        properties = (info.pop('customproperties' ,{}) or {})
-        if 'citem'   in info: properties.update({'citem'  :info.pop('citem')})   # write dump to single key
-        if 'pvritem' in info: properties.update({'pvritem':info.pop('pvritem')}) # write dump to single key
-        
-        if media != 'video': #unify default artwork for music.
-            art['poster'] = (getThumb(info,opt=1) or COLOR_LOGO)
-            art['fanart'] = (getThumb(info)       or FANART)
+        try:
+            info       = item.copy()
+            art        = (info.pop('art'              ,{}) or {})
+            cast       = (info.pop('cast'             ,[]) or [])
+            uniqueid   = (info.pop('uniqueid'         ,{}) or {})
+            streamInfo = (info.pop('streamdetails'    ,{}) or {})
+            properties = (info.pop('customproperties' ,{}) or {})
+            if 'citem'   in info: properties.update({'citem'  :info.pop('citem')})   # write dump to single key
+            if 'pvritem' in info: properties.update({'pvritem':info.pop('pvritem')}) # write dump to single key
             
-        listitem = self.getListItem(info.pop('label',''), info.pop('label2',''), info.pop('file',''), offscreen=offscreen)
-        listitem.setArt(art)
-        
-        infoTag = ListItemInfoTag(listitem, media)
-        info, properties = self.cleanInfo(info,media,properties)
-        infoTag.set_info(info)
-        if not media.lower() == 'music': 
-            infoTag.set_cast(cast)
-            infoTag.set_unique_ids(uniqueid)
+            if media != 'video': #unify default artwork for music.
+                art['poster'] = (getThumb(info,opt=1) or COLOR_LOGO)
+                art['fanart'] = (getThumb(info)       or FANART)
+                
+            listitem = self.getListItem(info.pop('label',''), info.pop('label2',''), info.pop('file',''), offscreen=offscreen)
+            listitem.setArt(art)
             
-        for ainfo in streamInfo.get('audio',[]):    infoTag.add_stream_info('audio'   , ainfo)
-        for vinfo in streamInfo.get('video',[]):    infoTag.add_stream_info('video'   , vinfo)
-        for sinfo in streamInfo.get('subtitle',[]): infoTag.add_stream_info('subtitle', sinfo)
-        
-        for key, pvalue in list(properties.items()): listitem.setProperty(key, self.cleanProp(pvalue))
-        if playable: listitem.setProperty("IsPlayable","true")
-        else:        listitem.setIsFolder(True)
-        return listitem
-             
+            infoTag = ListItemInfoTag(listitem, media)
+            info, properties = self.cleanInfo(info,media,properties)
+            infoTag.set_info(info)
+            if not media.lower() == 'music': 
+                infoTag.set_cast(cast)
+                infoTag.set_unique_ids(uniqueid)
+                
+            for ainfo in streamInfo.get('audio',[]):    infoTag.add_stream_info('audio'   , ainfo)
+            for vinfo in streamInfo.get('video',[]):    infoTag.add_stream_info('video'   , vinfo)
+            for sinfo in streamInfo.get('subtitle',[]): infoTag.add_stream_info('subtitle', sinfo)
+            
+            for key, pvalue in list(properties.items()): listitem.setProperty(key, self.cleanProp(pvalue))
+            if playable: listitem.setProperty("IsPlayable","true")
+            else:        listitem.setIsFolder(True)
+            return listitem
+        except Exception as e: log("buildItemListItem, failed! %s\n%s"%(e,item), xbmc.LOGERROR)
+            
                      
     def buildMenuListItem(self, label="", label2="", icon=COLOR_LOGO, url="", info={}, art={}, props={}, offscreen=False, media='video'):
         if not art: art = {'thumb':icon,'logo':icon,'icon':icon}
@@ -1202,7 +1208,7 @@ class Builtin:
 
 
     def isBusyDialog(self):
-        return (self.properties.isRunning('OVERLAY_BUSY') | self.getInfoBool('IsActive(busydialognocancel)','Window') | self.getInfoBool('IsActive(busydialog)','Window'))
+        return (self.properties.isRunning('BUSY_OVERLAY') | self.getInfoBool('IsActive(busydialognocancel)','Window') | self.getInfoBool('IsActive(busydialog)','Window'))
 
 
     def closeBusyDialog(self):
@@ -1248,19 +1254,22 @@ class Builtin:
         return value
         
         
-    def executewindow(self, key, wait=False, delay=0.1, condition='Player.Playing'):
+    def executewindow(self, key, wait=False, delay=False, condition=None):
         return self.executebuiltin(key,wait,delay,condition)
         
         
-    def executebuiltin(self, key, wait=False, delay=0.1, condition=None):
+    def executebuiltin(self, key, wait=False, delay=False, condition=None):
+        if not condition is None and not condition(): return False
         self.log('executebuiltin, key = %s, wait = %s, delay = %s, condition = %s):'%(key,wait,delay,condition))
-        if condition and not xbmc.getCondVisibility(condition): return
-        return xbmc.executebuiltin('%s'%(key),wait)
+        xbmc.executebuiltin('%s'%(key),wait)
+        return True
         
         
-    def executescript(self, path):
+    def executescript(self, path, condition=None):
         self.log('executescript, path = %s'%(path))
-        return xbmc.executescript('%s'%(path))
+        if not condition is None and not condition(): return False
+        xbmc.executescript('%s'%(path))
+        return True
 
 
     def executeJSONRPC(self, request):
@@ -1401,8 +1410,8 @@ class Dialog:
                     except: pass
                 self.close()
 
-        if not self.properties.isRunning('qrDialog'):
-            with self.properties.chkRunning('qrDialog'):
+        if not self.properties.isRunning('Dialog.qrDialog'):
+            with self.properties.chkRunning('Dialog.qrDialog'):
                 with self.builtin.busy_dialog():
                     imagefile = os.path.join(FileAccess.translatePath(TEMP_LOC),'%s.png'%(getMD5(str(url.split('/')[-1]))))
                     if not FileAccess.exists(imagefile):
@@ -1551,7 +1560,7 @@ class Dialog:
                 if actionId in ACTION_PREVIOUS_MENU: self.close()
                 else: pass
                 
-        if not self.properties.isRunning('SELECT_DIALOG'):
+        if not self.properties.isRunning('SELECT_OVERLAY'):
             dialogSelect = DialogSelect(DIALOG_SELECT, ADDON_PATH, "default")
             dialogSelect.doModal()
             del dialogSelect

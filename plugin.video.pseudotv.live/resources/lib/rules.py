@@ -1643,11 +1643,11 @@ class PauseRule(BaseRule): #Finial RULES [3000-~]
         
         
     def _getURL(self, id):
-        return 'http://%s/filelist/%s.json'%(PROPERTIES.getRemoteHost(),getMD5('%s.%s'%(SETTINGS.getFriendlyName(),id)))
+        return 'http://%s/filelist/%s.json'%(PROPERTIES.getRemoteHost(),getMD5('%s.%s'%(PROPERTIES.getFriendlyName(),id)))
         
         
     def _getPath(self, id):
-        return os.path.join(TEMP_LOC,'%s.json'%(getMD5('%s.%s'%(SETTINGS.getFriendlyName(),id))))
+        return os.path.join(TEMP_LOC,'%s.json'%(getMD5('%s.%s'%(PROPERTIES.getFriendlyName(),id))))
         
         
     def _getTotRuntime(self, id, filelist=[]):
@@ -1669,16 +1669,16 @@ class PauseRule(BaseRule): #Finial RULES [3000-~]
             
     def _set(self, id, filelist=[], resume={"idx":0,"position":0.0,"total":0.0,"file":"","updated":{"instance":"","time":-1}}):
         self.log("[%s] runAction, _set: filelist = %s, resume = %s, url = %s"%(id,len(filelist),resume,self.optionValues[1]))
-        friendly = SETTINGS.getFriendlyName()
+        friendly = PROPERTIES.getFriendlyName()
         if resume.get('updated',{}).get('instance') == friendly: #local
             return setJSON(self._getPath(id),{'resume':resume,'filelist':filelist})
         elif self.optionValues[1]:#remote
-            return requestURL(self.optionValues[1],payload={'uuid':SETTINGS.getMYUUID(),'name':friendly,'payload':{'resume':resume,'filelist':filelist}},json_data=True)
+            return requestURL(self.optionValues[1],payload={'uuid':SETTINGS.getMYUUID(),'name':friendly,'payload':{'resume':resume,'filelist':filelist}})
             
         
     def _get(self, id):
         self.log("[%s] runAction, _get: url = %s"%(id,self.optionValues[1]))
-        if self.optionValues[1]: return requestURL(self.optionValues[1],json_data=True)
+        if self.optionValues[1]: return requestURL(self.optionValues[1])
         else:                    return getJSON(self._getPath(id))
 
 

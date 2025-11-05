@@ -110,7 +110,7 @@ class Player(xbmc.Player):
 
 
     @timeit
-    def getplayingItem(self):
+    def getplayingItem(self, playingItem={}):
         def __update(id, citem={}): #playingItem from listitem maybe outdated, check with channels.json for fresh citem.
             for item in self.service.channels:
                 if item.get('id',random.random()) == id: 
@@ -180,7 +180,8 @@ class Player(xbmc.Player):
 
 
     def isPseudoTV(self):
-        return (self.pendingItem.get('playingItem',{}).get('isPseudoTV') or self.playingItem.get('isPseudoTV') or self.getplayingItem().get('isPseudoTV') or False)
+        if self.isPlaying(): return self.getplayingItem().get('isPseudoTV')
+        else:                return (self.pendingItem.get('playingItem',{}).get('isPseudoTV') or self.playingItem.get('isPseudoTV') or False)
 
 
     def isPlayingPseudoTV(self):
@@ -215,9 +216,9 @@ class Player(xbmc.Player):
                 self.playingItem = playingItem
                 if playingItem.get('radio',False): 
                     BUILTIN.executebuiltin('Action(back)')
-                    BUILTIN.executebuiltin('ReplaceWindow(visualisation)')
+                    BUILTIN.executewindow('ReplaceWindow(visualisation)')
                 elif playingItem.get('isPlaylist',False): 
-                    BUILTIN.executebuiltin('ReplaceWindow(fullscreenvideo)')
+                    BUILTIN.executewindow('ReplaceWindow(fullscreenvideo)')
                 self.toggleInfo(self.infoOnChange)
             self.jsonRPC.quePlaycount(oldInfo.get('fitem',{}),self.rollbackPlaycount)
             self.jsonRPC._setRuntime(playingItem.get('fitem',{}),playingItem.get('runtime'),self.saveDuration)
@@ -275,7 +276,7 @@ class Player(xbmc.Player):
             sec += 1
             msg = '%s\n%s'%(LANGUAGE(32039),LANGUAGE(32040)%(FIFTEEN-sec))
             dia = DIALOG.progressDialog((inc*sec),dia, msg)
-            if self.waitForAbort(1.0) or dia is None:
+            if self.service._shutdown(1.0) or dia is None:
                 cnx = True
                 break
         DIALOG.progressDialog(100,dia)
@@ -308,7 +309,7 @@ class Player(xbmc.Player):
                     resume = {"position":self.getPlayedTime(),
                               "total":   self.getPlayerTime(),
                               "file" :   self.playingItem.get('fitem',{}).get('file'),
-                              "updated":{'instance':SETTINGS.getFriendlyName(),'time':getUTCstamp()}}
+                              "updated":{'instance':PROPERTIES.getFriendlyName(),'time':getUTCstamp()}}
                     self.playingItem.setdefault('resume',{}).update(resume)
                     self.log('__chkResumeTime, resume = %s'%(self.playingItem.get('resume')))
 
@@ -330,12 +331,12 @@ class Player(xbmc.Player):
                 
         def __chkSleep():
             if self.sleepTime > 0 and (self.idleTime > (self.sleepTime * 10800)):
-                if not PROPERTIES.isRunning('__chkSleep'):
-                    with PROPERTIES.chkRunning('__chkSleep'):
+                if not PROPERTIES.isRunning('Player.__chkSleep'):
+                    with PROPERTIES.chkRunning('Player.__chkSleep'):
                         if self._onSleep(): self.stop()
                         
-        if not PROPERTIES.isRunning('_onIdle'):
-            with PROPERTIES.chkRunning('_onIdle'):
+        if not PROPERTIES.isRunning('Player._onIdle'):
+            with PROPERTIES.chkRunning('Player._onIdle'):
                 __chkPlayback()
                 __chkBackground()
                 __chkResumeTime()
@@ -387,7 +388,7 @@ class Player(xbmc.Player):
         
     def toggleInfo(self, state: bool=SETTINGS.getSettingBool('Enable_OnInfo')):
         if state and not self.isPlayingFiller():
-            BUILTIN.executebuiltin('ActivateWindow(fullscreeninfo)')
+            BUILTIN.executewindow('ActivateWindow(fullscreeninfo)')
             timerit(self.toggleInfo)(float(OSD_TIMER),[False])
         elif not state and BUILTIN.getInfoBool('IsVisible(fullscreeninfo)','Window'):
             BUILTIN.executebuiltin('Action(back)')

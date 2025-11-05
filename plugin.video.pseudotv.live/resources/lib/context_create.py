@@ -50,6 +50,7 @@ class Create:
                     manager.closeManager()
                     del manager
                     PROPERTIES.setEpochTimer('chkChannels')#trigger channel building
+                    PROPERTIES.setPropTimer('chkChannels')#trigger channel building
                 manager = Manager(MANAGER_XML, ADDON_PATH, "default", channel=channelData['number'])
                 del manager
                 
