@@ -36,4 +36,4 @@ def run(sysARG, fitem: dict={}, nitem: dict={}):
         if   mode == 'play':     threadit(Plugin(sysARG, sysInfo=params).playTV)(params["name"],params["chid"])
         elif mode == 'playlist': threadit(Plugin(sysARG, sysInfo=params).playPlaylist)(params["name"],params["chid"])
             
-if __name__ == '__main__': timerit(run)(0.1,[sys.argv, decodePlot(BUILTIN.getInfoLabel('Plot')), decodePlot(BUILTIN.getInfoLabel('NextPlot'))])
+if __name__ == '__main__': threadit(run)(sys.argv, decodePlot(BUILTIN.getInfoLabel('Plot')), decodePlot(BUILTIN.getInfoLabel('NextPlot')))

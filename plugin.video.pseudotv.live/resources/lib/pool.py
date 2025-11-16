@@ -139,12 +139,12 @@ class ExecutorPool:
         self.CPUCount = cpu_count
         if POOL_ENABLED: self.pool = ProcessPoolExecutor
         else:            self.pool = ThreadPoolExecutor
-        self.log(f"__init__, multiprocessing = {POOL_ENABLED}, CORES = {self.CPUCount}, THREADS = {self._calculate_thread_count()}")
+        self.log(f"__init__, multiprocessing = {POOL_ENABLED}, CORES = {self.CPUCount}, THREADS = {self.cpuCount()}")
 
 
-    def _calculate_thread_count(self):
+    def cpuCount(self):
         if POOL_ENABLED: return self.CPUCount
-        else:            return int(os.getenv('THREAD_COUNT', self.CPUCount * 4))
+        else:            return int(os.getenv('THREAD_COUNT', self.CPUCount * 2))
             
             
     def log(self, msg, level=xbmc.LOGDEBUG):
@@ -153,14 +153,14 @@ class ExecutorPool:
 
     def executor(self, func, timeout=None, *args, **kwargs):
         self.log("executor, func = %s, timeout = %s"%(func.__name__,timeout))
-        with self.pool(self._calculate_thread_count()) as executor:
+        with self.pool(self.cpuCount()) as executor:
             try: return executor.submit(func, *args, **kwargs).result(timeout)
             except Exception as e: self.log("executor, func = %s failed! %s\nargs = %s, kwargs = %s"%(func.__name__,e,args,kwargs), xbmc.LOGERROR)
 
 
     def executors(self, func, items=[], *args, **kwargs):
         self.log("executors, func = %s, items = %s"%(func.__name__,len(items)))
-        with self.pool(self._calculate_thread_count()) as executor:
+        with self.pool(self.cpuCount()) as executor:
             try: return list(filter(lambda item: item is not None, executor.map(wrapped_partial(func, *args, **kwargs), items)))
             except Exception as e: self.log("executors, func = %s, items = %s failed! %s\nargs = %s, kwargs = %s"%(func.__name__,len(items),e,args,kwargs), xbmc.LOGERROR)
 

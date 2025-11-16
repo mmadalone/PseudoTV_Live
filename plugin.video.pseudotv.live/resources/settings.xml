@@ -20,7 +20,7 @@
                 </setting>
             </group>
             <group id="2" label="30161">
-                <setting id="Select_Channels" type="string" label="30107" help="33310">
+                <setting id="Open_Manager" type="string" label="30107" help="33310">
                     <level>1</level>
                     <constraints>
                         <allowempty>true</allowempty>
@@ -30,7 +30,7 @@
                         <close>true</close>
                     </control>
                 </setting>
-                <setting id="Default_Channels" type="string" label="30172" help="33172" parent="Select_Channels">
+                <setting id="Default_Channels" type="string" label="30172" help="33172" parent="Open_Manager">
                     <level>3</level>
                     <default>Auto</default>
                     <constraints>
@@ -46,7 +46,7 @@
                         <close>true</close>
                     </control>
                 </setting>
-				<setting id="Run_Autotune" type="string" label="30210" help="" parent="Select_Channels">
+				<setting id="Open_Wizard" type="string" label="30210" help="" parent="Open_Manager">
 					<level>0</level>
 					<default/>
 					<constraints>
@@ -57,7 +57,7 @@
 						<close>true</close>
 					</control>
 				</setting>
-                <setting id="Backup_Channels" type="string" label="32110" help="33110" parent="Select_Channels">
+                <setting id="Backup_Channels" type="string" label="32110" help="33110" parent="Open_Manager">
                     <level>2</level>
                     <constraints>
                         <allowempty>true</allowempty>

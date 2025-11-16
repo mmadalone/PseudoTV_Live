@@ -53,7 +53,7 @@ BACKUP_TIME_FORMAT  = '%Y-%m-%d %I:%M %p'
 
 LANG                = 'en' #todo parse kodi region settings
 DEFAULT_ENCODING    = "utf-8"
-PROMPT_DELAY        = 4000 #msecs
+PROMPT_DELAY        = 4    #secs
 AUTOCLOSE_DELAY     = 300  #secs
 SELECT_DELAY        = 900  #secs
 RADIO_ITEM_LIMIT    = 250

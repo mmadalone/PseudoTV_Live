@@ -37,19 +37,21 @@ from globals   import *
         # DIALOG.qrDialog(URL_WIKI,LANGUAGE(32216)%(ADDON_NAME,ADDON_AUTHOR))
 
 class Wizard(xbmcgui.WindowXMLDialog):
+    lastActionTime = time.time()
     
     def __init__(self, *args, **kwargs):
         self.log('__init__')    
         xbmcgui.WindowXMLDialog.__init__(self, *args, **kwargs)    
         with BUILTIN.busy_dialog():
             self.tasks   = kwargs.get('inherited')
-            self.cache   = tasks.cache    
-            self.cacheDB = tasks.cacheDB        
-            self.jsonRPC = tasks.jsonRPC
-            self.player  = tasks.player
-            self.monitor = tasks.monitor
+            self.cache   = SETTINGS.cache    
+            self.cacheDB = SETTINGS.cacheDB
+            self.player  = PLAYER()
+            self.monitor = MONITOR()
             
-        self.doModal()
+        if not PROPERTIES.isRunning('chkWizard'):
+            with PROPERTIES.chkRunning('chkWizard'):
+                self.doModal()
             
         
     def log(self, msg, level=xbmc.LOGDEBUG):
@@ -57,9 +59,32 @@ class Wizard(xbmcgui.WindowXMLDialog):
         
         
     def onInit(self):
-        self.log('onInit')   
+        self.log('onInit')  
+
+        
+    def isLocked(self):
+        return PROPERTIES.getEXTPropertyBool('%s.Wizard.isLocked'%(ADDON_ID))
         
         
+    def setLocked(self, state=True):
+        self.getControl(41).setColorDiffuse({True:"0xC0FF0000",False:"0xFFFFFFFF"}[PROPERTIES.setEXTPropertyBool('%s.Wizard.isLocked'%(ADDON_ID),state)])
+
+
+    @contextmanager
+    def toggleSpinner(self, state=True, lock=True, condition=None):
+        self.log('toggleSpinner, state = %s, condition = %s, lock = %s'%(state,condition,lock))
+        if not condition is None and condition:
+            PROPERTIES.setRunning('Manager.toggleSpinner',state)
+            self.setVisibility(self.spinner,state)
+            if lock: self.setLocked(True)
+            try: yield
+            finally:
+                if self.isLocked(): self.setLocked(False)
+                self.setVisibility(self.spinner,False)
+                PROPERTIES.setRunning('Manager.toggleSpinner',False)
+        else: yield
+
+
     def onClose(self):
         # SETTINGS.hasAutotuned()
         self.close()
@@ -67,18 +92,22 @@ class Wizard(xbmcgui.WindowXMLDialog):
         
     def onAction(self, act):
         actionId = act.getId()   
-        self.log('onAction: actionId = %s'%(actionId))
         if (time.time() - self.lastActionTime) < .5 and actionId not in ACTION_PREVIOUS_MENU: action = ACTION_INVALID # during certain times we just want to discard all input
         else:
             if actionId in ACTION_PREVIOUS_MENU:
-                self.onClose()
-                
+                if self.isLocked(): DIALOG.notificationDialog(LANGUAGE(32260))
+            else:
+                with self.toggleSpinner(condition=PROPERTIES.isRunning('Wizard.toggleSpinner')==False):
+                    self.log('onAction: actionId = %s, locked = %s'%(actionId,self.isLocked()))
+
             
     def onFocus(self, controlId):
         self.log('onFocus: controlId = %s'%(controlId))
 
         
     def onClick(self, controlId):
-        self.log('onClick: controlId = %s'%(controlId))
-        
-        
+        if (self.isLocked() or (time.time() - self.lastActionTime) < .5): DIALOG.notificationDialog(LANGUAGE(32260))
+        else:
+            with self.toggleSpinner(condition=PROPERTIES.isRunning('Wizard.toggleSpinner')==False):
+                self.log('onClick: controlId = %s, locked = %s'%(controlId,self.isLocked()))
+                if controlId == 0: self.onClose()

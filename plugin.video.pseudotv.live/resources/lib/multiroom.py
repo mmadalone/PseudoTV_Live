@@ -220,5 +220,5 @@ class Multiroom:
         return SETTINGS.openSettings(ctl)
 
 
-if __name__ == '__main__': timerit(Multiroom(sys.argv)._run)(0.1)
+if __name__ == '__main__': threadit(Multiroom(sys.argv)._run)
     

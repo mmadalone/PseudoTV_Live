@@ -80,9 +80,9 @@ class Match:
 if __name__ == '__main__': 
     param = sys.argv[1]
     log('Info: __main__, param = %s'%(param))
-    if   param == 'info':   timerit(Info)(0.1  ,[sys.argv ,sys.listitem,decodePlot(BUILTIN.getInfoLabel('Plot'))])
-    elif param == 'browse': timerit(Browse)(0.1,[sys.argv,sys.listitem,decodePlot(BUILTIN.getInfoLabel('Plot'))])
-    elif param == 'match':  timerit(Match)(0.1 ,[sys.argv ,sys.listitem,decodePlot(BUILTIN.getInfoLabel('Plot'))])
+    if   param == 'info':   threadit(Info)(sys.argv ,sys.listitem,decodePlot(BUILTIN.getInfoLabel('Plot')))
+    elif param == 'browse': threadit(Browse)(sys.argv,sys.listitem,decodePlot(BUILTIN.getInfoLabel('Plot')))
+    elif param == 'match':  threadit(Match)(sys.argv ,sys.listitem,decodePlot(BUILTIN.getInfoLabel('Plot')))
         
    
    

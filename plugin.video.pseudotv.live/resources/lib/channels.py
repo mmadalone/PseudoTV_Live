@@ -103,14 +103,14 @@ class Channels:
     def setChannels(self, channels: list=[]) -> bool:
         if len(channels) == 0: channels = self.channelDATA['channels']
         self.channelDATA['channels'] = channels
-        SETTINGS.setSetting('Select_Channels','[B]%s[/B] Channels'%(len(channels)))
+        SETTINGS.setSetting('Open_Manager','[B]%s[/B] Channels'%(len(channels)))
         PROPERTIES.setChannels(len(channels)>0)
         return self._save()
 
     
     def loadChannels(self):
         channelDATA = self._load()
-        SETTINGS.setSetting('Select_Channels','[B]%s[/B] Channels'%(len(channelDATA.get('channels',[]))))
+        SETTINGS.setSetting('Open_Manager','[B]%s[/B] Channels'%(len(channelDATA.get('channels',[]))))
         return channelDATA
         
     

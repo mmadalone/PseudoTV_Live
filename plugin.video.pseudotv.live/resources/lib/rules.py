@@ -18,6 +18,7 @@
 
 # -*- coding: utf-8 -*-
 from globals    import *
+from jsonrpc    import JSONRPC
 from seasonal   import Seasonal
 from channels   import Channels
 #todo pinlock
@@ -1352,12 +1353,10 @@ class HandleMethodOrder(BaseRule):
 
 
     def getSort(self):
-        from jsonrpc import JSONRPC
         return JSONRPC().getEnums("List.Sort",type="method")
 
 
     def getOrder(self):
-        from jsonrpc import JSONRPC
         return JSONRPC().getEnums("List.Sort",type="order")
 
 
@@ -1651,7 +1650,6 @@ class PauseRule(BaseRule): #Finial RULES [3000-~]
         
         
     def _getTotRuntime(self, id, filelist=[]):
-        from jsonrpc import JSONRPC
         return JSONRPC().getTotRuntime(filelist)
             
 

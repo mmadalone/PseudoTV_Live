@@ -96,4 +96,4 @@ class Backup:
             if   param == 'Recover_Backup': self.recoverChannels()
             elif param == 'Backup_Channels':  self.backupChannels()
         
-if __name__ == '__main__': timerit(Backup(sys.argv).run)(0.1)
+if __name__ == '__main__': threadit(Backup(sys.argv).run)

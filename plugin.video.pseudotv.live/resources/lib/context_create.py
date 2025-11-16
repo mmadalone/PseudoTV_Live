@@ -66,7 +66,7 @@ if __name__ == '__main__':
     log('Create: __main__, param = %s'%(sys.argv))
     try:    mode = sys.argv[1]
     except: mode = ''
-    if mode == 'manage':  timerit(Create(sys.argv,sys.listitem,decodePlot(BUILTIN.getInfoLabel('Plot')).open)(0.1)
-    else:                 timerit(Create(sys.argv,sys.listitem,decodePlot(BUILTIN.getInfoLabel('Plot')).add)(0.1)
+    if mode == 'manage':  threadit(Create(sys.argv,sys.listitem,decodePlot(BUILTIN.getInfoLabel('Plot')).open)
+    else:                 threadit(Create(sys.argv,sys.listitem,decodePlot(BUILTIN.getInfoLabel('Plot')).add)
     
     

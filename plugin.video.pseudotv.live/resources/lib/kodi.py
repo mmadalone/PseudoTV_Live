@@ -362,10 +362,11 @@ class Settings:
                 return match, __match('All channels')
             
         if self.builtin.hasPVR():
-            instance, path = __match(instance)
-            self.log('openGuide, instance = %s, path = %s'%(instance,path))
-            if path: self.builtin.executewindow("ReplaceWindow(TVGuide,%s)"%(path),condition=partial(self.builtin.executebuiltin,key="Dialog.Close(all,true)"))
-            else:    self.builtin.executewindow("ReplaceWindow(TVGuide)")
+            try:
+                instance, path = __match(instance)
+                self.log('openGuide, instance = %s, path = %s'%(instance,path))
+                self.builtin.executewindow("ReplaceWindow(TVGuide,%s)"%(path),condition=partial(self.builtin.executebuiltin,key="Dialog.Close(all,true)"))
+            except: self.builtin.executewindow("ReplaceWindow(TVGuide)")
         else: self.builtin.executewindow("ReplaceWindow(Home)")
         
 
@@ -649,12 +650,20 @@ class Settings:
                
 
     def getFileCRC(self, file):
-        crc  = getCRC32(file)
-        name = 'getFileCRC.%s'%(getMD5(file))
-        cacheResponse = self.getCacheSetting(name, checksum=crc)
-        if not cacheResponse or cacheResponse != crc:  return self.setCacheSetting(name, crc, checksum=crc)
-            
-
+        try:
+            fle = FileAccess.open(file,'r')
+            crc = getCRC32(fle.read())
+            fle.close()
+            name  = 'getFileCRC.%s'%(getMD5(file))
+            cache = self.getCacheSetting(name, checksum=crc)
+            if not cache or cache != crc:
+                self.setCacheSetting(name, crc, checksum=crc)
+                return True
+            return False
+        except Exception as e:
+            self.log("getFileCRC, failed! %s"%(file,e), xbmc.LOGERROR)
+            return False
+        
 class Properties:
     def __init__(self, winID=10000):
         self.log('__init__, winID = %s'%(winID))
@@ -1540,8 +1549,8 @@ class Dialog:
         ## - xbmcgui.NOTIFICATION_WARNING
         ## - xbmcgui.NOTIFICATION_ERROR
         if show:
-            try:    self.dialog.notification(header, message, icon, time, sound=False)
-            except: self.builtin.executebuiltin("Notification(%s, %s, %d, %s)" % (header, message, time, icon))
+            try:    self.dialog.notification(header, message, icon, time*1000, sound=False)
+            except: self.builtin.executebuiltin("Notification(%s, %s, %d, %s)" % (header, message, time*1000, icon))
         return True
              
              

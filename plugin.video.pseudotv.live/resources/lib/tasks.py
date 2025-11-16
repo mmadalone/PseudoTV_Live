@@ -72,9 +72,9 @@ class Tasks():
 
     def chkWizard(self):
         self.log('chkWizard')
-        # if not SETTINGS.hasWizardRun():
-            # return Wizard(WIZARD_XML, ADDON_PATH, "default", inherited=self)
-        
+        if not SETTINGS.hasWizardRun():
+            BUILTIN.executescript('special://home/addons/%s/resources/lib/utilities.py, Run_Wizard'%(ADDON_ID))
+            
 
     def chkDebugging(self):
         self.log('chkDebugging')

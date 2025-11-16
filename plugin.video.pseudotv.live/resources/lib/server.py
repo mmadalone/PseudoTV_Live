@@ -109,26 +109,27 @@ class MyHandler(BaseHTTPRequestHandler):
                 for server in list(Multiroom().getDiscovery().values()):
                     if server.get('uuid') == uuid: return True
 
-        with PROPERTIES.suspendActivity():
-            if self.path.lower().endswith('.json'):
-                try:    incoming = loadJSON(self.rfile.read(int(self.headers['content-length'])).decode())
-                except: incoming = {}
-                if __verifyUUID(incoming.get('uuid')):
+        if self.path.lower().endswith('.json'):
+            try:    incoming = loadJSON(self.rfile.read(int(self.headers['content-length'])).decode())
+            except: incoming = {}
+            
+            if __verifyUUID(incoming.get('uuid')):
+                with PROPERTIES.suspendActivity():
                     self.log('do_POST incoming uuid [%s] verified!'%(incoming.get('uuid')))
                     #channels - channel manager save
                     if self.path.lower() == '/%s'%(CHANNELFLE.lower()) and incoming.get('payload'):
                         from channels import Channels
                         if Channels().setChannels(list(Channels()._verify(incoming.get('payload')))):
                             DIALOG.notificationDialog(LANGUAGE(30085)%(LANGUAGE(30108),incoming.get('name',ADDON_NAME)))
-                        return self.send_response(200, "OK")
+                        self.send_response(200, "OK")
                     #filelist w/resume - paused channel rule
                     elif self.path.lower().startswith('/filelist') and incoming.get('payload'):
                         if setJSON(os.path.join(TEMP_LOC,self.path.replace('/filelist/','')),incoming.get('payload')):
                             DIALOG.notificationDialog(LANGUAGE(30085)%(LANGUAGE(30060),incoming.get('name',ADDON_NAME)))
-                        return self.send_response(200, "OK")
+                        self.send_response(200, "OK")
                     else: self.send_error(401, "Path Not found")
-                else: return self.send_error(401, "UUID Not verified!")
-            else: return self.do_GET()
+            else: self.send_error(401, "UUID Not verified!")
+        else: return self.do_GET()
                     
                 
     def do_GET(self):
@@ -148,47 +149,43 @@ class MyHandler(BaseHTTPRequestHandler):
                 chunk = fle.readBytes()
             __sendChunk(chunk,compress)
             
-        with PROPERTIES.suspendActivity():
-            try:
-                file_path       = self.path.lower()
-                accept_encoding = self.headers.get("Accept-Encoding", "")
-                use_compression = "gzip" in accept_encoding
-                
-                # Determine Content-Type
-                if   file_path.endswith('.json'): content_type = "application/json"
-                elif file_path.endswith('.m3u'):  content_type = "application/vnd.apple.mpegurl"
-                elif file_path.endswith('.xml'):  content_type = "text/plain"
-                elif file_path.endswith('.html'): content_type = "text/html"
-                else:
-                    guessed_type = mimetypes.guess_type(file_path[1:])[0]
-                    content_type = guessed_type if guessed_type else "application/octet-stream"
+        try:
+            file_path       = self.path.lower()
+            accept_encoding = self.headers.get("Accept-Encoding", "")
+            use_compression = "gzip" in accept_encoding
+            
+            # Determine Content-Type
+            if   file_path.endswith('.json'): content_type = "application/json"
+            elif file_path.endswith('.m3u'):  content_type = "application/vnd.apple.mpegurl"
+            elif file_path.endswith('.xml'):  content_type = "text/plain"
+            elif file_path.endswith('.html'): content_type = "text/html"
+            else:
+                guessed_type = mimetypes.guess_type(file_path[1:])[0]
+                content_type = guessed_type if guessed_type else "application/octet-stream"
 
-                self.send_response(200)
-                self.send_header("Content-type", content_type)
-                
-                if   file_path == '/favicon.ico':                   return self.send_response(204)  # 204 No Content
-                elif file_path == f'/{M3UFLE.lower()}':             __sendFile(M3UFLEPATH, use_compression)
-                elif file_path == f'/{GENREFLE.lower()}':           __sendFile(GENREFLEPATH, use_compression)
-                elif file_path == f'/{XMLTVFLE.lower()}':           __sendFile(XMLTVFLEPATH, use_compression)
-                elif file_path.startswith(('/images/', '/logos/')): __sendFile(os.path.join(LOGO_LOC,unquoteString(self.path.replace('/images/','').replace('/logos/',''))), False)
-                else:
-                    chunk = b''
-                    if   file_path == f'/{BONJOURFLE.lower()}': chunk = dumpJSON(SETTINGS.getBonjour(inclChannels=True),idnt=4).encode(encoding=DEFAULT_ENCODING)
-                    elif file_path.startswith('/filelist'):     chunk = dumpJSON(getJSON((os.path.join(TEMP_LOC, self.path.replace('/filelist/', ''))))).encode(encoding=DEFAULT_ENCODING)
-                    elif file_path.startswith('/remote'):
-                        if   file_path.endswith('.json'):       chunk = dumpJSON(SETTINGS.getPayload(),idnt=4).encode(encoding=DEFAULT_ENCODING)
-                        elif file_path.endswith('.html'): 
-                            use_compression = False
-                            chunk = SETTINGS.getPayloadUI().encode(encoding=DEFAULT_ENCODING)
-                        else: return self.send_error(404, "File Not Found [%s]" % self.path)
+            self.send_response(200)
+            self.send_header("Content-type", content_type)
+            
+            if   file_path == '/favicon.ico':                   return self.send_response(204)  # 204 No Content
+            elif file_path == f'/{M3UFLE.lower()}':             __sendFile(M3UFLEPATH, use_compression)
+            elif file_path == f'/{GENREFLE.lower()}':           __sendFile(GENREFLEPATH, use_compression)
+            elif file_path == f'/{XMLTVFLE.lower()}':           __sendFile(XMLTVFLEPATH, use_compression)
+            elif file_path.startswith(('/images/', '/logos/')): __sendFile(os.path.join(LOGO_LOC,unquoteString(self.path.replace('/images/','').replace('/logos/',''))), False)
+            else:
+                chunk = b''
+                if   file_path == f'/{BONJOURFLE.lower()}': chunk = dumpJSON(SETTINGS.getBonjour(inclChannels=True),idnt=4).encode(encoding=DEFAULT_ENCODING)
+                elif file_path.startswith('/filelist'):     chunk = dumpJSON(getJSON((os.path.join(TEMP_LOC, self.path.replace('/filelist/', ''))))).encode(encoding=DEFAULT_ENCODING)
+                elif file_path.startswith('/remote'):
+                    if   file_path.endswith('.json'):       chunk = dumpJSON(SETTINGS.getPayload(),idnt=4).encode(encoding=DEFAULT_ENCODING)
+                    elif file_path.endswith('.html'): 
+                        use_compression = False
+                        chunk = SETTINGS.getPayloadUI().encode(encoding=DEFAULT_ENCODING)
                     else: return self.send_error(404, "File Not Found [%s]" % self.path)
-                    self.log('do_GET, file_path = %s, use_compression = %s'%(file_path, use_compression))
-                    __sendChunk(chunk, use_compression)
-            except FileNotFoundError:
-                self.send_error(404, "File Not Found [%s]" % self.path)
-            except Exception as e:
-                self.log_error("Exception during GET request: %s", e)
-                self.send_error(500, "Internal Server Error")
+                else:     return self.send_error(404, "File Not Found [%s]" % self.path)
+                self.log('do_GET, file_path = %s, use_compression = %s'%(file_path, use_compression))
+                __sendChunk(chunk, use_compression)
+        except FileNotFoundError: self.send_error(404, "File Not Found [%s]" % self.path)
+        except Exception as e: self.send_error(500, "Internal Server Error")
 
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
