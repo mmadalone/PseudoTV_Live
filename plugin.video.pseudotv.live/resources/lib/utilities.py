@@ -239,19 +239,7 @@ class Utilities:
                 log('Utilities: buildMenu, failed! %s'%(e), xbmc.LOGERROR)
                 return DIALOG.notificationDialog(LANGUAGE(32000))
         else: SETTINGS.openSettings((6,1))
-         
-    @staticmethod
-    def openChannelManager(chnum: int=1):
-        log('Utilities: openChannelManager, chnum = %s'%(chnum))
-        try:
-            with BUILTIN.busy_dialog(lock=True):
-                from manager import Manager
-                chmanager = Manager(MANAGER_XML, ADDON_PATH, "default", channel=chnum)
-                del chmanager
-        except Exception as e: 
-            log('Utilities: openChannelManager, failed! %s'%(e), xbmc.LOGERROR)
-            DIALOG.notificationDialog(LANGUAGE(30079))
-     
+        
     @staticmethod
     def openPositionUtil(idx):
         log('Utilities: openPositionUtil, idx = %s'%(idx))
@@ -282,12 +270,7 @@ class Utilities:
             except: param = None
             log('Utilities: param = %s'%(param))
             
-            #Channels
-            if param.startswith('Channel_Manager'):
-                ctl = (0,1)
-                Utilities().openChannelManager()
-                
-            elif param.startswith('Default_Channels'):
+            if param.startswith('Default_Channels'):
                 ctl = (0,2)
                 Utilities().selectChannels()
                 

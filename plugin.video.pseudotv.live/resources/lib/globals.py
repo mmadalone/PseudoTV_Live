@@ -331,7 +331,8 @@ def cleanGroups(citem, enableGrouping=SETTINGS.getSettingBool('Enable_Grouping')
             citem['group'].append(LANGUAGE(32019))
         elif not citem.get('favorite',False) and LANGUAGE(32019) in citem['group']:
              citem['group'].remove(LANGUAGE(32019))
-    return sorted(set(citem['group']))
+    citem['group'] = sorted(set(citem['group']))
+    return citem
         
 def cleanMPAA(mpaa):
     orgMPA = mpaa

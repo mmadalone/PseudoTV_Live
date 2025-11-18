@@ -29,35 +29,40 @@ class Create:
         
         
     def add(self):
+        log('Create: add')
         if not self.listitem.getPath(): return DIALOG.notificationDialog(LANGUAGE(32030))
         elif DIALOG.yesnoDialog('Would you like to add:\n[B]%s[/B]\nto the first available %s channel?'%(self.listitem.getLabel(),ADDON_NAME)):
             if not PROPERTIES.isRunning('Create.add'):
-                with PROPERTIES.chkRunning('Create.add'), BUILTIN.busy_dialog(), PROPERTIES.interruptActivity():
+                with PROPERTIES.chkRunning('Create.add'), BUILTIN.busy_dialog(lock=True):
                     manager = Manager(MANAGER_XML, ADDON_PATH, "default", start=False, channel=-1)
-                    channelData = manager.newChannel
-                    channelData['type']     = 'Custom'
-                    channelData['favorite'] = True
-                    channelData['number']   = manager.getFirstAvailChannel()
-                    channelData['radio']    = True if self.listitem.getPath().startswith('musicdb://') else False
-                    channelData['name'], channelData = manager.validateLabel(cleanLabel(self.listitem.getLabel()),channelData)
-                    path, channelData   = manager.validatePath(unquoteString(self.listitem.getPath()),channelData,spinner=False)
-                    if path is None: return
-                    channelData['changed'] = True
-                    channelData['path'] = [path.strip('/')] 
-                    channelData['id'] = getChannelID(channelData['name'], channelData['path'], channelData['number'], SETTINGS.getMYUUID())
-                    manager.channels.addChannel(channelData)
-                    manager.channels.setChannels()
-                    manager.closeManager()
+                    citem           = manager.newChannel
+                    citem['number'] = manager.getFirstChannel()
+                    citem['type']   = 'Custom'
+                    path, citem = manager.validatePaths(unquoteString(self.listitem.getPath()),citem)
+                    name, citem = manager.validateInputs('name',cleanLabel(self.listitem.getLabel()),citem)
+                    if not path is None:
+                        citem['path']     = [path.strip('/')] 
+                        citem['name']     = name
+                        citem['id']       = getChannelID(citem['name'], citem['path'], citem['number'], SETTINGS.getMYUUID())
+                        citem['favorite'] = True
+                        citem['changed']  = True
+                        citem['radio']    = True if path.startswith('musicdb://') else False
+                        
+                        with PROPERTIES.interruptActivity():
+                            manager.channels.addChannel(manager.setLogo(citem['name'], citem))
+                            manager.channels.setChannels()
+                            manager.closeManager()
+                        PROPERTIES.setEpochTimer('chkChannels')#trigger channel building
+                        PROPERTIES.setPropTimer('chkChannels')#trigger channel building
+                        del manager
+                        manager = Manager(MANAGER_XML, ADDON_PATH, "default", channel=citem['number'])
                     del manager
-                    PROPERTIES.setEpochTimer('chkChannels')#trigger channel building
-                    PROPERTIES.setPropTimer('chkChannels')#trigger channel building
-                manager = Manager(MANAGER_XML, ADDON_PATH, "default", channel=channelData['number'])
-                del manager
                 
                 
     def open(self):
+        log('Create: open')
         if not PROPERTIES.isRunning('Create.open'):
-            with PROPERTIES.chkRunning('Create.open'), BUILTIN.busy_dialog(), PROPERTIES.interruptActivity():
+            with PROPERTIES.chkRunning('Create.open'), BUILTIN.busy_dialog(lock=True):
                 manager = Manager(MANAGER_XML, ADDON_PATH, "default", channel=self.fitem.get('citem',{}).get('number',1))
             del manager
         
@@ -66,7 +71,7 @@ if __name__ == '__main__':
     log('Create: __main__, param = %s'%(sys.argv))
     try:    mode = sys.argv[1]
     except: mode = ''
-    if mode == 'manage':  threadit(Create(sys.argv,sys.listitem,decodePlot(BUILTIN.getInfoLabel('Plot')).open)
-    else:                 threadit(Create(sys.argv,sys.listitem,decodePlot(BUILTIN.getInfoLabel('Plot')).add)
-    
-    
+    try:    listitem = sys.listitem
+    except: listitem = xbmcgui.ListItem()
+    if mode == 'manager': Create(sys.argv,listitem,decodePlot(BUILTIN.getInfoLabel('Plot'))).open()
+    else:                 Create(sys.argv,listitem,decodePlot(BUILTIN.getInfoLabel('Plot'))).add()

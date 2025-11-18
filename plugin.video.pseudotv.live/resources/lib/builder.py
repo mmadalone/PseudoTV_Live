@@ -150,9 +150,7 @@ class Builder:
                 
         def __addStation(citem: dict) -> bool:
             self.log('[%s] __addStation'%(citem['id']))
-            citem['logo']  = self.resources.buildWebImage(cleanImage(citem['logo']))
-            citem['group'] = cleanGroups(citem, self.enableGrouping)
-            sitem = self.m3u.getStationItem(citem)
+            sitem = self.m3u.getStationItem(cleanGroups(citem, self.enableGrouping))
             return self.m3u.addStation(sitem) & self.xmltv.addChannel(sitem)
         
         def __addProgrammes(citem: dict, fileList: list) -> bool:

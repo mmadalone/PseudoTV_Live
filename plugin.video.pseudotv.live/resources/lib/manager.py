@@ -37,23 +37,19 @@ ACTION_SELECT_ITEM   = 7
 ACTION_INVALID       = 999
 ACTION_SHOW_INFO     = [11,24,401]
 ACTION_PREVIOUS_MENU = [92, 10,110,521] #+ [9, 92, 216, 247, 257, 275, 61467, 61448]
-     
+ 
 class Manager(xbmcgui.WindowXMLDialog):
     focusIndex     = -1
     newChannels    = []
     lockAutotune   = True
+    spinner        = None
     monitor        = MONITOR()
     lastActionTime = time.time()
     
     def __init__(self, *args, **kwargs):
         self.log('__init__, running = %s'%(PROPERTIES.isRunning('Manager.__init__')))
         xbmcgui.WindowXMLDialog.__init__(self, *args, **kwargs)    
-    
-        def __getFirstChannel(channelList):
-            for channel in channelList:
-                if not channel.get('id'): return channel.get('number')
-            return 1
-            
+
         def __findAutotuned(chnum, retitem=False, channels=[]):
             for idx, channel in enumerate(channels):
                 if channel.get('number') == (chnum or 1): 
@@ -62,7 +58,7 @@ class Manager(xbmcgui.WindowXMLDialog):
 
         def __loadChannels(name=SETTINGS.getSetting('Default_Channels')): #load local or remote channel configurations
             self.log('__loadChannels, name = %s, local = %s'%(name, self.friendly))
-            if   name == self.friendly: return self.channels.getChannels() #Local
+            if   name == self.friendly or not kwargs.get('start',False): return self.channels.getChannels() #Local
             elif name == LANGUAGE(30022):#Auto
                 channels = self.channels.getChannels()
                 if len(channels) > 0: return channels
@@ -112,7 +108,7 @@ class Manager(xbmcgui.WindowXMLDialog):
                 with BUILTIN.busy_dialog(lock=True):
                     self.channelList = self.channels.sortChannels(self.createChannelList(self.buildArray(), __loadChannels()))
                     self.newChannels = self.channelList.copy()
-                    if self.startChannel == -1:            self.startChannel = __getFirstChannel(self.channelList)
+                    if self.startChannel == -1:            self.startChannel = self.getFirstChannel()
                     if self.startChannel <= CHANNEL_LIMIT: self.focusIndex   = (self.startChannel - 1) #Convert from Channel number to array index 1:0 when within CHANNEL_LIMIT
                     else:                                  self.focusIndex   = __findAutotuned(self.startChannel,channels=self.channelList)
                     if self.openChannel: self.openChannel = self.channelList[self.focusIndex]
@@ -143,7 +139,13 @@ class Manager(xbmcgui.WindowXMLDialog):
             log("onInit, failed! %s"%(e), xbmc.LOGERROR)
             self.closeManager()
 
-
+       
+    def getFirstChannel(self):
+        for channel in self.channelList:
+            if not channel.get('id'): return channel.get('number')
+        return 1
+     
+     
     def buildPreview(self, citem={}):
         fileList    = []
         builder     = Builder()
@@ -251,8 +253,9 @@ class Manager(xbmcgui.WindowXMLDialog):
         
         
     def setLocked(self, state=True):
-        self.getControl(41).setColorDiffuse({True:"0xC0FF0000",False:"0xFFFFFFFF"}[PROPERTIES.setEXTPropertyBool('%s.Manager.isLocked'%(ADDON_ID),state)])
-
+        try: self.getControl(41).setColorDiffuse({True:"0xC0FF0000",False:"0xFFFFFFFF"}[PROPERTIES.setEXTPropertyBool('%s.Manager.isLocked'%(ADDON_ID),state)])
+        except: pass
+        
 
     @contextmanager
     def toggleSpinner(self, state=True, lock=True, condition=None):
@@ -267,7 +270,7 @@ class Manager(xbmcgui.WindowXMLDialog):
                 self.setVisibility(self.spinner,False)
                 PROPERTIES.setRunning('Manager.toggleSpinner',False)
         else: yield
-
+        
 
     def togglechanList(self, state=True, focus=0, reset=False):
         self.log('togglechanList, state = %s, focus = %s, reset = %s'%(state,focus,reset))
@@ -383,7 +386,7 @@ class Manager(xbmcgui.WindowXMLDialog):
                 'rules'   : LANGUAGE(32088),
                 'radio'   : LANGUAGE(32084),
                 'favorite': LANGUAGE(32083),
-                'changed' : LANGUAGE(32259)}
+                'changed' : LANGUAGE(33259)}
 
         lizLST = list()
         lizLST.extend(poolit(__buildItem)(list(self.newChannel.keys())))
@@ -618,7 +621,7 @@ class Manager(xbmcgui.WindowXMLDialog):
                           'radio'   :__validateBool,
                           'favorite':__validateBool}.get(key,None)
         try:
-            with toggleSpinner():
+            with self.toggleSpinner():
                 retval, citem = KEY_VALIDATION(value,citem)
                 if retval is None:
                     DIALOG.notificationDialog(LANGUAGE(32077)%key.title()) 

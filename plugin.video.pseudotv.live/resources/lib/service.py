@@ -509,7 +509,7 @@ class Service():
     
         
     def _tasks(self):
-        self._que(self.tasks._chkEpochTimer,-1,*('chkQueTimer', self.tasks.chkQueTimer, DISCOVERY_TIMER)) #keep que alive after interrupt.
+        self._que(self.tasks._chkEpochTimer,-1,*('chkQueTimer', self.tasks.chkQueTimer, FIFTEEN)) #keep que alive after interrupt.
         
     
     def _shutdown(self, wait=1.0) -> bool: #service break

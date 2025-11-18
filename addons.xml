@@ -57,9 +57,9 @@
                     <label>30114</label>
                     <visible>[!ListItem.IsPlayable + ListItem.IsFolder] + [!String.IsEmpty(ListItem.Label)]</visible>
                 </item>
-                <item library="resources/lib/context_create.py" args="manage">
-                    <label>30107</label>
-                    <visible>[String.Contains(ListItem.Plot,"item=")] + [Window.IsVisible(tvchannels)]</visible>
+                <item library="resources/lib/context_create.py" args="manager">
+                    <label>32261</label>
+                    <visible>[String.Contains(ListItem.Plot,"item=")] + [Window.IsVisible(tvguide)|Window.IsVisible(tvchannels)]</visible>
                 </item>
             </menu>
         </menu>

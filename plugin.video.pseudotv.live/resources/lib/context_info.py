@@ -37,15 +37,14 @@ class Browse:
             if '?xsp=' in path:
                 path, params = path.split('?xsp=')
                 path = '%s?xsp=%s'%(path,quoteString(unquoteString(params)))
-            #todo create custom container window with channel listitems.
             log('Browse: target = %s, path = %s'%(media,path))
         BUILTIN.executewindow('ReplaceWindow(%s,%s,return)'%(media,path))
 
 class Match:
     SEARCH_SCRIPT  = None
     GLOBAL_SCRIPT  = 'script.globalsearch'
-    SIMILAR_SCRIPT = 'script.embuary.helper'
-
+    EMBUARY_HELPER = 'script.embuary.helper'
+    
     def __init__(self, sysARG: dict={}, listitem: xbmcgui.ListItem=xbmcgui.ListItem(), fitem: dict={}):
         with BUILTIN.busy_dialog():
             title  = BUILTIN.getInfoLabel('Title')
@@ -54,8 +53,8 @@ class Match:
             dbid   = (fitem.get('tvshowid') or fitem.get('movieid'))
             log('Match: __init__, sysARG = %s, title = %s, dbtype = %s, dbid = %s'%(sysARG,'%s - %s'%(title,name),dbtype,dbid))
 
-            if SETTINGS.hasAddon(self.SIMILAR_SCRIPT,install=True) and dbid:
-                self.SEARCH_SCRIPT = self.SIMILAR_SCRIPT
+            if SETTINGS.hasAddon(self.EMBUARY_HELPER,install=True) and dbid:
+                self.SEARCH_SCRIPT = self.EMBUARY_HELPER
             elif SETTINGS.hasAddon(self.GLOBAL_SCRIPT,install=True):
                 self.SEARCH_SCRIPT = self.GLOBAL_SCRIPT
             else: 
@@ -63,7 +62,7 @@ class Match:
             log('Match: SEARCH_SCRIPT = %s'%(self.SEARCH_SCRIPT))
             SETTINGS.hasAddon(self.SEARCH_SCRIPT,enable=True)
 
-        if self.SEARCH_SCRIPT == self.SIMILAR_SCRIPT:
+        if self.SEARCH_SCRIPT == self.EMBUARY_HELPER:
             # plugin://script.embuary.helper/?info=getsimilar&dbid=$INFO[ListItem.DBID]&type=tvshow&tag=HDR
             # plugin://script.embuary.helper/?info=getsimilar&dbid=$INFO[ListItem.DBID]&type=movie&tag=HDR
             # tag = optional, additional filter option to filter by library tag

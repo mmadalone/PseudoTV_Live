@@ -25,10 +25,10 @@ class Record:
     def __init__(self, sysARG: dict={}, listitem: xbmcgui.ListItem=xbmcgui.ListItem(), fitem: dict={}):
         with BUILTIN.busy_dialog():
             log('Record: __init__, sysARG = %s, fitem = %s\npath = %s'%(sysARG,fitem,listitem.getPath()))
-            self.sysARG          = sysARG
-            self.fitem           = fitem
-            self.listitem        = listitem
-            self.fitem['label']  = (fitem.get('label') or listitem.getLabel())
+            self.sysARG         = sysARG
+            self.fitem          = fitem
+            self.listitem       = listitem
+            self.fitem['label'] = (fitem.get('label') or listitem.getLabel())
         
         
     def add(self):
@@ -77,6 +77,6 @@ if __name__ == '__main__':
     try:    param = sys.argv[1]
     except: param = None
     log('Record: __main__, param = %s'%(param))
-    if   param == 'add': threadit(Record(sys.argv,sys.listitem,decodePlot(BUILTIN.getInfoLabel('Plot'))).add)
-    elif param == 'del': threadit(Record(sys.argv,sys.listitem,decodePlot(BUILTIN.getInfoLabel('Plot'))).remove)
+    if   param == 'add': Record(sys.argv,sys.listitem,decodePlot(BUILTIN.getInfoLabel('Plot'))).add()
+    elif param == 'del': Record(sys.argv,sys.listitem,decodePlot(BUILTIN.getInfoLabel('Plot'))).remove()
     

@@ -63,14 +63,14 @@ class Resources:
 
     def getLogo(self, citem: dict, fallback=LOGO, auto=False) -> str:
         seasonal = citem.get('name') == LANGUAGE(32002)
-        logo = self.getLocalLogo(citem.get('name'))                                           #local
-        if not logo and seasonal:                logo = Seasonal().getHoliday().get('logo')   #seasonal
-        if not logo:                             logo = self.getCachedLogo(citem)             #cache
-        if not logo and auto:                    logo = self.getLogoResources(citem)          #resources
-        if not logo and auto:                    logo = self.getTVShowLogo(citem.get('name')) #tvshow
-        if not logo:                             logo = (fallback or LOGO)                    #fallback
+        logo = self.getLocalLogo(citem.get('name'))                            #local
+        if not logo and seasonal: logo = Seasonal().getHoliday().get('logo')   #seasonal
+        if not logo:              logo = self.getCachedLogo(citem)             #cache
+        if not logo and auto:     logo = self.getLogoResources(citem)          #resources
+        if not logo and auto:     logo = self.getTVShowLogo(citem.get('name')) #tvshow
+        if not logo:              logo = (fallback or LOGO)                    #fallback
         self.log('getLogo, name = %s, logo = %s, auto = %s'%(citem.get('name'), logo, auto))
-        return logo
+        return self.buildWebImage(cleanImage(logo))
         
 
     @cacheit(expiration=datetime.timedelta(days=MAX_GUIDEDAYS), json_data=True)
@@ -201,10 +201,10 @@ class Resources:
         
         
     def buildWebImage(self, image: str) -> str:
-        #convert any local images to url via local server and/or kodi web server.
+        #convert any local images to url via local to kodi web server.
         if image.startswith(LOGO_LOC) and self.remoteHost:
             image = 'http://%s/images/%s'%(self.remoteHost,quoteString(os.path.split(image)[1]))
-        elif image.startswith(('image://','image%3A')) and self.baseURL and not ('smb' in image or 'nfs' in image or 'http' in image):
+        elif image.startswith(('image')) and self.baseURL and not any(set(['smb' in image, 'nfs' in image, 'http' in image])):
             image = '%s/image/%s'%(self.baseURL,quoteString(image))
         self.log('buildWebImage, returning image = %s'%(image))
         return image

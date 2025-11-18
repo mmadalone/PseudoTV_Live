@@ -312,21 +312,6 @@
                     <visible>Control.IsVisible(6)</visible>
                     <autoscroll time="3000" delay="5000" repeat="5000">true</autoscroll>
                 </control>
-                <control type="list" id="7">
-                    <description>Unused List TODO, Preview window? Adv. Rules?</description>
-                </control>
-                <control type="textbox">
-                    <description>description area</description>
-                    <bottom>-15</bottom>
-                    <width>1050</width>
-                    <height>70</height>
-                    <font>font12</font>
-                    <align>justify</align>
-                    <label condition="Control.IsVisible(7)">$INFO[Container(7).ListItem.Property(description)]</label>
-                    <textcolor>dimgray</textcolor>
-                    <visible>Control.IsVisible(7)</visible>
-                    <autoscroll time="3000" delay="5000" repeat="5000">true</autoscroll>
-                </control>
             </control>
             <control type="group" id="4">
                 <description>spinner</description>
@@ -423,10 +408,8 @@
                 <onup>10</onup>
                 <onleft condition="Control.IsVisible(5)">5</onleft>
                 <onleft condition="Control.IsVisible(6)">6</onleft>
-                <onleft condition="Control.IsVisible(7)">7</onleft>
                 <onright condition="Control.IsVisible(5)">5</onright>
                 <onright condition="Control.IsVisible(6)">6</onright>
-                <onright condition="Control.IsVisible(7)">7</onright>
                 <itemgap>-15</itemgap>
                 <scrolltime tween="sine" easing="out">200</scrolltime>
                 <defaultcontrol>9001</defaultcontrol>
@@ -479,18 +462,18 @@
                     <visible>!String.IsEmpty(Control.GetLabel(9004))</visible>
                 </control>
             </control>
-            <control type="label">
-                <description>version label</description>
-                <bottom>-15</bottom>
-                <right>15</right>
-                <width>140</width>
-                <height>70</height>
-                <font>font12</font>
-                <align>right</align>
-                <textcolor>dimgray</textcolor>
-                <autoscroll time="3000" delay="5000" repeat="5000">true</autoscroll>
-                <label>[B]$INFO[System.AddonVersion(plugin.video.pseudotv.live),v.,][/B]</label>
-            </control>
+			<control type="label">
+				<description>version label</description>
+				<bottom>-15</bottom>
+                <right>-50</right>
+				<width>300</width>
+				<height>70</height>
+				<font>font12</font>
+				<align>justify</align>
+				<textcolor>dimgray</textcolor>
+				<autoscroll time="3000" delay="5000" repeat="5000">true</autoscroll>
+				<label>[B]$INFO[System.AddonVersion(plugin.video.pseudotv.live),v.,][/B]</label>
+			</control>
         </control>
     </controls>
 </window>

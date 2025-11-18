@@ -202,7 +202,7 @@ class Tasks():
             else: self.service._que(self.chkChannels,3,channels)
         else:
             self.log('chkChannels, No Channels Configured!')
-            if not hasAutotuned:    DIALOG.notificationDialog(LANGUAGE(32181))
+            if not hasAutotuned:    pass#DIALOG.notificationDialog(LANGUAGE(32181))
             elif hasEnabledServers: PROPERTIES.setPropTimer('chkPVRRefresh')
             else:                   DIALOG.notificationDialog(LANGUAGE(32058))
         PROPERTIES.setChannels(len(channels) > 0)
@@ -223,7 +223,7 @@ class Tasks():
                     elif len(params) > 0:
                         param   = params.pop(0)
                         updated = True
-                        self.log("chkLOGOQUE, queuing = %s\n%s"%(len(params),param))
+                        self.log("chkLOGOQUE, remaining queue = %s\n%s"%(len(params),param))
                         if param.get('name','').startswith('getLogoResources'):
                             self.service._que(resources.getLogoResources, 5+i, *param.get('args',()), **param.get('kwargs',{}))
                         elif param.get('name','').startswith('getTVShowLogo'):

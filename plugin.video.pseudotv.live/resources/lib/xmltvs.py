@@ -457,16 +457,14 @@ class XMLTVS:
             self.log('buildGenres, __parseGenres: epggenres = %s'%(epggenres.keys())) #todo custom user color selector.
             return epggenres
 
-        def __matchGenres(genres,  programmes=[]):
-            for program in programmes:
-                categories = [cat[0] for cat in program.get('category',[])]
-                catcombo   = '/'.join(categories)
-                for category in categories:
-                    match = genres.get(category.lower())
-                    if match and not genres.get(catcombo.lower()):
-                        genres[catcombo.lower()] = match
-                        break
-            return dict(sorted(sorted(list(genres.items()), key=lambda v:v[1]['name']), key=lambda v:v[1]['genreId']))
+        def __matchGenres(program):
+            categories = [cat[0] for cat in program.get('category',[])]
+            catcombo   = ' / '.join(categories)
+            for category in categories:
+                match = genres.get(category.lower())
+                if match and not genres.get(catcombo.lower()):
+                    genres[catcombo.lower()] = match
+                    break
             
         def __getGenres(file=GENREFLE_DEFAULT):
             if FileAccess.exists(file): 
@@ -484,14 +482,15 @@ class XMLTVS:
             name.appendChild(doc.createTextNode('%s'%(ADDON_NAME)))
             root.appendChild(name)
             
+            genres = __getGenres()
+            self.pool.executors(__matchGenres, self.XMLTVDATA.get('programmes',[]))
+            epggenres.update(dict(sorted(sorted(list(genres.items()), key=lambda v:v[1]['name']), key=lambda v:v[1]['genreId'])))
             epggenres = __getGenres(GENREFLEPATH)
-            epggenres.update(self.pool.executors(__matchGenres,**{'epggenres':__getGenres(),'programmes':self.XMLTVDATA.get('programmes',[])}))
             for key in list(set(epggenres)):
                 gen = doc.createElement('genre')
                 gen.setAttribute('genreId',epggenres[key].get('genreId'))
                 gen.appendChild(doc.createTextNode(key.title()))
                 root.appendChild(gen)
-                
             try:
                 with FileLock():
                     xmlData = FileAccess.open(GENREFLEPATH, "w")

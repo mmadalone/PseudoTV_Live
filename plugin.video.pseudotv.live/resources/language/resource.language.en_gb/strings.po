@@ -1950,6 +1950,9 @@ msgctxt "#32260"
 msgid "Controls Temporarily Locked!"
 msgstr ""
 
+msgctxt "#32261"
+msgid "Edit Channel"
+msgstr ""
 
 # Help - strings 33000 thru 33999 reserved for common strings used in add-ons
 
@@ -2409,6 +2412,11 @@ msgstr ""
 msgctxt "#33232"
 msgid "Change content limits and sorting methods."
 msgstr ""
+
+msgctxt "#33259"
+msgid "Rebuild channel after change?"
+msgstr ""
+
 
 msgctxt "#33308"
 msgid "Install Log Uploader."

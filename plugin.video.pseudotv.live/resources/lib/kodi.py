@@ -328,7 +328,7 @@ class Settings:
                 if self.builtin.executebuiltin('EnableAddon(%s)'%(id),wait=True): self.monitor.waitForAbort(1.0)
             self.log('hasAddon, id = %s (Installed)'%(id))
             try:    return xbmcaddon.Addon(id)
-            except: return self.hasAddon(id, install, enable, force, notify=True)
+            except: return False
         elif install:
             if self.builtin.executebuiltin('InstallAddon(%s)'%(id),wait=True):
                 return self.hasAddon(id, False, enable, force, notify)
