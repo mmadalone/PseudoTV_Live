@@ -370,6 +370,11 @@ class Settings:
         else: self.builtin.executewindow("ReplaceWindow(Home)")
         
 
+    def _getResumeURLs(self):
+        for file in FileAccess.listdir(RESUME_LOC)[1]:
+            yield 'http://%s/filelist/%s'%(PROPERTIES.getRemoteHost(),file)
+
+
     @cacheit(expiration=datetime.timedelta(minutes=5), json_data=True)
     def getBonjour(self, inclChannels=False):
         self.log("getBonjour, inclChannels = %s"%(inclChannels))
@@ -387,7 +392,8 @@ class Settings:
                                 'remote' :'http://%s/%s'%(payload['host'],REMOTEFLE),
                                 'm3u'    :'http://%s/%s'%(payload['host'],M3UFLE),
                                 'xmltv'  :'http://%s/%s'%(payload['host'],XMLTVFLE),
-                                'genre'  :'http://%s/%s'%(payload['host'],GENREFLE)}
+                                'genre'  :'http://%s/%s'%(payload['host'],GENREFLE),
+                                'resume' : list(self._getResumeURLs())}
                               
         payload['settings']  = {'Resource_Logos'    :self.getSetting('Resource_Logos').split('|'),
                                 'Resource_Bumpers'  :self.getSetting('Resource_Bumpers').split('|'),
@@ -1422,7 +1428,7 @@ class Dialog:
         if not self.properties.isRunning('Dialog.qrDialog'):
             with self.properties.chkRunning('Dialog.qrDialog'):
                 with self.builtin.busy_dialog():
-                    imagefile = os.path.join(FileAccess.translatePath(TEMP_LOC),'%s.png'%(getMD5(str(url.split('/')[-1]))))
+                    imagefile = os.path.join(FileAccess.translatePath(TEMP_IMAGE_LOC),'%s.png'%(getMD5(str(url.split('/')[-1]))))
                     if not FileAccess.exists(imagefile):
                         qrIMG = pyqrcode.create(url)
                         qrIMG.png(imagefile, scale=10)

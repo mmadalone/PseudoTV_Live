@@ -107,7 +107,7 @@ class Tasks():
     def chkQueTimer(self):
         self._chkEpochTimer('chkVersion'      , self.chkVersion       , 21600)
         self._chkEpochTimer('chkKodiSettings' , self.chkKodiSettings  , 3600)
-        self._chkEpochTimer('chkServers'      , self.chkServers       , 300)
+        self._chkEpochTimer('chkServers'      , self.chkServers       , 900)
         self._chkEpochTimer('chkDiscovery'    , self.chkDiscovery     , 300)
         self._chkEpochTimer('chkChannels'     , self.chkChannels      , 3600)
         

@@ -1646,7 +1646,7 @@ class PauseRule(BaseRule): #Finial RULES [3000-~]
         
         
     def _getPath(self, id):
-        return os.path.join(TEMP_LOC,'%s.json'%(getMD5('%s.%s'%(PROPERTIES.getFriendlyName(),id))))
+        return os.path.join(RESUME_LOC,'%s.json'%(getMD5('%s.%s'%(PROPERTIES.getFriendlyName(),id))))
         
         
     def _getTotRuntime(self, id, filelist=[]):
@@ -1671,12 +1671,13 @@ class PauseRule(BaseRule): #Finial RULES [3000-~]
         if resume.get('updated',{}).get('instance') == friendly: #local
             return setJSON(self._getPath(id),{'resume':resume,'filelist':filelist})
         elif self.optionValues[1]:#remote
-            return requestURL(self.optionValues[1],payload={'uuid':SETTINGS.getMYUUID(),'name':friendly,'payload':{'resume':resume,'filelist':filelist}})
+            return requestURL(self.optionValues[1],payload={'uuid':SETTINGS.getMYUUID(),'name':friendly,'payload':{'resume':resume,'filelist':filelist}},
+                              cache={"cache":SETTINGS.cacheDB, "json_data": True, "checksum":ADDON_VERSION, "life": datetime.timedelta(minutes=15)})
             
         
     def _get(self, id):
         self.log("[%s] runAction, _get: url = %s"%(id,self.optionValues[1]))
-        if self.optionValues[1]: return requestURL(self.optionValues[1])
+        if self.optionValues[1]: return requestURL(self.optionValues[1], cache={"cache":SETTINGS.cacheDB, "json_data": True, "checksum":ADDON_VERSION, "life": datetime.timedelta(minutes=15)})
         else:                    return getJSON(self._getPath(id))
 
 

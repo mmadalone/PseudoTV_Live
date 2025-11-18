@@ -124,7 +124,7 @@ class MyHandler(BaseHTTPRequestHandler):
                         self.send_response(200, "OK")
                     #filelist w/resume - paused channel rule
                     elif self.path.lower().startswith('/filelist') and incoming.get('payload'):
-                        if setJSON(os.path.join(TEMP_LOC,self.path.replace('/filelist/','')),incoming.get('payload')):
+                        if setJSON(os.path.join(RESUME_LOC,self.path.replace('/filelist/','')),incoming.get('payload')):
                             DIALOG.notificationDialog(LANGUAGE(30085)%(LANGUAGE(30060),incoming.get('name',ADDON_NAME)))
                         self.send_response(200, "OK")
                     else: self.send_error(401, "Path Not found")
@@ -174,7 +174,7 @@ class MyHandler(BaseHTTPRequestHandler):
             else:
                 chunk = b''
                 if   file_path == f'/{BONJOURFLE.lower()}': chunk = dumpJSON(SETTINGS.getBonjour(inclChannels=True),idnt=4).encode(encoding=DEFAULT_ENCODING)
-                elif file_path.startswith('/filelist'):     chunk = dumpJSON(getJSON((os.path.join(TEMP_LOC, self.path.replace('/filelist/', ''))))).encode(encoding=DEFAULT_ENCODING)
+                elif file_path.startswith('/filelist'):     chunk = dumpJSON(getJSON((os.path.join(RESUME_LOC, self.path.replace('/filelist/',''))))).encode(encoding=DEFAULT_ENCODING)
                 elif file_path.startswith('/remote'):
                     if   file_path.endswith('.json'):       chunk = dumpJSON(SETTINGS.getPayload(),idnt=4).encode(encoding=DEFAULT_ENCODING)
                     elif file_path.endswith('.html'): 

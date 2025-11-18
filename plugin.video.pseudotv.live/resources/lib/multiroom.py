@@ -66,6 +66,10 @@ class Multiroom:
         def __chkResources(settings):
             [SETTINGS.hasAddon(id,install=True,enable=True) for k,addons in list(settings.items()) for id in addons if id.startswith(('resource','plugin'))]
             
+        def __chkResumeURLs(urls=[]):
+            log('_chkResumeURLs, urls = %s'%(len(urls)))
+            [requestURL(url, cache={"cache":SETTINGS.cacheDB, "json_data": True, "checksum":ADDON_VERSION, "life": datetime.timedelta(minutes=15)}) for url in urls]
+
         if not servers: servers = self.getDiscovery()
         PROPERTIES.setServers(len(servers) > 0)
         for server in list(servers.values()):
@@ -75,7 +79,8 @@ class Multiroom:
             else:        server['online'] = False
             if server.get('enabled',False):
                 if online != server.get('online',False): DIALOG.notificationDialog('%s: %s'%(server.get('name'),LANGUAGE(32211)%({True:'green',False:'red'}[server.get('online',False)],{True:LANGUAGE(32158),False:LANGUAGE(32253)}[server.get('online',False)])))
-                __chkResources(loadJSON(server.get('settings')))
+                __chkResources(server.get('settings'))
+                __chkResumeURLs(server.get('remotes',{}).get('resume',[]))
         SETTINGS.setSetting('Select_server','|'.join([LANGUAGE(32211)%({True:'green',False:'red'}[server.get('online',False)],server.get('name')) for server in self.getEnabled(servers)]))
         self.log('_chkServers, servers = %s'%(len(servers)))
         self.setDiscovery(servers)
