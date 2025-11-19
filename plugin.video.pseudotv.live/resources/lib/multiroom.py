@@ -204,10 +204,9 @@ class Multiroom:
             if BUILTIN.getInfoLabel('Platform.Windows','System'): #prompt windows users to dl bonjour service.
                 BUILTIN.executescript('special://home/addons/%s/resources/lib/utilities.py, Show_ZeroConf_QR'%(ADDON_ID))
             if DIALOG.yesnoDialog(message=LANGUAGE(30129)):
-                with PROPERTIES.suspendActivity():
-                    if self.jsonRPC.setSettingValue("services.zeroconf",True,queue=False):
-                        DIALOG.notificationDialog(LANGUAGE(32219)%(LANGUAGE(30035)))
-                        self._chkDiscovery()
+                if self.jsonRPC.setSettingValue("services.zeroconf",True,queue=False):
+                    DIALOG.notificationDialog(LANGUAGE(32219)%(LANGUAGE(30035)))
+                    self._chkDiscovery()
         else: DIALOG.notificationDialog(LANGUAGE(32219)%(LANGUAGE(30034)))
                     
             

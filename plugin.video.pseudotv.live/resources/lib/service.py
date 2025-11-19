@@ -504,7 +504,7 @@ class Service():
 
 
     def _playing(self) -> bool: #assert background service during playback
-        if self.player.isPlaying() and not self.player.runWhilePlaying: return True
+        if (self.player.isPlaying() or BUILTIN.isPaused()) and not self.player.runWhilePlaying: return True
         return False
     
         

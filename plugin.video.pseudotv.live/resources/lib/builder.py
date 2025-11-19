@@ -184,12 +184,18 @@ class Builder:
                         
                         citem = self.runActions(RULES_ACTION_CHANNEL_TEMP_CITEM, citem, citem, inherited=self) #inject temporary citem changes here
                         self.log('[%s] build, preview = %s, rules = %s'%(citem['id'],preview,citem.get('rules',{})))
-                        if self.service._interrupt() or self.service._suspend():
-                            self.log("[%s] build, _interrupt/_suspend"%(citem['id']))
+                        if self.service._interrupt():
+                            self.log("[%s] build, _interrupt"%(citem['id']))
                             complete = False
                             self.pErrors = [LANGUAGE(32160)]
                             self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32213)), header=ADDON_NAME)
                             break
+                        elif self.service._suspend():
+                            self.log("[%s] build, _suspend"%(citem['id']))
+                            channels.insert(idx,citem)
+                            self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32262)), header=ADDON_NAME)
+                            self.service.monitor.waitForAbort(SUSPEND_TIMER)
+                            continue
                         else:
                             self.pMSG  = '%s: %s'%(LANGUAGE(32144),LANGUAGE(32212))
                             self.pName = citem['name']
@@ -332,10 +338,16 @@ class Builder:
         if not _validFileList(fileArray): #if valid array bypass channel building
             paths = citem.get('path',[])
             for idx, path in enumerate(paths):
-                if self.service._interrupt() or self.service._suspend():
-                    self.log("[%s] buildChannel, _interrupt/_suspend"%(citem['id']))
+                if self.service._interrupt():
+                    self.log("[%s] buildChannel, _interrupt"%(citem['id']))
                     self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32213)), header=ADDON_NAME)
                     return []
+                elif self.service._suspend():
+                    self.log("[%s] buildChannel, _suspend"%(citem['id']))
+                    paths.insert(idx,path)
+                    self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32262)), header=ADDON_NAME)
+                    self.service.monitor.waitForAbort(SUSPEND_TIMER)
+                    continue
                 else:
                     if len(citem.get('path',[])) > 1: self.pName = '%s %s/%s'%(citem['name'],idx+1,len(citem.get('path',[])))
                     fileList = self.buildFileList(citem, self.runActions(RULES_ACTION_CHANNEL_BUILD_PATH, citem, path, inherited=self), 'video', self.limit, self.sort, self.limits)
@@ -388,10 +400,15 @@ class Builder:
         self.log("[%s] buildFileList, page = %s, sort = %s, limits = %s\npath = %s"%(citem['id'],page,sort,limits,path))
         
         while not self.service.monitor.abortRequested() and len(fileList) < page:   
-            if self.service._interrupt() or self.service._suspend():
-                self.log("[%s] buildFileList, _interrupt/_suspend"%(citem['id']))
+            if self.service._interrupt():
+                self.log("[%s] buildFileList, _interrupt"%(citem['id']))
                 self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32213)), header=ADDON_NAME)
                 return []
+            elif self.service._suspend():
+                self.log("[%s] buildFileList, _suspend"%(citem['id']))
+                self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32262)), header=ADDON_NAME)
+                self.service.monitor.waitForAbort(SUSPEND_TIMER)
+                continue
             elif len(dirList) > 0:
                 dir   = dirList.pop(0)
                 npath = dir.get('file')
@@ -435,11 +452,17 @@ class Builder:
             for idx, item in enumerate(items):
                 file     = item.get('file','')
                 fileType = item.get('filetype','file')
-                if self.service._interrupt() or self.service._suspend():
-                    self.log("[%s] buildList, _interrupt/_suspend"%(citem['id']))
+                if self.service._interrupt():
+                    self.log("[%s] buildList, _interrupt"%(citem['id']))
                     self.jsonRPC.autoPagination(citem['id'], path, query, limits) #rollback pagination limits
                     self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32213)), header=ADDON_NAME)
                     return [], [], nlimits, errors
+                elif self.service._suspend():
+                    self.log("[%s] buildList, _suspend"%(citem['id']))
+                    items.insert(idx,item)
+                    self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32262)), header=ADDON_NAME)
+                    self.service.monitor.waitForAbort(SUSPEND_TIMER)
+                    continue
                 elif not item.get('type'): item['type'] = query.get('key','files')
                 elif fileType == 'directory':
                     dirList.append(item)

@@ -1954,6 +1954,10 @@ msgctxt "#32261"
 msgid "Edit Channel"
 msgstr ""
 
+msgctxt "#32262"
+msgid "Pausing"
+msgstr ""
+
 # Help - strings 33000 thru 33999 reserved for common strings used in add-ons
 
 msgctxt "#33001"

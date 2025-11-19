@@ -290,18 +290,17 @@ class Tasks():
             
             
     def chkSettingsChange(self, settings={}):
-        with PROPERTIES.suspendActivity():
-            nSettings = SETTINGS.getCurrentSettings()
-            for setting, value in list(settings.items()):
-                actions = {'User_Folder'  :{'func':self.setUserPath            ,'kwargs':{'old':value,'new':nSettings.get(setting)}},
-                           'Debug_Enable' :{'func':self.jsonRPC.toggleShowLog  ,'kwargs':{'state':SETTINGS.getSettingBool('Debug_Enable')}},
-                           'TCP_PORT'     :{'func':SETTINGS.setPVRRemote       ,'kwargs':{'host':PROPERTIES.getRemoteHost(),'instance':PROPERTIES.getFriendlyName()}},}
-                           
-                if nSettings.get(setting) != value and actions.get(setting):
-                    action = actions.get(setting)
-                    self.log('chkSettingsChange, detected change in %s: %s => %s\naction = %s'%(setting,value,nSettings.get(setting),action))
-                    self.service._que(action.get('func'),1,*action.get('args',()),**action.get('kwargs',{}))
-            return nSettings
+        nSettings = SETTINGS.getCurrentSettings()
+        for setting, value in list(settings.items()):
+            actions = {'User_Folder'  :{'func':self.setUserPath            ,'kwargs':{'old':value,'new':nSettings.get(setting)}},
+                       'Debug_Enable' :{'func':self.jsonRPC.toggleShowLog  ,'kwargs':{'state':SETTINGS.getSettingBool('Debug_Enable')}},
+                       'TCP_PORT'     :{'func':SETTINGS.setPVRRemote       ,'kwargs':{'host':PROPERTIES.getRemoteHost(),'instance':PROPERTIES.getFriendlyName()}},}
+                       
+            if nSettings.get(setting) != value and actions.get(setting):
+                action = actions.get(setting)
+                self.log('chkSettingsChange, detected change in %s: %s => %s\naction = %s'%(setting,value,nSettings.get(setting),action))
+                self.service._que(action.get('func'),1,*action.get('args',()),**action.get('kwargs',{}))
+        return nSettings
 
 
     def setUserPath(self, old, new):

@@ -114,7 +114,7 @@ class MyHandler(BaseHTTPRequestHandler):
             except: incoming = {}
             
             if __verifyUUID(incoming.get('uuid')):
-                with PROPERTIES.suspendActivity():
+                with PROPERTIES.interruptActivity():
                     self.log('do_POST incoming uuid [%s] verified!'%(incoming.get('uuid')))
                     #channels - channel manager save
                     if self.path.lower() == '/%s'%(CHANNELFLE.lower()) and incoming.get('payload'):

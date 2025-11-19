@@ -1546,19 +1546,25 @@ class Dialog:
     def infoDialog(self, listitem):
         self.dialog.info(listitem)
         
+    
+    def _notificationDialog(self, message, header, sound, time, icon, show):
+        threadit(self.notificationDialog)(message, header, sound, time, icon, show)
 
-    def notificationDialog(self, message, header=ADDON_NAME, sound=False, time=PROMPT_DELAY, icon=COLOR_LOGO, show=None):
+
+    def notificationDialog(self, message, header=ADDON_NAME, sound=False, time=PROMPT_DELAY, icon=COLOR_LOGO, show=None, usethread=False):
         if show is None: show = self.settings.getSettingBool('Notify_While_Playing')
         self.log('notificationDialog: %s, show = %s'%(message,show))
-        ## - Builtin Icons:
-        ## - xbmcgui.NOTIFICATION_INFO
-        ## - xbmcgui.NOTIFICATION_WARNING
-        ## - xbmcgui.NOTIFICATION_ERROR
-        if show:
-            try:    self.dialog.notification(header, message, icon, time*1000, sound=False)
-            except: self.builtin.executebuiltin("Notification(%s, %s, %d, %s)" % (header, message, time*1000, icon))
-        return True
-             
+        if usethread: return self._notificationDialog(message, header, sound, time, icon, show)
+        else:
+            ## - Builtin Icons:
+            ## - xbmcgui.NOTIFICATION_INFO
+            ## - xbmcgui.NOTIFICATION_WARNING
+            ## - xbmcgui.NOTIFICATION_ERROR
+            if show:
+                try:    self.dialog.notification(header, message, icon, time*1000, sound=False)
+                except: self.builtin.executebuiltin("Notification(%s, %s, %d, %s)" % (header, message, time*1000, icon))
+            return True
+        
              
     def customSelect(self, items, header, preselect, useDetails, autoclose, multi): #todo
         class DialogSelect(xbmcgui.WindowXMLDialog):

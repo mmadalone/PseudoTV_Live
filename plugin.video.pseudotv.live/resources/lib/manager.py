@@ -638,7 +638,7 @@ class Manager(xbmcgui.WindowXMLDialog):
             return path, self.setLogo(citem.get('name'),citem)
             
         def __fileList(tmpcitem, fileList=[]):
-            tmpcitem['id']   = getChannelID(tmpcitem['name'], tmpcitem['path'], random.random())
+            tmpcitem['id'] = getChannelID(tmpcitem['name'], tmpcitem['path'], random.random())
             DIALOG.notificationDialog('%s: [B]%s[/B]\n%s'%(LANGUAGE(32098),tmpcitem['name'],LANGUAGE(32140)))
             return self.buildFileList(tmpcitem, path)
             
@@ -656,18 +656,17 @@ class Manager(xbmcgui.WindowXMLDialog):
                 liz.setProperty('startoffset', str(resume))
                 infoTag = ListItemInfoTag(liz, 'video')
                 infoTag.set_resume_point({'ResumeTime':resume,'TotalTime':int(item.get('duration')*60)})
+                # DIALOG.notificationDialog('%s: [B]%s[/B]\n%s'%(LANGUAGE(32098),file,'Starting Playback'),time=1)
                 player.play(item.get('file'),liz)
                 
                 while not self.monitor.abortRequested() and not player.isPlaying():
                     if self.monitor.waitForAbort(1.0) or wait < 1: break
-                    else:
-                        wait -= 1
-                        DIALOG.notificationDialog('%s: [B]%s[/B]\n%s'%(LANGUAGE(32098),file,'Seeking waiting %s'%(wait)),time=1)
+                    else: wait -= 1
                     
                 self.log('validatePaths, _seek: waiting (%s) to seek %s'%(wait, item.get('file')))
                 if player.isPlaying() and ((int(player.getTime()) > resume) or BUILTIN.getInfoBool('SeekEnabled','Player')):
                     self.log('validatePaths, _seek: found playable and seekable file %s'%(item.get('file')))
-                    DIALOG.notificationDialog('%s: [B]%s[/B]\n%s'%(LANGUAGE(32098),file,'Seekable Media Found!'),time=1)
+                    # DIALOG.notificationDialog('%s: [B]%s[/B]\n%s'%(LANGUAGE(32098),file,'Seekable Media Found!'),time=1)
                     passed = True
                 player.stop()
                 
@@ -675,7 +674,7 @@ class Manager(xbmcgui.WindowXMLDialog):
             self.log('validatePaths _seek, passed = %s'%(passed))
             return passed
             
-        def __vfs(path, citem, cnt=0):
+        def __vfs(path, citem, cnt=3):
             with self.toggleSpinner(condition=PROPERTIES.isRunning('Manager.toggleSpinner')==False):
                 if    isRadio({'path':[path]}) or isMixed_XSP({'path':[path]}): return True
                 else: DIALOG.notificationDialog('%s: [B]%s[/B]\n%s'%(LANGUAGE(32098),path,LANGUAGE(32140)))
@@ -684,7 +683,7 @@ class Manager(xbmcgui.WindowXMLDialog):
                 fileList = __fileList(tmpcitem)
                 self.log('validatePaths, __vfs: path = %s fileList = %s'%(path,len(fileList)))
             
-            while not self.monitor.abortRequested() and cnt < 4:
+            while not self.monitor.abortRequested() and cnt > 0:
                 try:    file = FileAccess._getShortPath(path)
                 except: file = FileAccess._getFolderPath(path)
                 if not fileList: return not bool(DIALOG.notificationDialog('%s: [B]%s[/B]\n%s'%(LANGUAGE(32098),file,'No Media found %s'%(LANGUAGE(32030)))))
@@ -693,11 +692,10 @@ class Manager(xbmcgui.WindowXMLDialog):
                     else:
                         retval = DIALOG.yesnoDialog(LANGUAGE(30202),customlabel='Try Again (%s)'%(cnt))
                         if   retval == 1: return DIALOG.notificationDialog('%s: [B]%s[/B]\n%s'%(LANGUAGE(32098),file,'Forcing %s'%(LANGUAGE(32030))))
-                        elif retval == 2: cnt +=1
+                        elif retval == 2: cnt -=1
                         else: return not bool(DIALOG.notificationDialog('%s: [B]%s[/B]\n%s'%(LANGUAGE(32098),file,'No Seekable Media %s'%(LANGUAGE(32030)))))
 
         if __vfs(path, citem): return __set(path, citem)
-        DIALOG.notificationDialog(LANGUAGE(32030))
         return None, citem
 
 

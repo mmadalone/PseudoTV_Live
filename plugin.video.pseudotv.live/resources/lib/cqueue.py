@@ -159,8 +159,11 @@ class CustomQueue:
             elif self.service._shutdown(0.0001): 
                 self.log("_start, _shutdown")
                 break
-            elif self.service._interrupt() or self.service._suspend(): 
-                self.log("_start, _interrupt/_suspend")
+            elif self.service._interrupt(): 
+                self.log("_start, _interrupt")
+                break
+            elif self.service._suspend(): 
+                self.log("_start, _suspend")
                 self.service.monitor.waitForAbort(SUSPEND_TIMER)
                 continue
             elif self.priority:
