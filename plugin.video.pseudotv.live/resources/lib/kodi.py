@@ -1001,6 +1001,27 @@ class Properties:
         return self.getEXTPropertyBool('pendingSuspend')
 
 
+    def recessActivity(self, func, *args, **kwargs):
+        results     = None
+        isSuspend   = self.isSuspendActivity()
+        isInterrupt = self.isInterruptActivity()
+        while not self.monitor.abortRequested():
+            if   self.monitor.waitForAbort(0.1): break
+            elif self.isSuspendActivity():   self.setSuspendActivity(False)
+            elif self.isInterruptActivity(): self.setInterruptActivity(False)
+            else:
+                with self.lockActivity():
+                    try:
+                        results = func(*args, **kwargs)
+                        if results: break
+                    except Exception as e:
+                        self.log("recessActivity, failed! %s"%(e), xbmc.LOGERROR)
+                        break
+        if isSuspend:   self.setSuspendActivity(True)
+        if isInterrupt: self.setInterruptActivity(True)
+        return results
+
+
     @contextmanager
     def legacy(self):
         if not self.isPseudoTVRunning():

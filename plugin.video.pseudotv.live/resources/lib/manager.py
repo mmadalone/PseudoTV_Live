@@ -147,40 +147,18 @@ class Manager(xbmcgui.WindowXMLDialog):
      
      
     def buildPreview(self, citem={}):
-        fileList    = []
-        builder     = Builder()
-        isSuspend   = PROPERTIES.isSuspendActivity()
-        isInterrupt = PROPERTIES.isInterruptActivity()
-        while not self.monitor.abortRequested() and PROPERTIES.isRunning('Manager.__init__'):
-            if   self.monitor.waitForAbort(0.1): break
-            elif PROPERTIES.isSuspendActivity():   PROPERTIES.setSuspendActivity(False)
-            elif PROPERTIES.isInterruptActivity(): PROPERTIES.setInterruptActivity(False)
-            else: 
-                with PROPERTIES.lockActivity():
-                    fileList = builder.build([citem],preview=True)
-                    if not fileList or isinstance(fileList,list): break
-        if isSuspend:   PROPERTIES.setSuspendActivity(True)
-        if isInterrupt: PROPERTIES.setInterruptActivity(True)
+        fileList = []
+        builder  = Builder()
+        fileList = PROPERTIES.recessActivity(builder.build, *([citem],True))
         del builder
         self.log('buildPreview, fileList = %s'%(len(fileList))) 
         return fileList
 
 
     def buildFileList(self, citem={}, path='', limit=25):
-        fileList    = []
-        builder     =  Builder()
-        isSuspend   = PROPERTIES.isSuspendActivity()
-        isInterrupt = PROPERTIES.isInterruptActivity()
-        while not self.monitor.abortRequested() and PROPERTIES.isRunning('Manager.__init__'):
-            if   self.monitor.waitForAbort(0.1): break
-            elif PROPERTIES.isSuspendActivity():   PROPERTIES.setSuspendActivity(False)
-            elif PROPERTIES.isInterruptActivity(): PROPERTIES.setInterruptActivity(False)
-            else:
-                with PROPERTIES.lockActivity():
-                    fileList = builder.buildFileList(citem, path, page=limit)
-                    if not fileList or isinstance(fileList,list): break
-        if isSuspend:   PROPERTIES.setSuspendActivity(True)
-        if isInterrupt: PROPERTIES.setInterruptActivity(True)
+        fileList = []
+        builder  =  Builder()
+        fileList = PROPERTIES.recessActivity(builder.buildFileList, *(citem,path,'video',limit,{},{}))
         del builder
         self.log('buildFileList, fileList = %s'%(len(fileList))) 
         return fileList
@@ -886,7 +864,7 @@ class Manager(xbmcgui.WindowXMLDialog):
     def saveChannelItems(self, citem: dict={}, open=False):
         self.log('saveChannelItems [%s], open = %s'%(citem.get('id'),open))
         if self.madeItemchange:
-            with PROPERTIES.interruptActivity(), self.toggleSpinner(condition=PROPERTIES.isRunning('Manager.toggleSpinner')==False):
+            with self.toggleSpinner(condition=PROPERTIES.isRunning('Manager.toggleSpinner')==False):
                 self.madeItemchange = False
                 citem['changed'] = True
                 self.madeChanges = True
@@ -915,7 +893,7 @@ class Manager(xbmcgui.WindowXMLDialog):
         
         if self.madeChanges:
             if DIALOG.yesnoDialog(LANGUAGE(32076)):
-                with PROPERTIES.interruptActivity(), self.toggleSpinner(condition=PROPERTIES.isRunning('Manager.toggleSpinner')==False):
+                with self.toggleSpinner(condition=PROPERTIES.isRunning('Manager.toggleSpinner')==False):
                     self.madeChanges = False
                     channels = __validateChannels(self.newChannels)
                     self.log("saveChanges, channels = %s"%(len(channels)))

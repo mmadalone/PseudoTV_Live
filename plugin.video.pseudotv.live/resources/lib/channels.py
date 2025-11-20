@@ -57,10 +57,11 @@ class Channels:
                 
                 
     def _save(self, file=CHANNELFLEPATH) -> bool:
-        self.channelDATA['uuid']     = SETTINGS.getMYUUID()
-        self.channelDATA['channels'] = self.sortChannels(self.channelDATA['channels'])
-        self.log('_save, file = %s\nchannels = %s'%(file,len(self.channelDATA['channels'])))
-        return setJSON(file,self.channelDATA)
+        with PROPERTIES.interruptActivity():
+            self.channelDATA['uuid']     = SETTINGS.getMYUUID()
+            self.channelDATA['channels'] = self.sortChannels(self.channelDATA['channels'])
+            self.log('_save, file = %s\nchannels = %s'%(file,len(self.channelDATA['channels'])))
+            return setJSON(file,self.channelDATA)
 
         
     def getTemplate(self) -> dict: 

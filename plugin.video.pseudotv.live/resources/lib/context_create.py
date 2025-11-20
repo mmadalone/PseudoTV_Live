@@ -48,10 +48,9 @@ class Create:
                         citem['changed']  = True
                         citem['radio']    = True if path.startswith('musicdb://') else False
                         
-                        with PROPERTIES.interruptActivity():
-                            manager.channels.addChannel(manager.setLogo(citem['name'], citem))
-                            manager.channels.setChannels()
-                            manager.closeManager()
+                        manager.channels.addChannel(manager.setLogo(citem['name'], citem))
+                        manager.channels.setChannels()
+                        manager.closeManager()
                         PROPERTIES.setEpochTimer('chkChannels')#trigger channel building
                         PROPERTIES.setPropTimer('chkChannels')#trigger channel building
                         del manager

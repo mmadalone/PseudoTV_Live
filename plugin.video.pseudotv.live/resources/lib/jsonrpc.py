@@ -604,14 +604,14 @@ class JSONRPC:
         friendly = self.getSettingValue("services.devicename")
         self.log("inputFriendlyName, name = %s"%(friendly))
         if not friendly or friendly.lower() == 'kodi':
-            with PROPERTIES.interruptActivity():
-                if DIALOG.okDialog(LANGUAGE(32132)%(friendly)):
+            if DIALOG.okDialog(LANGUAGE(32132)%(friendly)):
+                with PROPERTIES.interruptActivity():
                     friendly = DIALOG.inputDialog(LANGUAGE(30122), friendly)
-                    if not friendly or friendly.lower() == 'kodi':
-                        return self.inputFriendlyName()
-                    else:
-                        self.setSettingValue("services.devicename",friendly,queue=False)
-                        self.log('inputFriendlyName, setting device name = %s'%(friendly))
+                if not friendly or friendly.lower() == 'kodi':
+                    return self.inputFriendlyName()
+                else:
+                    self.setSettingValue("services.devicename",friendly,queue=False)
+                    self.log('inputFriendlyName, setting device name = %s'%(friendly))
         return friendly
            
            

@@ -193,7 +193,7 @@ class Builder:
                         elif self.service._suspend():
                             self.log("[%s] build, _suspend"%(citem['id']))
                             channels.insert(idx,citem)
-                            self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32262)), header=ADDON_NAME)
+                            self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32145)), header=ADDON_NAME)
                             self.service.monitor.waitForAbort(SUSPEND_TIMER)
                             continue
                         else:
@@ -345,7 +345,7 @@ class Builder:
                 elif self.service._suspend():
                     self.log("[%s] buildChannel, _suspend"%(citem['id']))
                     paths.insert(idx,path)
-                    self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32262)), header=ADDON_NAME)
+                    self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32145)), header=ADDON_NAME)
                     self.service.monitor.waitForAbort(SUSPEND_TIMER)
                     continue
                 else:
@@ -406,7 +406,7 @@ class Builder:
                 return []
             elif self.service._suspend():
                 self.log("[%s] buildFileList, _suspend"%(citem['id']))
-                self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32262)), header=ADDON_NAME)
+                self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32145)), header=ADDON_NAME)
                 self.service.monitor.waitForAbort(SUSPEND_TIMER)
                 continue
             elif len(dirList) > 0:
@@ -460,7 +460,7 @@ class Builder:
                 elif self.service._suspend():
                     self.log("[%s] buildList, _suspend"%(citem['id']))
                     items.insert(idx,item)
-                    self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32262)), header=ADDON_NAME)
+                    self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32145)), header=ADDON_NAME)
                     self.service.monitor.waitForAbort(SUSPEND_TIMER)
                     continue
                 elif not item.get('type'): item['type'] = query.get('key','files')

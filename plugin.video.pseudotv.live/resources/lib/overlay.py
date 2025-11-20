@@ -290,8 +290,9 @@ class OnNext(xbmcgui.WindowXMLDialog):
         self.onNextMode = kwargs.get('mode' , SETTINGS.getSettingInt('OnNext_Mode'))
         self.onNextPosition = kwargs.get('position' , SETTINGS.getSetting("OnNext_Position_XY"))
         
+        self.service    = self.player.service
         self.jsonRPC    = self.player.jsonRPC
-        self.monitor    = self.player.service.monitor
+        self.monitor    = self.player.monitor
         
         self.citem      = self.player.playingItem.get('citem',{})
         self.fitem      = self.player.playingItem.get('fitem',{})
