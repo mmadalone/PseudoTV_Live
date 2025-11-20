@@ -150,7 +150,6 @@ class Settings:
     def __init__(self):
         self.log('__init__')
         self.properties = Properties()
-        self.settings   = self.getRealSettings()
 
         
     def log(self, msg, level=xbmc.LOGDEBUG):
@@ -182,23 +181,23 @@ class Settings:
       
       
     def getSetting(self, key):
-        return self._getSetting(self.settings.getSetting,key)
+        return self._getSetting(self.getRealSettings().getSetting,key)
         
         
     def getSettingBool(self, key):
-        return self._getSetting(self.settings.getSettingBool,key)
+        return self._getSetting(self.getRealSettings().getSettingBool,key)
 
 
     def getSettingInt(self, key):
-        return self._getSetting(self.settings.getSettingInt,key)
+        return self._getSetting(self.getRealSettings().getSettingInt,key)
               
               
     def getSettingNumber(self, key): 
-        return self._getSetting(self.settings.getSettingNumber,key)
+        return self._getSetting(self.getRealSettings().getSettingNumber,key)
         
         
     def getSettingString(self, key):
-        return self._getSetting(self.settings.getSettingString,key)
+        return self._getSetting(self.getRealSettings().getSettingString,key)
 
 
     def getSettingFloat(self, key):
@@ -257,24 +256,24 @@ class Settings:
         
     def setSetting(self, key, value=""):  
         if self.getSetting(key) != str(value): #Kodi setsetting() can tax system performance. i/o issue? block unneeded saves.
-            self._setSetting(self.settings.setSetting,key,str(value))
+            self._setSetting(self.getRealSettings().setSetting,key,str(value))
         return value
             
             
     def setSettingBool(self, key, value):
-        return self._setSetting(self.settings.setSettingBool,key,value)
+        return self._setSetting(self.getRealSettings().setSettingBool,key,value)
         
         
     def setSettingInt(self, key, value):  
-        return self._setSetting(self.settings.setSettingInt,key,value)
+        return self._setSetting(self.getRealSettings().setSettingInt,key,value)
                    
                    
     def setSettingNumber(self, key, value):  
-        return self._setSetting(self.settings.setSettingNumber,key,value)
+        return self._setSetting(self.getRealSettings().setSettingNumber,key,value)
         
              
     def setSettingString(self, key, value):  
-        return self._setSetting(self.settings.setSettingString,key,value)
+        return self._setSetting(self.getRealSettings().setSettingString,key,value)
 
 
     def setSettingBoolList(self, key, value):
