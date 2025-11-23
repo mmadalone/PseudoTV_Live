@@ -110,6 +110,7 @@ class Player(xbmc.Player):
 
 
     @timeit
+    @executeit
     def getplayingItem(self, playingItem={}):
         def __update(id, citem={}): #playingItem from listitem maybe outdated, check with channels.json for fresh citem.
             for item in self.service.channels:
@@ -134,9 +135,9 @@ class Player(xbmc.Player):
     def getPlayerItem(self):
         try: return self.getPlayingItem()
         except:
-            self.monitor.waitForAbort(0.1)
-            if self.isPlaying(): return self.getPlayerItem()
-            else:                return xbmcgui.ListItem()
+            if not self.isPlaying(): return xbmcgui.ListItem()
+            self.monitor.waitForAbort(0.5) 
+            return self.getPlayerItem()
         
         
     def getPlayerFile(self):
@@ -180,10 +181,7 @@ class Player(xbmc.Player):
 
 
     def isPseudoTV(self):
-        try:
-            if self.isPlaying(): return self.playingItem['isPseudoTV']
-            else:                return self.pendingItem['playingItem']['isPseudoTV']
-        except:                  return self.getplayingItem().get('isPseudoTV',False)
+        return (self.playingItem.get('isPseudoTV') or self.pendingItem.get('playingItem',{}).get('isPseudoTV') or False)            
 
 
     def isPlayingPseudoTV(self):
@@ -253,6 +251,7 @@ class Player(xbmc.Player):
             self.jsonRPC.quePlaycount(playingItem.get('fitem',{}),self.rollbackPlaycount)
             if playingItem.get('isPlaylist',False): xbmc.PlayList(xbmc.PLAYLIST_VIDEO).clear()
             self._runActions(RULES_ACTION_PLAYER_STOP, playingItem.get('citem',{}), playingItem, inherited=self)
+            self.playingItem = {}
         
 
     def _onError(self, playingItem={}): #todo evaluate potential for error handling.
@@ -285,7 +284,6 @@ class Player(xbmc.Player):
         return not bool(cnx)
 
 
-    @timeit
     def _onIdle(self):
         self.log('_onIdle')
         def __chkPlayback():

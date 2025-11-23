@@ -58,8 +58,8 @@ class Multiroom:
 
 
     def _chkDiscovery(self):
-        timerit(Discovery)(1.0,[self.service, self])
         self.log('_chkDiscovery')
+        Discovery(self.service, self)
                 
 
     def _chkServers(self, servers={}):

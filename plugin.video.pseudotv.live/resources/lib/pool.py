@@ -145,7 +145,7 @@ class ExecutorPool:
 
     def getCPUCount(self):
         if POOL_ENABLED: return cpu_count
-        else:            return int(os.getenv('THREAD_COUNT', cpu_count * 2))
+        else:            return int(os.getenv('THREAD_COUNT', cpu_count))
             
             
     def log(self, msg, level=xbmc.LOGDEBUG):

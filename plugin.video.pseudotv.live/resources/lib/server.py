@@ -286,16 +286,20 @@ class HTTP:
                     host   = SETTINGS.getIP()
                     port   = self._chkPort(host, SETTINGS.getSettingInt('TCP_PORT'))
                     server = PROPERTIES.setRemoteHost('%s:%s'%(host,port))
-                    
                     self.log("_start, starting server @ %s"%(server),xbmc.LOGINFO)
                     SETTINGS.setSetting('Remote_NAME' ,PROPERTIES.getFriendlyName())
                     SETTINGS.setSetting('Remote_M3U'  ,'http://%s/%s'%(server,M3UFLE))
                     SETTINGS.setSetting('Remote_XMLTV','http://%s/%s'%(server,XMLTVFLE))
                     SETTINGS.setSetting('Remote_GENRE','http://%s/%s'%(server,GENREFLE))
                     
+                    ThreadedHTTPServer.allow_reuse_address = True
                     self._server = ThreadedHTTPServer((host, port), partial(MyHandler,service=self.service))
-                    self._server.allow_reuse_address = True
-                    
+                    try:
+                        self._server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                        self.log("_start, set SO_REUSEADDR on server socket", xbmc.LOGDEBUG)
+                    except Exception as e:
+                        self.log("_start, failed to set SO_REUSEADDR: %s" % e, xbmc.LOGWARNING)
+
                     self.httpd = Thread(target=self._server.serve_forever)
                     self.httpd.daemon=True
                     self.httpd.start()
