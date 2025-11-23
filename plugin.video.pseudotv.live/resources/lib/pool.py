@@ -24,9 +24,10 @@ from itertools          import repeat, count
 from functools          import partial, wraps, reduce, update_wrapper
 
 try:
-    import multiprocessing
+    from _multiprocessing import SemLock, sem_unlink #workaround to raise two python exceptions. _multiprocessing import error, sem_unlink missing from native python (android).
+    from multiprocessing  import cpu_count
     cpu_count   = multiprocessing.cpu_count()
-    POOL_ENABLED = False #True force disable multiproc. until monkeypatch/wrapper to fix pickling error. 
+    POOL_ENABLED = True #todo monkeypatch/wrapper to fix pickling error. 
 except:
     POOL_ENABLED = False
     cpu_count   = os.cpu_count()
@@ -136,15 +137,15 @@ def executeit(method):
 
 class ExecutorPool:
     def __init__(self):
-        self.CPUCount = cpu_count
+        self.CPUCount = self.getCPUCount() 
         if POOL_ENABLED: self.pool = ProcessPoolExecutor
         else:            self.pool = ThreadPoolExecutor
-        self.log(f"__init__, multiprocessing = {POOL_ENABLED}, CORES = {self.CPUCount}, THREADS = {self.cpuCount()}")
+        self.log(f"__init__, multiprocessing = {POOL_ENABLED}, CORES = {cpu_count}, THREADS = {self.CPUCount}")
 
 
-    def cpuCount(self):
-        if POOL_ENABLED: return self.CPUCount
-        else:            return int(os.getenv('THREAD_COUNT', self.CPUCount * 2))
+    def getCPUCount(self):
+        if POOL_ENABLED: return cpu_count
+        else:            return int(os.getenv('THREAD_COUNT', cpu_count * 2))
             
             
     def log(self, msg, level=xbmc.LOGDEBUG):
@@ -153,16 +154,26 @@ class ExecutorPool:
 
     def executor(self, func, timeout=None, *args, **kwargs):
         self.log("executor, func = %s, timeout = %s"%(func.__name__,timeout))
-        with self.pool(self.cpuCount()) as executor:
+        with self.pool(self.CPUCount) as executor:
             try: return executor.submit(func, *args, **kwargs).result(timeout)
-            except Exception as e: self.log("executor, func = %s failed! %s\nargs = %s, kwargs = %s"%(func.__name__,e,args,kwargs), xbmc.LOGERROR)
+            except Exception as e:
+                self.log("executor, func = %s failed! %s\nargs = %s, kwargs = %s"%(func.__name__,e,args,kwargs), xbmc.LOGERROR)
+                return self.execute(func, *args, **kwargs)
 
 
     def executors(self, func, items=[], *args, **kwargs):
         self.log("executors, func = %s, items = %s"%(func.__name__,len(items)))
-        with self.pool(self.cpuCount()) as executor:
+        with self.pool(self.CPUCount) as executor:
             try: return list(filter(lambda item: item is not None, executor.map(wrapped_partial(func, *args, **kwargs), items)))
-            except Exception as e: self.log("executors, func = %s, items = %s failed! %s\nargs = %s, kwargs = %s"%(func.__name__,len(items),e,args,kwargs), xbmc.LOGERROR)
+            except Exception as e:
+                self.log("executors, func = %s, items = %s failed! %s\nargs = %s, kwargs = %s"%(func.__name__,len(items),e,args,kwargs), xbmc.LOGERROR)
+                return self.generator(func, items, *args, **kwargs)
+
+
+    def execute(self, func, *args, **kwargs):
+        self.log("execute, func = %s"%(func.__name__))
+        try: return func(*args, **kwargs)
+        except Exception as e: self.log("execute, func = %s failed! %s\nargs = %s, kwargs = %s"%(func.__name__,e,args,kwargs), xbmc.LOGERROR)
 
 
     def generator(self, func, items=[], *args, **kwargs):

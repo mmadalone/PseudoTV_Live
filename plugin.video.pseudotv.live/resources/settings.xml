@@ -1137,25 +1137,11 @@
                     <level>3</level>
                     <default>false</default>
                     <control type="toggle"/>
-                    <dependencies>
-                        <dependency type="enable">
-                            <and>
-                                <condition operator="is" setting="Debug_Enable">true</condition>
-                            </and>
-                        </dependency>
-                    </dependencies>
                 </setting>
                 <setting id="Enable_Executors" type="boolean" label="30198" help="33198">
                     <level>3</level>
-                    <default>true</default>
+                    <default>false</default>
                     <control type="toggle"/>
-                    <dependencies>
-                        <dependency type="enable">
-                            <and>
-                                <condition operator="is" setting="Debug_Enable">true</condition>
-                            </and>
-                        </dependency>
-                    </dependencies>
                 </setting>
                 <setting id="RPC_Delay" type="integer" label="30110" help="33109">
                     <level>3</level>
@@ -1165,13 +1151,6 @@
                         <step>10</step>
                         <maximum>2000</maximum>
                     </constraints>
-                    <dependencies>
-                        <dependency type="enable">
-                            <and>
-                                <condition operator="is" setting="Debug_Enable">true</condition>
-                            </and>
-                        </dependency>
-                    </dependencies>
                     <control type="slider" format="integer">
                         <popup>false</popup>
                     </control>
@@ -1184,13 +1163,6 @@
                         <step>1</step>
                         <maximum>10</maximum>
                     </constraints>
-                    <dependencies>
-                        <dependency type="enable">
-                            <and>
-                                <condition operator="is" setting="Debug_Enable">true</condition>
-                            </and>
-                        </dependency>
-                    </dependencies>
                     <control type="slider" format="integer">
                         <popup>false</popup>
                     </control>

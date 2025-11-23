@@ -119,11 +119,11 @@ class Player(xbmc.Player):
             
         playingItem = loadJSON(decodeString(self.getPlayerItem().getProperty('sysInfo')))
         playingItem['isPseudoTV'] = '@%s'%(slugify(ADDON_NAME)) in playingItem.get('chid','')
-        playingItem['chfile']     = BUILTIN.getInfoLabel('Filename','Player')
-        playingItem['chfolder']   = BUILTIN.getInfoLabel('Folderpath','Player')
-        playingItem['chpath']     = BUILTIN.getInfoLabel('Filenameandpath','Player')
         
         if playingItem['isPseudoTV']:
+            playingItem['chfile']     = BUILTIN.getInfoLabel('Filename','Player')
+            playingItem['chfolder']   = BUILTIN.getInfoLabel('Folderpath','Player')
+            playingItem['chpath']     = BUILTIN.getInfoLabel('Filenameandpath','Player')
             playingItem.update({'citem':combineDicts(playingItem.get('citem',{}),__update(playingItem.get('citem',{}).get('id'))),'runtime':int(self.getPlayerTime())}) #still needed for adv. rules?
             if not playingItem.get('fitem'):    playingItem.update({'fitem':decodePlot(BUILTIN.getInfoLabel('Plot','VideoPlayer'))})
             if not playingItem.get('nitem'):    playingItem.update({'nitem':decodePlot(BUILTIN.getInfoLabel('NextPlot','VideoPlayer'))})
@@ -180,8 +180,10 @@ class Player(xbmc.Player):
 
 
     def isPseudoTV(self):
-        if self.isPlaying(): return self.getplayingItem().get('isPseudoTV')
-        else:                return (self.pendingItem.get('playingItem',{}).get('isPseudoTV') or self.playingItem.get('isPseudoTV') or False)
+        try:
+            if self.isPlaying(): return self.playingItem['isPseudoTV']
+            else:                return self.pendingItem['playingItem']['isPseudoTV']
+        except:                  return self.getplayingItem().get('isPseudoTV',False)
 
 
     def isPlayingPseudoTV(self):
@@ -509,7 +511,8 @@ class Service():
     
         
     def _tasks(self):
-        self._que(self.tasks._chkEpochTimer,-1,*('chkQueTimer', self.tasks.chkQueTimer, FIFTEEN)) #keep que alive after interrupt.
+        if not self._playing():
+            self._que(self.tasks._chkEpochTimer,-1,*('chkQueTimer', self.tasks.chkQueTimer, FIFTEEN)) #keep que alive after interrupt.
         
     
     def _shutdown(self, wait=1.0) -> bool: #service break

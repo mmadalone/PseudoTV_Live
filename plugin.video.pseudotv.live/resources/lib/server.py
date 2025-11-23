@@ -126,6 +126,19 @@ class MyHandler(BaseHTTPRequestHandler):
                     if setJSON(os.path.join(RESUME_LOC,self.path.replace('/filelist/','')),incoming.get('payload')):
                         DIALOG.notificationDialog(LANGUAGE(30085)%(LANGUAGE(30060),incoming.get('name',ADDON_NAME)))
                     self.send_response(200, "OK")
+                elif file_path.startswith(('/manager','/wizard')) and file_path.endswith('form.html'):
+                    try:
+                        # Prefer a hypothetical SETTINGS.setPayload if it exists
+                        if hasattr(SETTINGS, 'setPayload'):
+                            SETTINGS.setPayload(incoming.get('payload'))
+                        else:
+                            # Fallback: write to resume location as remote_payload.json
+                            setJSON(os.path.join(RESUME_LOC, 'remote_payload.json'), incoming.get('payload'))
+                        DIALOG.notificationDialog(LANGUAGE(30085)%(LANGUAGE(30108),incoming.get('name',ADDON_NAME)))
+                        self.send_response(200, "OK")
+                    except Exception as e:
+                        self.log('do_POST, failed to save remote payload: %s'%(e), xbmc.LOGERROR)
+                        self.send_error(500, "Failed to save payload")
                 else: self.send_error(401, "Path Not found")
             else: self.send_error(401, "UUID Not verified!")
         else: return self.do_GET()
@@ -180,7 +193,16 @@ class MyHandler(BaseHTTPRequestHandler):
                         use_compression = False
                         chunk = SETTINGS.getPayloadUI().encode(encoding=DEFAULT_ENCODING)
                     else: return self.send_error(404, "File Not Found [%s]" % self.path)
-                else:     return self.send_error(404, "File Not Found [%s]" % self.path)
+                elif file_path.startswith(('/manager','/wizard')) and file_path.endswith('form.html'):
+                    def _escape_html(s):
+                        return s.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace('"',"&quot;")
+                    use_compression = False
+                    fle  = FileAccess.open(FORM_DEFAULT,'r')
+                    html = fle.read()
+                    fle.close()
+                    html.format(json=_escape_html(dumpJSON(SETTINGS.getPayload(), idnt=4)), uuid=SETTINGS.getMYUUID())
+                    chunk = html.encode(encoding=DEFAULT_ENCODING)
+                else: return self.send_error(404, "File Not Found [%s]" % self.path)
                 self.log('do_GET, file_path = %s, use_compression = %s'%(file_path, use_compression))
                 __sendChunk(chunk, use_compression)
         except FileNotFoundError: self.send_error(404, "File Not Found [%s]" % self.path)

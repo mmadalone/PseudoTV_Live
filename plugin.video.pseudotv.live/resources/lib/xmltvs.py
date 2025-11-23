@@ -438,9 +438,8 @@ class XMLTVS:
             return self._save()
         
         
-    def buildGenres(self):
+    def buildGenres(self, epggenres={}):
         def __parseGenres(plines):
-            epggenres = {}
             for line in plines:
                 try:    
                     names = line.childNodes[0].data
@@ -484,8 +483,8 @@ class XMLTVS:
             
             genres = __getGenres()
             self.pool.executors(__matchGenres, self.XMLTVDATA.get('programmes',[]))
-            epggenres.update(dict(sorted(sorted(list(genres.items()), key=lambda v:v[1]['name']), key=lambda v:v[1]['genreId'])))
             epggenres = __getGenres(GENREFLEPATH)
+            epggenres.update(dict(sorted(sorted(list(genres.items()), key=lambda v:v[1]['name']), key=lambda v:v[1]['genreId'])))
             for key in list(set(epggenres)):
                 gen = doc.createElement('genre')
                 gen.setAttribute('genreId',epggenres[key].get('genreId'))

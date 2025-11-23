@@ -84,7 +84,7 @@ class CustomQueue:
         self.log(f"_exe, func = {func.__name__}, executor = {self.executor}")
         try:
             if    self.executor: self.pool.executor(func, None, *args, **kwargs)
-            else: func(*args, **kwargs)
+            else:                self.pool.execute(func, *args, **kwargs)
         except Exception as e:
             self.log(f"_exe, func = {func.__name__} failed! {e}\nargs = {args}, kwargs = {kwargs}", xbmc.LOGERROR)
                
