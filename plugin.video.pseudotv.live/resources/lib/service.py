@@ -330,7 +330,7 @@ class Player(xbmc.Player):
                 self.toggleOnNext(bool(self.OnNextMode))
                 
         def __chkSleep():
-            if self.sleepTime > 0 and (self.idleTime > (self.sleepTime * 10800)):
+            if self.sleepTime > 0 and (self.monitor.idleTime > (self.sleepTime * 10800)):
                 if not PROPERTIES.isRunning('Player.__chkSleep'):
                     with PROPERTIES.chkRunning('Player.__chkSleep'):
                         if self._onSleep(): self.stop()
@@ -431,6 +431,7 @@ class Monitor(xbmc.Monitor):
             self.isRunning = False
             
         
+    @executeit
     def _chkIdle(self):
         self.idleTime = BUILTIN.getIdle()
         self.isIdle   = bool(self.idleTime) | self.idleTime > OSD_TIMER
@@ -537,13 +538,21 @@ class Service():
         return self.pendingInterrupt
     
 
-    def _suspend(self) -> bool: #task que continue
+    def _suspend(self, wait=SUSPEND_TIMER) -> bool: #task que continue
         pendingSuspend = (PROPERTIES.isSuspendActivity() | BUILTIN.isSettingsOpened())
         if pendingSuspend != self.pendingSuspend:
             self.pendingSuspend = PROPERTIES.setPendingSuspend(pendingSuspend)
             self.log('_suspend, pendingSuspend = %s'%(self.pendingSuspend))
+        self._waitForAbort(wait)
         return self.pendingSuspend
         
+
+    def _waitForAbort(self, wait=SUSPEND_TIMER):
+        while not self.monitor.abortRequested() and wait > 0:
+            if (self.monitor.waitForAbort(0.5) | PROPERTIES.isPendingShutdown() | PROPERTIES.isPendingRestart() | PROPERTIES.isPendingSuspend() | PROPERTIES.isPendingInterrupt()): break
+            else: wait -= 0.5
+        self.log('_waitForAbort, remaining wait = %s'%(wait))
+                    
 
     def _initialize(self):
         self.monitor.idleThread.start()

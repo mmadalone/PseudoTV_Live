@@ -66,6 +66,7 @@ class Discovery:
         return log('%s: %s'%(self.__class__.__name__,msg),level)
 
 
+    @executeit
     def _run(self):
         if not PROPERTIES.isRunning('Discovery._run'):
             with PROPERTIES.chkRunning('Discovery._run'):
@@ -74,7 +75,7 @@ class Discovery:
                 self.log("_run, Multicast DNS Service waiting for (%s)"%(ZEROCONF_SERVICE))
                 SETTINGS.setSetting('ZeroConf_Status','[COLOR=yellow][B]%s[/B][/COLOR]'%(LANGUAGE(32252)))
                 ServiceBrowser(zconf, ZEROCONF_SERVICE, self.MyListener(multiroom=self.multiroom))
-                self.service.monitor.waitForAbort(DISCOVER_INTERVAL)
+                self.service._waitForAbort(DISCOVER_INTERVAL)
                 SETTINGS.setSetting('ZeroConf_Status',LANGUAGE(32211)%({True:'green',False:'red'}[zcons],{True:LANGUAGE(32158),False:LANGUAGE(32253)}[zcons]))
                 self.log("_run, Multicast DNS Service stopping search for (%s)"%(ZEROCONF_SERVICE))
                 zconf.close()

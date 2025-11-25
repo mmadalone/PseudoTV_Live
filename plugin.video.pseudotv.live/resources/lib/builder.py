@@ -194,7 +194,6 @@ class Builder:
                             self.log("[%s] build, _suspend"%(citem['id']))
                             channels.insert(idx,citem)
                             self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32145)), header=ADDON_NAME)
-                            self.service.monitor.waitForAbort(SUSPEND_TIMER)
                             continue
                         else:
                             self.pMSG  = '%s: %s'%(LANGUAGE(32144),LANGUAGE(32212))
@@ -346,7 +345,6 @@ class Builder:
                     self.log("[%s] buildChannel, _suspend"%(citem['id']))
                     paths.insert(idx,path)
                     self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32145)), header=ADDON_NAME)
-                    self.service.monitor.waitForAbort(SUSPEND_TIMER)
                     continue
                 else:
                     if len(citem.get('path',[])) > 1: self.pName = '%s %s/%s'%(citem['name'],idx+1,len(citem.get('path',[])))
@@ -407,7 +405,6 @@ class Builder:
             elif self.service._suspend():
                 self.log("[%s] buildFileList, _suspend"%(citem['id']))
                 self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32145)), header=ADDON_NAME)
-                self.service.monitor.waitForAbort(SUSPEND_TIMER)
                 continue
             elif len(dirList) > 0:
                 dir   = dirList.pop(0)
@@ -461,7 +458,6 @@ class Builder:
                     self.log("[%s] buildList, _suspend"%(citem['id']))
                     items.insert(idx,item)
                     self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32145)), header=ADDON_NAME)
-                    self.service.monitor.waitForAbort(SUSPEND_TIMER)
                     continue
                 elif not item.get('type'): item['type'] = query.get('key','files')
                 elif fileType == 'directory':

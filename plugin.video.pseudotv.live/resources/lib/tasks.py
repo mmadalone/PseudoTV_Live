@@ -285,7 +285,7 @@ class Tasks():
                         with BUILTIN.busy_dialog(lock=True):
                             # BUILTIN.executebuiltin("Dialog.Close(all)")
                             DIALOG.notificationWait('%s: %s'%(PVR_CLIENT_NAME,LANGUAGE(32125)),wait=wait, usethread=True)
-                            __toggle(False), self.monitor.waitForAbort(wait), __toggle(True)
+                            __toggle(False), self.service._waitForAbort(wait), __toggle(True)
                     else: self.service._que(self.chkPVRRefresh)
             
             

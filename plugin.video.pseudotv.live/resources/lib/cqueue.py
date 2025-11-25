@@ -164,7 +164,6 @@ class CustomQueue:
                 break
             elif self.service._suspend(): 
                 self.log("_start, _suspend")
-                self.service.monitor.waitForAbort(SUSPEND_TIMER)
                 continue
             elif self.priority:
                 if not self.min_heap:

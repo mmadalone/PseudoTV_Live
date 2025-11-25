@@ -101,9 +101,11 @@ class VideoParser:
                     duration = 0
 
                 if duration == 0:
+                    monitor = MONITOR()
                     for parser in EXTERNAL_PARSER:
-                        if MONITOR().waitForAbort(0.0001) or duration > 0: break
+                        if monitor.waitForAbort(0.0001) or duration > 0: break
                         duration = parser().determineLength(filename)
+                    del monitor
             if duration > 0: duration = jsonRPC._setDuration(filename, fileitem, int(duration))
         log("VideoParser: getVideoLength duration = %s, filename = %s"%(duration,filename))
         return duration
