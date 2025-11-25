@@ -90,7 +90,7 @@ class Plugin:
         self.log('[%s] getRadioItems'%(chid))
         return interleave([self.jsonRPC.requestList({'id':chid}, path, 'music', page=limit, sort={"method":"random"})[0] for path in vid.split('|')], SETTINGS.getSettingInt('Interleave_Set'), SETTINGS.getSettingBool('Interleave_Repeat'))
 
-
+    
     def getPausedItems(self, name, chid):
         self.log('[%s] getPausedItems'%(chid))
         def __buildfItem(item):

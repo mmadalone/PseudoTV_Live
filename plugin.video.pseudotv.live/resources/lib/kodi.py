@@ -1001,7 +1001,7 @@ class Properties:
 
 
     def recessActivity(self, func, *args, **kwargs):
-        results     = None
+        results     = []
         isSuspend   = self.isSuspendActivity()
         isInterrupt = self.isInterruptActivity()
         while not self.monitor.abortRequested():

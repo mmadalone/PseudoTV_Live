@@ -147,7 +147,6 @@ class Manager(xbmcgui.WindowXMLDialog):
      
      
     def buildPreview(self, citem={}):
-        fileList = []
         builder  = Builder()
         fileList = PROPERTIES.recessActivity(builder.build, *([citem],True))
         del builder
@@ -156,7 +155,6 @@ class Manager(xbmcgui.WindowXMLDialog):
 
 
     def buildFileList(self, citem={}, path='', limit=25):
-        fileList = []
         builder  =  Builder()
         fileList = PROPERTIES.recessActivity(builder.buildFileList, *(citem,path,'video',limit,{},{}))
         del builder
@@ -692,9 +690,7 @@ class Manager(xbmcgui.WindowXMLDialog):
             return self.buildListItem('%s| %s'%(fileList.index(fitem),fitem.get('showlabel',fitem.get('label'))), fitem.get('file') ,icon=(getThumb(fitem,opt=EPG_ARTWORK) or {0:FANART,1:COLOR_LOGO}[EPG_ARTWORK]))
             
         def __fileList(citem):
-            fileList   = []
-            start_time = 0
-            end_time   = 0
+            fileList = []
             try:
                 DIALOG.notificationDialog('%s: [B]%s[/B]\n%s'%(LANGUAGE(32236),citem.get('name','Untitled'),LANGUAGE(32140)))
                 tmpcitem = citem.copy()
@@ -702,8 +698,11 @@ class Manager(xbmcgui.WindowXMLDialog):
                 start_time = time.time()
                 fileList   = self.buildPreview(tmpcitem)
                 end_time   = time.time()
-            except Exception as e: self.log("previewChannel, __fileList: failed! %s"%(e), xbmc.LOGERROR)
-            return fileList, round(abs(end_time-start_time),2)
+                self.log('previewChannel: __fileList, id = %s, fileList = %s'%(citem['id'],len(fileList)))
+                return fileList, round(abs(end_time-start_time),2)
+            except Exception as e:
+                self.log("previewChannel, __fileList: failed! %s"%(e), xbmc.LOGERROR)
+                return [], 0
             
         if not PROPERTIES.isRunning('Manager.previewChannel'):
             with PROPERTIES.chkRunning('Manager.previewChannel'), self.toggleSpinner(condition=PROPERTIES.isRunning('Manager.toggleSpinner')==False):
@@ -712,7 +711,6 @@ class Manager(xbmcgui.WindowXMLDialog):
                 if not isinstance(fileList,list) and not fileList: DIALOG.notificationDialog('%s or\n%s'%(LANGUAGE(32030),LANGUAGE(32000)))
                 elif fileList:
                     lizLST.extend(poolit(__buildItem)(fileList))
-                    self.log('previewChannel, id = %s, lizLST = %s'%(citem['id'],len(lizLST)))
             if len(lizLST) > 0: return DIALOG.selectDialog(lizLST, header='%s: [B]%s[/B] - Build Time: [B]%ss[/B]'%(LANGUAGE(32235),citem.get('name','Untitled'),f"{run_time:.2f}"))
             if retCntrl: self.setFocusId(retCntrl)
 

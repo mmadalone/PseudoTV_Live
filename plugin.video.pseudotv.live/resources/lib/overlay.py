@@ -285,10 +285,10 @@ class OnNext(xbmcgui.WindowXMLDialog):
     
     def __init__(self, *args, **kwargs):
         xbmcgui.WindowXMLDialog.__init__(self, *args, **kwargs)
-        self.player     = kwargs.get('player', None)
-        self.nitem      = kwargs.get('next', {})
-        self.onNextMode = kwargs.get('mode' , SETTINGS.getSettingInt('OnNext_Mode'))
-        self.onNextPosition = kwargs.get('position' , SETTINGS.getSetting("OnNext_Position_XY"))
+        self.player         = kwargs.get('player'  , None)
+        self.nitem          = kwargs.get('next'    , {})
+        self.onNextMode     = kwargs.get('mode'    , SETTINGS.getSettingInt('OnNext_Mode'))
+        self.onNextPosition = kwargs.get('position', SETTINGS.getSetting("OnNext_Position_XY"))
         
         self.service    = self.player.service
         self.jsonRPC    = self.player.jsonRPC
@@ -328,7 +328,7 @@ class OnNext(xbmcgui.WindowXMLDialog):
                 nowTitle  = (self.fitem.get('label')     or BUILTIN.getInfoLabel('Title','VideoPlayer'))
                 nextTitle = (self.nitem.get('showlabel') or BUILTIN.getInfoLabel('NextTitle','VideoPlayer') or chname)
 
-                try: nextTime = epochTime(self.nitem['start'],tz=False).strftime('%I:%M%p')
+                try: nextTime = epochTime(self.nitem['start']).strftime('%I:%M%p')
                 except Exception as e: 
                     self.log("__init__, nextTime failed! %s\nstart = %s"%(e,self.nitem.get('start')), xbmc.LOGERROR)
                     nextTime = BUILTIN.getInfoLabel('NextStartTime','VideoPlayer')

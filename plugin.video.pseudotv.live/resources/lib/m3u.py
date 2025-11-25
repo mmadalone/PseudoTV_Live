@@ -63,8 +63,9 @@ M3U_MIN  = {"id"                : "",
 class M3U:
     def __init__(self):
         self.log('__init__')
+        data = '#EXTM3U tvg-shift="" x-tvg-url="%s" x-tvg-id="" catchup-correction=""'%('http://%s/%s'%(PROPERTIES.getRemoteHost(),XMLTVFLE))
         stations, recordings = self.cleanSelf(list(self._load()))
-        self.M3UDATA = {'data':'#EXTM3U tvg-shift="" x-tvg-url="" x-tvg-id="" catchup-correction=""', 'stations':stations, 'recordings':recordings}
+        self.M3UDATA = {'data':data,'stations':stations,'recordings':recordings}
         
         
     def log(self, msg, level=xbmc.LOGDEBUG):
@@ -200,6 +201,8 @@ class M3U:
             opts = list(self.getMitem().keys())
             mins = [opts.pop(opts.index(key)) for key in list(M3U_MIN.keys()) if key in opts] #min required m3u entries.
             line = '#EXTINF:-1 tvg-chno="%s" tvg-id="%s" tvg-name="%s" tvg-logo="%s" group-title="%s" radio="%s" catchup="%s" %s,%s\n'
+            
+            self.M3UDATA['data']       = '#EXTM3U tvg-shift="" x-tvg-url="%s" x-tvg-id="" catchup-correction=""'%('http://%s/%s'%(PROPERTIES.getRemoteHost(),XMLTVFLE))
             self.M3UDATA['stations']   = self.sortStations(self.M3UDATA.get('stations',[]))
             self.M3UDATA['recordings'] = self.sortStations(self.M3UDATA.get('recordings',[]), key='name')
             self.log('_save, saving %s stations and %s recordings to %s'%(len(self.M3UDATA['stations']),len(self.M3UDATA['recordings']),file))
