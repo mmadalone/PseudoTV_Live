@@ -23,12 +23,18 @@ from videoparser import VideoParser
 class Service:
     player  = PLAYER()
     monitor = MONITOR()
-    def _shutdown(self, wait=0.0001) -> bool:
+    def _shutdown(self, wait=1.0) -> bool:
+        self._wait(wait)
         return PROPERTIES.isPendingShutdown()
     def _interrupt(self) -> bool:
         return PROPERTIES.isPendingInterrupt()
-    def _suspend(self) -> bool:
+    def _suspend(self, wait=SUSPEND_TIMER) -> bool:
+        self._wait(wait)
         return PROPERTIES.isPendingSuspend()
+    def _wait(self, wait=1.0):
+        while not self.monitor.abortRequested() and wait > 0:
+            if (self.monitor.waitForAbort(CPU_CYCLE) | PROPERTIES.isPendingShutdown() | PROPERTIES.isPendingRestart() | PROPERTIES.isPendingSuspend() | PROPERTIES.isPendingInterrupt()): break
+            else: wait -= CPU_CYCLE
         
           
 class JSONRPC:
@@ -392,7 +398,6 @@ class JSONRPC:
 
 
     def getDuration(self, path, item={}, accurate=bool(SETTINGS.getSettingInt('Duration_Type')), save=SETTINGS.getSettingBool('Store_Duration')):
-        self.log("getDuration, accurate = %s, path = %s, save = %s" % (accurate, path, save))
         if not item: item = {'file':path}
         runtime = self._getRuntime(item)
         if runtime == 0 or accurate:
@@ -401,7 +406,7 @@ class JSONRPC:
                 for file in splitStacks(path): duration += self.__parseDuration(runtime, file)
             else: duration = self.__parseDuration(runtime, path, item, save)
             if duration > 0: runtime = duration
-        self.log("getDuration, returning path = %s, runtime = %s" % (path, runtime))
+        self.log("getDuration, accurate = %s, path = %s, save = %s\nreturn path = %s, runtime = %s" % (accurate, path, save,path, runtime))
         return runtime
 
 
@@ -591,7 +596,7 @@ class JSONRPC:
             iters = cycle(files)
             while not self.service.monitor.abortRequested() and (len(files) < page and len(files) > 0):
                 item = next(iters).copy()
-                if   self.service._shutdown(0.0001): break
+                if   self.service._shutdown(CPU_CYCLE): break
                 elif self.getDuration(item.get('file'),item) == 0:
                     try: files.pop(files.index(item))
                     except: break
@@ -687,13 +692,10 @@ class JSONRPC:
         if (citem.get('name','') and citem.get('id','')):
             nextitems = self.matchChannel(citem.get('name',''), citem.get('id',''), citem.get('radio',False)).get('broadcastnext',[])
             for idx, nextitem in enumerate(nextitems):
-                if self.service._shutdown(0.0001): break
-                else:
-                    item = decodePlot(nextitem.get('plot',''))
-                    if item.get('start') == nitem.get('start',str(random.random())) and item.get('id') == nitem.get('id',random.random()):
-                        for next in nextitems[idx:]:
-                            if self.service._shutdown(0.0001): break
-                            elif not isFiller(next): return decodePlot(next.get('plot',''))
+                item = decodePlot(nextitem.get('plot',''))
+                if item.get('start') == nitem.get('start',str(random.random())) and item.get('id') == nitem.get('id',random.random()):
+                    for next in nextitems[idx:]:
+                        if not isFiller(next): return decodePlot(next.get('plot',''))
         return nitem
         
 

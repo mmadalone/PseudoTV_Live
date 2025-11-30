@@ -288,7 +288,7 @@ class Player(xbmc.Player):
         self.log('_onIdle')
         def __chkPlayback():
             if self.pendingItem.get('invoked',-1) > 0:
-                if not BUILTIN.isBusyDialog() and (time.time() - self.pendingItem.get('invoked',-1)) > 60:
+                if not BUILTIN.isBusyDialog() and (time.time() - self.pendingItem.get('invoked',-1)) > SETTINGS.getSettingInt('Playback_Timeout'):
                     self.onPlayBackError()
 
         def __chkBackground():
@@ -543,15 +543,15 @@ class Service():
         if pendingSuspend != self.pendingSuspend:
             self.pendingSuspend = PROPERTIES.setPendingSuspend(pendingSuspend)
             self.log('_suspend, pendingSuspend = %s'%(self.pendingSuspend))
-        self._waitForAbort(wait)
+        self._wait(wait)
         return self.pendingSuspend
         
 
-    def _waitForAbort(self, wait=SUSPEND_TIMER):
+    def _wait(self, wait=1.0):
         while not self.monitor.abortRequested() and wait > 0:
-            if (self.monitor.waitForAbort(0.5) | PROPERTIES.isPendingShutdown() | PROPERTIES.isPendingRestart() | PROPERTIES.isPendingSuspend() | PROPERTIES.isPendingInterrupt()): break
-            else: wait -= 0.5
-        self.log('_waitForAbort, remaining wait = %s'%(wait))
+            if (self.monitor.waitForAbort(CPU_CYCLE) | PROPERTIES.isPendingShutdown() | PROPERTIES.isPendingRestart() | PROPERTIES.isPendingSuspend() | PROPERTIES.isPendingInterrupt()): break
+            else: wait -= CPU_CYCLE
+        if wait > 0: self.log('_wait, remaining = %s'%(wait))
                     
 
     def _initialize(self):

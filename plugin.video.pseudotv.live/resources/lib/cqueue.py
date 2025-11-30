@@ -156,7 +156,7 @@ class CustomQueue:
             if not self.head and not self.priority:
                 self.log("_start, The queue is empty!")
                 break
-            elif self.service._shutdown(0.0001): 
+            elif self.service._shutdown(CPU_CYCLE): 
                 self.log("_start, _shutdown")
                 break
             elif self.service._interrupt(): 

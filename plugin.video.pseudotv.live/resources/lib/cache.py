@@ -41,23 +41,32 @@ def cacheit(expiration=datetime.timedelta(minutes=15), checksum=ADDON_VERSION, j
     
 class Service:
     monitor = MONITOR()
-    def _shutdown(self, wait=0.0001) -> bool:
-        return xbmcgui.Window(10000).getProperty('%s.pendingShutdown'%(ADDON_ID)) == "true"
+    def _is(self, text):
+        return text == "true"
+    def _shutdown(self, wait=1.0) -> bool:
+        self._wait(wait)
+        return self._is(xbmcgui.Window(10000).getProperty('%s.pendingShutdown'%(ADDON_ID)))
     def _interrupt(self) -> bool:
-        return xbmcgui.Window(10000).getProperty('%s.pendingInterrupt'%(ADDON_ID)) == "true"
+        return self._is(xbmcgui.Window(10000).getProperty('%s.pendingInterrupt'%(ADDON_ID)))
     def _suspend(self) -> bool:
-        return xbmcgui.Window(10000).getProperty('%s.pendingSuspend'%(ADDON_ID)) == "true"
+        self._wait(wait)
+        return self._is(xbmcgui.Window(10000).getProperty('%s.pendingSuspend'%(ADDON_ID)))
+    def _wait(self, wait=1.0):
+        delay = (1/int((xbmcgui.Window(10000).getProperty('%s.CPU_CYCLE'%(ADDON_ID)) or '1')) / 8)
+        while not self.monitor.abortRequested() and wait > 0:
+            if (self.monitor.waitForAbort(delay) | self._is(xbmcgui.Window(10000).getProperty('%s.pendingShutdown'%(ADDON_ID))) | self._is(xbmcgui.Window(10000).getProperty('%s.pendingRestart'%(ADDON_ID))) | self._is(xbmcgui.Window(10000).getProperty('%s.pendingSuspend'%(ADDON_ID))) | self._is(xbmcgui.Window(10000).getProperty('%s.pendingInterrupt'%(ADDON_ID)))): break
+            else: wait -= delay
 
 class Cache:
     lock    = Lock()
     cache   = SimpleCache()
     service = Service()
 
-
     @contextmanager
-    def cacheLocker(self, wait=0.0001): #simplecache is not thread safe, threadlock not avoiding collisions? Hack/Lazy avoidance.
+    def cacheLocker(self): #simplecache is not thread safe, threadlock not avoiding collisions? Hack/Lazy avoidance.
+        delay = (1/int((xbmcgui.Window(10000).getProperty('%s.CPU_CYCLE'%(ADDON_ID)) or '1')) / 8)
         while not self.service.monitor.abortRequested():
-            if self.service._shutdown(wait) or self.service._interrupt(): break
+            if self.service._shutdown(delay) or self.service._interrupt(): break
             elif xbmcgui.Window(10000).getProperty('%s.cacheLocker'%(ADDON_ID)) != 'true': break
         xbmcgui.Window(10000).setProperty('%s.cacheLocker'%(ADDON_ID),'true')
         try: yield

@@ -913,6 +913,10 @@ msgctxt "#30221"
 msgid "remove.bg API-Key"
 msgstr ""
 
+msgctxt "#30222"
+msgid "Playback Timeout"
+msgstr ""
+
 # Skin - strings 31000 thru 31999 reserved for skins
 
 
@@ -2391,6 +2395,10 @@ msgstr ""
 
 msgctxt "#33220"
 msgid ""
+msgstr ""
+
+msgctxt "#33222"
+msgid "How long to wait in seconds before PseudoTV attempts to correct failed playback. [90 Default]"
 msgstr ""
 
 msgctxt "#33228"

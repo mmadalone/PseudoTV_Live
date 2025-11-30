@@ -26,11 +26,15 @@ from functools          import partial, wraps, reduce, update_wrapper
 try:
     from _multiprocessing import SemLock, sem_unlink #workaround to raise two python exceptions. _multiprocessing import error, sem_unlink missing from native python (android).
     from multiprocessing  import cpu_count
-    cpu_count   = multiprocessing.cpu_count()
+    cpu_count = multiprocessing.cpu_count()
+    xbmcgui.Window(10000).setProperty('%s.CPU_CYCLE'%(ADDON_ID),str(cpu_count))
     POOL_ENABLED = True #todo monkeypatch/wrapper to fix pickling error. 
 except:
     POOL_ENABLED = False
-    cpu_count   = os.cpu_count()
+    cpu_count = os.cpu_count()
+    xbmcgui.Window(10000).setProperty('%s.CPU_CYCLE'%(ADDON_ID),str(cpu_count))
+    
+CPU_CYCLE = (1/int((xbmcgui.Window(10000).getProperty('%s.CPU_CYCLE'%(ADDON_ID)) or '1')) / 8) #lazy function
 
 def wrapped_partial(func, *args, **kwargs):
     partial_func = partial(func, *args, **kwargs)
@@ -47,7 +51,7 @@ def timeit(method):
             log('%s timeit => %.2f ms'%(method.__qualname__.replace('.',': '),(end_time-start_time)*1000))
         return result
     return wrapper
-    
+
 def killit(method):
     @wraps(method)
     def wrapper(wait=30, *args, **kwargs):
@@ -140,7 +144,7 @@ class ExecutorPool:
         self.CPUCount = self.getCPUCount() 
         if POOL_ENABLED: self.pool = ProcessPoolExecutor
         else:            self.pool = ThreadPoolExecutor
-        self.log(f"__init__, multiprocessing = {POOL_ENABLED}, CORES = {cpu_count}, THREADS = {self.CPUCount}")
+        self.log(f"__init__, multiprocessing = {POOL_ENABLED}, CORES = {cpu_count}, THREADS = {self.CPUCount}, CPU_CYCLE = {CPU_CYCLE}")
 
 
     def getCPUCount(self):

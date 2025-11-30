@@ -66,6 +66,7 @@ class Background(xbmcgui.WindowXMLDialog):
                 self.log("__init__, nextTime failed! %s\nstart = %s"%(e,self.nitem.get('start')), xbmc.LOGERROR)
                 nextTime = BUILTIN.getInfoLabel('NextStartTime','VideoPlayer')
                 
+            if not nextTime: return
             onNow  = '%s on %s'%(nowTitle,chname) if chname not in validString(nowTitle) else nowTitle
             onNext = '@ %s: %s'%(nextTime,nextTitle)
         
@@ -117,9 +118,9 @@ class Restart(xbmcgui.WindowXMLDialog):
     def onInit(self):
         self.log("onInit")
         try:
-            prog = 0
-            wait = OSD_TIMER*2
-            tot  = wait
+            prog  = 0
+            wait  = OSD_TIMER*2
+            tot   = wait
             control = self.getControl(40000)
             control.setVisibleCondition('[Player.Playing + !Window.IsVisible(fullscreeninfo) + Window.IsVisible(fullscreenvideo)]')
             xpos = control.getX()
@@ -333,6 +334,7 @@ class OnNext(xbmcgui.WindowXMLDialog):
                     self.log("__init__, nextTime failed! %s\nstart = %s"%(e,self.nitem.get('start')), xbmc.LOGERROR)
                     nextTime = BUILTIN.getInfoLabel('NextStartTime','VideoPlayer')
 
+                if not nextTime: return
                 onNow  = '%s on %s'%(nowTitle,chname) if chname not in validString(nowTitle) else nowTitle
                 onNext = '@ %s: %s'%(nextTime,nextTitle)
             

@@ -25,8 +25,13 @@
     # jsonRPC = JSONRPC()
     # def _interrupt(self) -> bool:
         # return PROPERTIES.isPendingInterrupt()
-    # def _suspend(self) -> bool:
+    # def _suspend(self, wait=SUSPEND_TIMER) -> bool:
+        # self._wait(wait)
         # return PROPERTIES.isPendingSuspend()
+    # def _wait(self, wait=1.0):
+        # while not self.monitor.abortRequested() and wait > 0:
+            # if (self.monitor.waitForAbort(CPU_CYCLE) | PROPERTIES.isPendingShutdown() | PROPERTIES.isPendingRestart() | PROPERTIES.isPendingSuspend() | PROPERTIES.isPendingInterrupt()): break
+            # else: wait -= CPU_CYCLE
         
 # class Skin:
     # def __init__(self, service=None):

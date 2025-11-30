@@ -1143,6 +1143,18 @@
                     <default>false</default>
                     <control type="toggle"/>
                 </setting>
+                <setting id="Playback_Timeout" type="integer" label="30222" help="33222">
+                    <level>3</level>
+                    <default>90</default>
+                    <constraints>
+                        <minimum>30</minimum>
+                        <step>15</step>
+                        <maximum>120</maximum>
+                    </constraints>
+                    <control type="slider" format="integer">
+                        <popup>false</popup>
+                    </control>
+                </setting>
                 <setting id="RPC_Delay" type="integer" label="30110" help="33109">
                     <level>3</level>
                     <default>1</default>

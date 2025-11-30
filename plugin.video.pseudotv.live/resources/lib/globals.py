@@ -47,7 +47,7 @@ from operator            import itemgetter
 
 from logger              import *
 from cache               import Cache, cacheit
-from pool                import killit, timeit, poolit, executeit, timerit, threadit
+from pool                import killit, timeit, poolit, executeit, timerit, threadit, CPU_CYCLE
 from kodi                import *
 from fileaccess          import FileAccess, FileLock
 from collections         import defaultdict, Counter, OrderedDict

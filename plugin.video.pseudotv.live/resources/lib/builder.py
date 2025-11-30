@@ -33,12 +33,18 @@ class Service:
     player  = PLAYER()
     monitor = MONITOR()
     jsonRPC = JSONRPC()
-    def _shutdown(self, wait=0.0001) -> bool:
+    def _shutdown(self, wait=1.0) -> bool:
+        self._wait(wait)
         return PROPERTIES.isPendingShutdown()
     def _interrupt(self) -> bool:
         return PROPERTIES.isPendingInterrupt()
-    def _suspend(self) -> bool:
+    def _suspend(self, wait=SUSPEND_TIMER) -> bool:
+        self._wait(wait)
         return PROPERTIES.isPendingSuspend()
+    def _wait(self, wait=1.0):
+        while not self.monitor.abortRequested() and wait > 0:
+            if (self.monitor.waitForAbort(CPU_CYCLE) | PROPERTIES.isPendingShutdown() | PROPERTIES.isPendingRestart() | PROPERTIES.isPendingSuspend() | PROPERTIES.isPendingInterrupt()): break
+            else: wait -= CPU_CYCLE
 
 class Builder:
     xsp       = XSP()
@@ -284,7 +290,7 @@ class Builder:
         if len(tmpList) > 0:
             iters = cycle(fileList)
             while not self.service.monitor.abortRequested() and tmpList[-1].get('stop') <= (now + MIN_EPG_DURATION):
-                if   self.service._shutdown(0.0001): break
+                if   self.service._shutdown(CPU_CYCLE): break
                 elif tmpList[-1].get('stop') >= (now + MIN_EPG_DURATION): 
                     self.log("[%s] addScheduling, OUT fileList = %s, stop = %s"%(citem['id'],len(tmpList),tmpList[-1].get('stop')))
                     break

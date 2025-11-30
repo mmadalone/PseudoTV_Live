@@ -196,6 +196,7 @@ Language IDS not found in py files, possibly only in xml: {
     "30219": "Allow A.I. Integration",
     "30220": "A.I. artwork prompt",
     "30221": "remove.bg API-Key",
+    "30222": "Playback Timeout",
     "32004": "TV Networks",
     "32005": "TV Shows",
     "32006": "TV Genres",
@@ -339,6 +340,7 @@ Language IDS not found in py files, possibly only in xml: {
     "33214": "Force Channel rebuilding when Playlist changes are detected",
     "33219": "[COLOR=red][B]Warning!! [/B][/COLOR]PseudoTV is not responsible for excessive API usage or any charges incurred from A.I. services.\\nUsers are advised to configure their platforms carefully to manage usage.",
     "33220": "",
+    "33222": "How long to wait in seconds before PseudoTV attempts to correct failed playback. [90 Default]",
     "33308": "Install Log Uploader.",
     "33309": "Submit debugging log for review to http://paste.kodi.tv."
 }
