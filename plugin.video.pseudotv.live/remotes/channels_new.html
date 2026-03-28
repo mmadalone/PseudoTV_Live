@@ -50,7 +50,6 @@
         .tab-content { display: none; }
         .tab-content.active { display: block; }
 
-        /* Configuration Header Layout */
         .config-header { display: flex; gap: 20px; align-items: flex-end; margin-bottom: 25px; }
         .config-item-small { flex: 1; max-width: 250px; }
         .config-item-large { flex: 2; }
@@ -115,7 +114,6 @@
     </div>
 
     <div class="container">
-        <!-- CHANNEL MANAGER TAB -->
         <div id="tab-channels" class="tab-content active">
             <h2>Channel Manager</h2>
             
@@ -166,11 +164,16 @@
     </div>
 
 <script>
-    const configData = {{ channels_json|safe }};
-    const servers = {{ servers_json|safe }}; // Variable for Servers_List
-    const template = {{ template_json|safe }};
-    const xmltvString = `{{ xmltv_data|safe }}`;
-    const CHANNEL_LIMIT = {{ CHANNEL_LIMIT|safe }};
+    // Injected initially via Python
+    const serverData = {{ servers_json|safe }}; 
+
+    // API State
+    let activeBaseUrl = '';
+    let configData = [];
+    let template = {};
+    let xmltvString = '';
+    let CHANNEL_LIMIT = 999;
+    
     const ignoredKeys = ['type', 'catchup', 'catchup-source', 'url'];
     const horizontalBools = ['radio', 'favorite', 'changed', 'enabled'];
     let activeRules = {}, currentPaths = [], hasChanges = false;
@@ -182,28 +185,63 @@
     }
 
     function init() {
-        // Populate Server/Source List
         const sSelect = document.getElementById('serverSelector');
-        servers.forEach(srv => {
-            let opt = document.createElement('option'); opt.value = srv; opt.textContent = srv;
-            sSelect.appendChild(opt);
-        });
+        sSelect.innerHTML = '<option value="">-- Select Source --</option>';
 
-        // Populate Channel List
-        const cSelect = document.getElementById('channelSelector');
-        configData.forEach((ch, idx) => {
-            let opt = document.createElement('option'); opt.value = idx;
-            opt.textContent = `Ch ${ch.number}: ${ch.name}`; cSelect.appendChild(opt);
-        });
+        // Populate dropdown with friendly names from the serverData object
+        if (serverData && serverData.servers) {
+            for (const friendlyName in serverData.servers) {
+                let opt = document.createElement('option');
+                opt.value = friendlyName;
+                opt.textContent = friendlyName;
+                sSelect.appendChild(opt);
+            }
+        }
         document.addEventListener('input', (e) => { if(!e.target.id.includes('Selector')) hasChanges = true; });
-        buildEPG();
     }
 
-    function changeConfig() {
-        const val = document.getElementById('serverSelector').value;
-        if (!val) return;
+    async function changeConfig() {
+        const friendlyName = document.getElementById('serverSelector').value;
+        if (!friendlyName) return;
+
         if (hasChanges && !confirm("Unsaved changes will be lost. Switch source?")) return;
-        window.location.href = `/?config=${encodeURIComponent(val)}`;
+
+        // 1. Resolve host and set API base
+        const serverEntry = serverData.servers[friendlyName];
+        activeBaseUrl = `http://${serverEntry.host}`;
+
+        try {
+            // 2. Fetch data from the remote host's API endpoints
+            const [channelsRes, templateRes, xmlRes] = await Promise.all([
+                fetch(`${activeBaseUrl}/api/channels`),
+                fetch(`${activeBaseUrl}/api/template`),
+                fetch(`${activeBaseUrl}/api/xmltv`)
+            ]);
+
+            configData = await channelsRes.json();
+            template = await templateRes.json();
+            xmltvString = await xmlRes.text();
+
+            // 3. Update Channel Selector
+            const cSelect = document.getElementById('channelSelector');
+            cSelect.innerHTML = '<option value="">-- Select a Channel --</option>' +
+                               '<option value="NEW" style="color: var(--pstv-focus); font-weight: bold;">+ CREATE NEW CHANNEL</option>';
+
+            configData.forEach((ch, idx) => {
+                let opt = document.createElement('option'); opt.value = idx;
+                opt.textContent = `Ch ${ch.number}: ${ch.name}`; cSelect.appendChild(opt);
+            });
+
+            // 4. Reset Guide and Form
+            document.getElementById('epg-channel-list').innerHTML = '';
+            document.getElementById('epg-rows-container').innerHTML = '';
+            document.getElementById('channelForm').style.display = 'none';
+            hasChanges = false;
+            buildEPG();
+
+        } catch (err) {
+            alert(`API Error (${friendlyName}): ${err.message}`);
+        }
     }
 
     function navigateTab(t) {
@@ -222,7 +260,7 @@
         form.style.display = 'block';
         const data = (selector.value === "NEW") ? template : configData[selector.value];
         activeRules = data.rules || {};
-        currentPaths = Array.isArray(data.path) ? data.path : [];
+        currentPaths = Array.isArray(data.path) ? data.path : (data.path ? [data.path] : []);
         container.innerHTML = '';
         renderFields(data, container);
     }
@@ -261,8 +299,10 @@
     }
 
     function buildEPG() {
+        if (!xmltvString) return;
         const xmlDoc = new DOMParser().parseFromString(xmltvString, "text/xml");
         const header = document.getElementById('epg-time-header');
+        header.innerHTML = '';
         for (let i = 0; i < 24; i++) {
             const d0 = new Date(); d0.setHours(i, 0); const d3 = new Date(); d3.setHours(i, 30);
             header.innerHTML += `<div class="time-slot">${formatTime12h(d0)}</div><div class="time-slot">${formatTime12h(d3)}</div>`;
@@ -285,17 +325,50 @@
 
     function parseDate(s) { return new Date(s.substring(0,4), s.substring(4,6)-1, s.substring(6,8), s.substring(8,10), s.substring(10,12)); }
     function addNewPath() { const p = prompt("New Path:"); if(p) { currentPaths.push(p); handleSelectionChange(); } }
-    function searchLogo() { const q = prompt("Logo Search:"); if(q) fetch(`/api/logo_search?q=${q}`).then(r => r.json()).then(d => { if(d.url) document.getElementById('logo').value = d.url; }); }
-    function saveData() { 
-        const n = parseInt(document.getElementById('number').value);
-        if(n < 1 || n > CHANNEL_LIMIT) { alert("Invalid Channel Number"); return; }
-        hasChanges = false; document.getElementById('channelForm').submit(); 
+    
+    function searchLogo() { 
+        const q = prompt("Logo Search:"); 
+        if(q) fetch(`${activeBaseUrl}/api/logo_search?q=${q}`).then(r => r.json()).then(d => { if(d.url) document.getElementById('logo').value = d.url; }); 
     }
+
+    async function saveData() { 
+        const nInput = document.getElementById('number');
+        if (nInput) {
+            const n = parseInt(nInput.value);
+            if(n < 1 || n > CHANNEL_LIMIT) { alert("Invalid Channel Number"); return; }
+        }
+
+        const formData = new FormData(document.getElementById('channelForm'));
+        const payload = Object.fromEntries(formData.entries());
+
+        try {
+            const res = await fetch(`${activeBaseUrl}/api/save`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (res.ok) {
+                alert("Channel Saved Successfully");
+                hasChanges = false;
+                changeConfig(); // Reload current view
+            }
+        } catch (e) {
+            alert("Save Failed: " + e.message);
+        }
+    }
+
     function loadRuleValues() {
         const rId = document.getElementById('ruleSelector').value;
         const container = document.getElementById('ruleValueFields');
         container.innerHTML = '';
-        if (rId === "ADD_NEW") { const nId = prompt("New Rule ID:"); if(nId) { activeRules[nId] = { "values": { "0": 1, "1": 1, "2": 1, "3": 1 } }; handleSelectionChange(); } return; }
+        if (rId === "ADD_NEW") { 
+            const nId = prompt("New Rule ID:"); 
+            if(nId) { 
+                activeRules[nId] = { "values": { "0": 1, "1": 1, "2": 1, "3": 1 } }; 
+                handleSelectionChange(); 
+            } 
+            return; 
+        }
         if (!rId || !activeRules[rId]) return;
         const vals = activeRules[rId].values || {};
         for (let vKey in vals) {
