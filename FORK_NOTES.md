@@ -109,17 +109,19 @@ The fork ships its own Kodi addon repo so the live install can auto-update from 
 |---|---|
 | `master` | upstream mirror (no edits here) |
 | `madteevee-patches` | our source patches + `release.py` + `repository.mmadalone.pseudotv/` |
-| `gh-pages` | published Kodi repo (manifest + zips). Deployed via GitHub Pages. |
+| `gh-pages` | published Kodi repo (manifest + zips). Served via `raw.githubusercontent.com` directly (Pages is disabled on this fork — see below). |
 
-Repo URL once Pages is enabled: **https://mmadalone.github.io/PseudoTV_Live/addons.xml**
+Repo URL: **https://raw.githubusercontent.com/mmadalone/PseudoTV_Live/gh-pages/addons.xml**
 
-### One-time GitHub Pages setup
+### Why `raw.githubusercontent.com` instead of GitHub Pages
 
-Repository on github.com → **Settings → Pages → Source: "Deploy from a branch" → Branch: `gh-pages` / `(root)` → Save**. Takes ~30 s to first-publish; subsequent pushes to `gh-pages` redeploy automatically.
+GitHub denies enabling Pages on repos forked from `PseudoTV/PseudoTV_Live` ("Pages on this forked repository is disabled due to a policy enforced by the owner of the parent repository"). Workaround: serve `addons.xml` + zips off the `gh-pages` branch directly via `raw.githubusercontent.com`. Same content, same URL stability, no Pages required. Caveats:
+- ~5 min CDN cache for unauthenticated raw fetches; new releases land in Kodi within that window.
+- 60 req/h unauthenticated rate limit per IP; not an issue for a single-user repo.
 
 ### One-time Kodi install of the repo addon
 
-1. Download the bootstrap zip from https://mmadalone.github.io/PseudoTV_Live/repository.mmadalone.pseudotv/repository.mmadalone.pseudotv-1.0.0.zip
+1. Download the bootstrap zip from https://raw.githubusercontent.com/mmadalone/PseudoTV_Live/gh-pages/repository.mmadalone.pseudotv/repository.mmadalone.pseudotv-1.0.1.zip
 2. In Kodi: **Settings → System → Add-ons → Unknown sources** = ON (required to install from zip).
 3. **Settings → Add-ons → Install from zip file** → pick the downloaded zip.
 4. After install, **Settings → Add-ons → Install from repository → mmadalone PseudoTV Live (madteevee) → Video add-ons → PseudoTV Live (madteevee)** → Update / Install. The fork's `0.6.1q+madteevee.X` will replace upstream's `0.6.1q`.
