@@ -77,17 +77,37 @@ def zip_addon(addon_dir: Path, addon_id: str, version: str, dest_dir: Path) -> P
     return zip_path
 
 
-def copy_assets(addon_dir: Path, dest: Path) -> None:
-    """Copy icon.png + fanart.jpg next to the zip if present (so Kodi can preview)."""
-    for asset in ("icon.png", "fanart.jpg"):
-        src = addon_dir / asset
-        if not src.exists():
-            # fallback: search nested resources/images/
+def copy_assets(addon_dir: Path, dest: Path, root: ET.Element) -> None:
+    """Mirror each <assets>/<icon|fanart|screenshot> element to its declared
+    subpath under dest, so Kodi's repo browser finds them at
+    <datadir>/<addon-id>/<icon-path>. Falls back to a flat icon.png/fanart.jpg
+    copy at dest root if the addon doesn't declare an <assets> block.
+    """
+    asset_paths: list[str] = []
+    for tag in ("icon", "fanart"):
+        for el in root.findall(f".//assets/{tag}"):
+            if el.text:
+                asset_paths.append(el.text.strip())
+    # also mirror screenshots if declared (cosmetic but cheap)
+    for el in root.findall(".//assets/screenshot"):
+        if el.text:
+            asset_paths.append(el.text.strip())
+
+    if not asset_paths:
+        # fallback: flat icon.png + fanart.jpg next to zip
+        for asset in ("icon.png", "fanart.jpg"):
             for nested in addon_dir.rglob(asset):
-                src = nested
+                shutil.copy2(nested, dest / asset)
                 break
-        if src.exists():
-            shutil.copy2(src, dest / asset)
+        return
+
+    for rel_path in asset_paths:
+        src = addon_dir / rel_path
+        if not src.is_file():
+            continue
+        target = dest / rel_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, target)
 
 
 def build_addons_xml(addon_roots: list[ET.Element]) -> bytes:
@@ -123,7 +143,7 @@ def main() -> int:
         per_addon_dir.mkdir(parents=True, exist_ok=True)
 
         zip_path = zip_addon(addon_dir, addon_id, version, per_addon_dir)
-        copy_assets(addon_dir, per_addon_dir)
+        copy_assets(addon_dir, per_addon_dir, root)
         print(f"  built {zip_path.relative_to(REPO_ROOT)} ({zip_path.stat().st_size} bytes)")
         roots.append(root)
 
