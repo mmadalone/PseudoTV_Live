@@ -25,8 +25,14 @@ from xsp        import XSP
 from m3u        import M3U
 from fillers    import Fillers
 from resources  import Resources
-from seasonal   import Seasonal 
+from seasonal   import Seasonal
 from rules      import RulesList
+
+# getFileList return sentinels — distinguish "channel already at MAX_GUIDEDAYS"
+# (keep station, no new programmes) from "build interrupted" (transient; do not
+# touch state). Previously both cases returned bare True, conflating them.
+BUILD_AT_MAX      = 'AT_MAX'
+BUILD_INTERRUPTED = 'INTERRUPTED'
 
 class Service:
     from jsonrpc import JSONRPC
@@ -193,21 +199,34 @@ class Builder:
                             else:                                                                                    self.pMSG = '%s %s'%(LANGUAGE(32245),LANGUAGE(32023)) #Parsing  
                             
                             self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32248),self.pName), header='%s, %s'%(ADDON_NAME,self.pMSG))
-                            response = self.getFileList(citem, now, (stopTimes.get(citem['id']) or start))# {False:'In-Valid Channel', True:'Valid Channel w/o programmes', list:'Valid Channel w/ programmes}
+                            response = self.getFileList(citem, now, (stopTimes.get(citem['id']) or start))
+                            # response semantics:
+                            #   list of items     -> happy path: add station + programmes
+                            #   BUILD_AT_MAX      -> channel already built up to MAX_GUIDEDAYS; keep station, no new programmes
+                            #   BUILD_INTERRUPTED -> build halted by service interrupt; transient, do not touch state
+                            #   False             -> legitimate failure; falls through to else branch (B3 keeps channel)
                             if preview: return response
-                            elif response:
-                                if __addStation(citem) and __hasFileList(response): updated.add(__addProgrammes(citem, response)) #added xmltv lineup entries.
-                            else: 
+                            elif isinstance(response, list) and __hasFileList(response):
+                                if __addStation(citem): updated.add(__addProgrammes(citem, response))  # added xmltv lineup entries.
+                            elif response == BUILD_AT_MAX:
+                                __addStation(citem)  # max-days reached: refresh station entry (logo/group changes), no programmes to add
+                            elif response == BUILD_INTERRUPTED:
+                                self.log('[%s] build, channel build interrupted; leaving M3U/XMLTV untouched'%(citem['id']))
+                            else:
                                 if complete: self.pErrors.append(LANGUAGE(32026))
                                 chanErrors = ' | '.join(list(sorted(set(self.pErrors))))
                                 self.log('[%s] build, In-Valid Channel (%s) %s'%(citem['id'],self.pName,chanErrors))
                                 self.updateProgress(self.pCount, message='%s: %s'%(self.pName,chanErrors),header='%s, %s'%(ADDON_NAME,'%s %s'%(LANGUAGE(32027),LANGUAGE(32023))))
-                                if not __hasProgrammes(citem): 
-                                    self.updateProgress(self.pCount, message=self.pName,header='%s, %s'%(ADDON_NAME,'%s %s'%(LANGUAGE(32244),LANGUAGE(32023))))
-                                    __clrChannel(citem) #remove m3u/xmltv references when no valid programmes found. # todo del citem causes issues down the road with citem missing params. reeval need to remove here
+                                # Don't __clrChannel on transient/empty build failure. Keep the channel
+                                # record (citem in channels.json) and any prior M3U/XMLTV state so the
+                                # next chkLibrary cycle can retry. Channels are only removed via the
+                                # explicit reset flow (clrIDS, see line 186) or by removal in the
+                                # channel manager. This aligns with the v0.6.2 upstream fix for
+                                # "failed library parsing inadvertently clearing auto-tuned channels".
+                                self.log('[%s] build, preserving channel record across transient failure (no __clrChannel)'%(citem['id']), xbmc.LOGWARNING)
                             self.runActions(RULES_ACTION_CHANNEL_STOP, citem, inherited=self)
                          
-                    SETTINGS.setResetChannels(clrIDS)       
+                    SETTINGS.setResetChannels(clrIDS, replace=True)  # persist remaining un-processed; empty list clears the cache
                     self.pDialog = DIALOG.updateProgress(100, self.pDialog, message='%s %s'%(self.pMSG,LANGUAGE(32025) if complete else LANGUAGE(32135)))
                     self.log('build, complete = %s, updated = %s, saved = %s'%(complete,bool(updated),__setChannels()))
                     return complete, bool(updated)
@@ -215,27 +234,27 @@ class Builder:
         return False, False
         
 
-    def getFileList(self, citem: dict, now: time, start: time) -> bool and list:
+    def getFileList(self, citem: dict, now: time, start: time):
         self.log('[%s] getFileList, start = %s'%(citem['id'],start))
         try:
             if start > (now + ((MAX_GUIDEDAYS * 86400) - 43200)): #max guidedata days to seconds, minus fill buffer (12hrs) in seconds.
                 self.updateProgress(self.pCount, message=self.pName, header='%s, %s'%(ADDON_NAME,self.pMSG))
                 self.log('[%s] getFileList, programmes over MAX_DAYS! start = %s'%(citem['id'],datetime.datetime.fromtimestamp(start)),xbmc.LOGINFO)
-                return True# prevent over-building
-            
+                return BUILD_AT_MAX  # prevent over-building; station should be retained, no new programmes
+
             multi = len(citem.get('path',[])) > 1 #multi-path source
             radio = True if citem.get('radio',False) else False
             media = 'music' if radio else 'video'
             self.log('[%s] getFileList, multipath = %s, radio = %s, media = %s, path = %s'%(citem['id'],multi,radio,media,citem.get('path')),xbmc.LOGINFO)
-            
+
             if radio: response = self.buildRadio(citem)
             else:     response = self.buildChannel(citem)
-            
+
             if isinstance(response,list): return sorted(self.addScheduling(citem, response, now, start), key=itemgetter('start'))
-            elif self.service._interrupt():   
+            elif self.service._interrupt():
                 self.log("[%s] getFileList, _interrupt"%(citem['id']))
                 self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32213)), header=ADDON_NAME)
-                return True
+                return BUILD_INTERRUPTED  # transient: do not touch state; next build retries
             else:
                 return response
         except Exception as e: self.log("[%s] getFileList, failed! %s"%(citem['id'],e), xbmc.LOGERROR)
@@ -311,7 +330,7 @@ class Builder:
         def _injectRules(citem):
             def __chkEvenDistro(citem):
                 if self.enableEven and not citem.get('rules',{}).get("1000"):
-                    nrules = {"1000":{"values":{"0":SETTINGS.getSettingInt('Enable_Even'),"1":SETTINGS.getSettingInt('Page_Limit'),"2":SETTINGS.getSettingBool('Enable_Force_Episode')}}}
+                    nrules = {"1000":{"values":{"0":SETTINGS.getSettingInt('Enable_Even')}}}
                     self.log(" [%s] buildChannel: _injectRules, __chkEvenDistro, new rules = %s"%(citem['id'],nrules))
                     citem.setdefault('rules',{}).update(nrules)
                 return citem
@@ -377,15 +396,16 @@ class Builder:
         dirList  = [{'file':path}]
         npath    = path
         nlimits  = limits
+        reparseCount = 0
         self.log("[%s] buildFileList, page = %s, sort = %s, limits = %s\npath = %s"%(citem['id'],page,sort,limits,path))
-        
+
         while not self.service.monitor.abortRequested() and len(fileList) < page:
             #Not all results are flat hierarchies; walk all paths until fileList page is reached. ie. folders with pagination and/or directories
-            if self.service._interrupt(): 
+            if self.service._interrupt():
                 self.log("[%s] buildFileList, _interrupt"%(citem['id']))
                 self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32213)), header=ADDON_NAME)
-                return []       
-            elif self.service._suspend(): 
+                return []
+            elif self.service._suspend():
                 self.log("[%s] buildFileList, _suspend"%(citem['id']))
                 self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32145)), header=ADDON_NAME)
                 self.service.monitor.waitForAbort(SUSPEND_TIMER)
@@ -398,11 +418,19 @@ class Builder:
                 dirList = setDictLST(dirList + subdirList)
                 self.log('[%s] buildFileList, adding = %s/%s remaining dirs (%s)\npath = %s, limits = %s'%(citem['id'],len(fileList),page,len(dirList),npath,nlimits))
             elif len(dirList) == 0:
-                if len(fileList) > 0 and nlimits.get('total',0) > 0:
+                # Continue paginating while there's more content available, even if the
+                # current page yielded 0 items (e.g. all filtered as extras / strm / 3D
+                # / sub-minDuration). Original code only reparsed when fileList > 0,
+                # which caused channels whose first page was entirely filtered to bail
+                # out empty (then __clrChannel would delete them). Cap iterations to
+                # prevent runaway loops on pathological smartplaylists.
+                hasMore = nlimits.get('end',0) < nlimits.get('total',0)
+                if hasMore and reparseCount < MAX_BUILDFILELIST_REPARSE:
+                    reparseCount += 1
                     dirList.insert(0,{'file':npath})
-                    self.log('[%s] buildFileList, reparse path %s'%(citem['id'],npath))
+                    self.log('[%s] buildFileList, reparse path (%s/%s) end=%s/total=%s, fileList=%s/%s'%(citem['id'],reparseCount,MAX_BUILDFILELIST_REPARSE,nlimits.get('end'),nlimits.get('total'),len(fileList),page))
                 else:
-                    self.log('[%s] buildFileList, no more folders to parse'%(citem['id']))
+                    self.log('[%s] buildFileList, no more pages (reparse=%s, end=%s/total=%s, fileList=%s)'%(citem['id'],reparseCount,nlimits.get('end'),nlimits.get('total'),len(fileList)))
                     break
         self.log("[%s] buildFileList, returning fileList %s/%s"%(citem['id'],len(fileList),page))
         return fileList

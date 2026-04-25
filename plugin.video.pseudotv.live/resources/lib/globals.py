@@ -319,15 +319,20 @@ def togglePVR(state=True, reverse=False, wait=FIFTEEN):
         if (state and isEnabled) or (not state and not isEnabled): return
         elif not PROPERTIES.isRunning('togglePVR'):
             with PROPERTIES.chkRunning('togglePVR'):
-                BUILTIN.executebuiltin("Dialog.Close(all)") 
+                BUILTIN.executebuiltin("Dialog.Close(all)")
                 log('globals: togglePVR, state = %s, reverse = %s, wait = %s'%(state,reverse,wait))
                 BUILTIN.executeJSONRPC('{"jsonrpc":"2.0","method":"Addons.SetAddonEnabled","params":{"addonid":"%s","enabled":%s}, "id": 1}'%(PVR_CLIENT_ID,str(state).lower()))
                 if reverse:
-                    with BUILTIN.busy_dialog(): 
+                    with BUILTIN.busy_dialog():
                         MONITOR().waitForAbort(1.0)
                         timerit(togglePVR)(wait,[not bool(state)])
                     DIALOG.notificationWait('%s: %s'%(PVR_CLIENT_NAME,LANGUAGE(32125)),wait=wait)
-    else: DIALOG.notificationWait(LANGUAGE(30023)%(PVR_CLIENT_NAME))
+    else:
+        # Enable_PVR_RELOAD is off (user opted out of auto-toggling the PVR addon).
+        # Original code fired DIALOG.notificationWait(LANGUAGE(30023)%(PVR_CLIENT_NAME)) which
+        # renders as "Unable to reload <PVR> while playing..." even when nothing is playing —
+        # the string is unrelated to the actual gate (Enable_PVR_RELOAD). Silently log instead.
+        log('globals: togglePVR skipped (Enable_PVR_RELOAD is disabled in settings); state=%s, reverse=%s'%(state,reverse))
         
 def isRadio(item):
     if item.get('radio',False) or item.get('type') == "Music Genres": return True

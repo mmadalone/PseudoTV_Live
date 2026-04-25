@@ -767,44 +767,115 @@
                     </dependencies>
                     <control type="toggle"/>
                 </setting>
+                <setting id="Decouple_Kodi_PVR" type="boolean" label="30900" help="33900">
+                    <level>3</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
                 <setting id="Min_Days" type="integer" label="30036" help="33036">
                     <level>3</level>
-                    <enable>false</enable>
                     <default>1</default>
                     <constraints>
                         <minimum>1</minimum>
                         <step>1</step>
                         <maximum>3</maximum>
                     </constraints>
+                    <dependencies>
+                        <dependency type="enable">
+                            <condition operator="is" setting="Decouple_Kodi_PVR">true</condition>
+                        </dependency>
+                    </dependencies>
                     <control type="slider" format="integer">
                         <popup>false</popup>
                     </control>
                 </setting>
                 <setting id="Max_Days" type="integer" label="30037" help="33036">
                     <level>3</level>
-                    <enable>false</enable>
                     <default>3</default>
                     <constraints>
                         <minimum>1</minimum>
                         <step>1</step>
                         <maximum>31</maximum>
                     </constraints>
+                    <dependencies>
+                        <dependency type="enable">
+                            <condition operator="is" setting="Decouple_Kodi_PVR">true</condition>
+                        </dependency>
+                    </dependencies>
                     <control type="slider" format="integer">
                         <popup>false</popup>
                     </control>
                 </setting>
                 <setting id="OSD_Timer" type="integer" label="30169" help="33036">
                     <level>3</level>
-                    <enable>false</enable>
                     <default>5</default>
                     <constraints>
                         <minimum>0</minimum>
                         <step>1</step>
                         <maximum>15</maximum>
                     </constraints>
+                    <dependencies>
+                        <dependency type="enable">
+                            <condition operator="is" setting="Decouple_Kodi_PVR">true</condition>
+                        </dependency>
+                    </dependencies>
                     <control type="slider" format="integer">
                         <popup>false</popup>
                     </control>
+                </setting>
+                <setting id="Streamdetails_Cache_Days" type="integer" label="30901" help="33901">
+                    <level>3</level>
+                    <default>30</default>
+                    <constraints>
+                        <minimum>1</minimum>
+                        <step>1</step>
+                        <maximum>90</maximum>
+                    </constraints>
+                    <control type="slider" format="integer">
+                        <popup>false</popup>
+                    </control>
+                </setting>
+                <setting id="Library_Walk_Interval" type="integer" label="30902" help="33902">
+                    <level>3</level>
+                    <default>12</default>
+                    <constraints>
+                        <minimum>1</minimum>
+                        <step>1</step>
+                        <maximum>72</maximum>
+                    </constraints>
+                    <control type="slider" format="integer">
+                        <popup>false</popup>
+                    </control>
+                </setting>
+                <setting id="Skip_PVR_Recordings" type="boolean" label="30903" help="33903">
+                    <level>3</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="Skip_PVR_Searches" type="boolean" label="30904" help="33904">
+                    <level>3</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="Skip_Music_Library" type="boolean" label="30905" help="33905">
+                    <level>3</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="Skip_TV_Library" type="boolean" label="30906" help="33906">
+                    <level>3</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="Skip_Movie_Library" type="boolean" label="30907" help="33907">
+                    <level>3</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="Skip_Smartplaylists_Scan" type="boolean" label="30908" help="33908">
+                    <level>3</level>
+                    <default>false</default>
+                    <control type="toggle"/>
                 </setting>
             </group>
         </category>
@@ -1291,7 +1362,7 @@
                 </setting>
                 <setting id="RPC_Timer" type="integer" label="30201" help="33201">
                     <level>3</level>
-                    <default>3</default>
+                    <default>5</default>
                     <constraints>
                         <minimum>0</minimum>
                         <step>1</step>

@@ -101,21 +101,38 @@ class Library:
         return [item for item in items if item.get('enabled',False)]
 
 
-    def updateLibrary(self, force: bool=False) -> bool:  
+    def updateLibrary(self, force: bool=False) -> bool:
         def __funcs():
-            return {
-                     "Playlists"    :{'func':self.getPlaylists   ,'life':datetime.timedelta(minutes=FIFTEEN)},
-                     "TV Networks"  :{'func':self.getNetworks    ,'life':datetime.timedelta(days=MAX_GUIDEDAYS)},
-                     "TV Shows"     :{'func':self.getTVShows     ,'life':datetime.timedelta(hours=MAX_GUIDEDAYS)},
-                     "TV Genres"    :{'func':self.getTVGenres    ,'life':datetime.timedelta(days=MAX_GUIDEDAYS)},
-                     "Movie Genres" :{'func':self.getMovieGenres ,'life':datetime.timedelta(days=MAX_GUIDEDAYS)},
-                     "Movie Studios":{'func':self.getMovieStudios,'life':datetime.timedelta(days=MAX_GUIDEDAYS)},
-                     "Mixed Genres" :{'func':self.getMixedGenres ,'life':datetime.timedelta(days=MAX_GUIDEDAYS)},
-                     "Mixed"        :{'func':self.getMixed       ,'life':datetime.timedelta(minutes=FIFTEEN)},
-                     "Recommended"  :{'func':self.getRecommend   ,'life':datetime.timedelta(hours=MAX_GUIDEDAYS)},
-                     "Services"     :{'func':self.getServices    ,'life':datetime.timedelta(hours=MAX_GUIDEDAYS)},
-                     "Music Genres" :{'func':self.getMusicGenres ,'life':datetime.timedelta(days=MAX_GUIDEDAYS)}
-                     }
+            # Gate types out of the iteration entirely when their corresponding Skip_*
+            # setting is on. Function-level gates (in get*Info/get*Recordings/etc.) still
+            # exist as defense-in-depth, but skipping at the dict level prevents the
+            # progress dialog from even flashing the type name during updateLibrary.
+            skip_tv     = SETTINGS.getSettingBool('Skip_TV_Library')
+            skip_movie  = SETTINGS.getSettingBool('Skip_Movie_Library')
+            skip_music  = SETTINGS.getSettingBool('Skip_Music_Library')
+            skip_xsp    = SETTINGS.getSettingBool('Skip_Smartplaylists_Scan')
+            funcs = {}
+            if not skip_xsp:
+                funcs["Playlists"]     = {'func':self.getPlaylists   ,'life':datetime.timedelta(minutes=FIFTEEN)}
+            if not skip_tv:
+                funcs["TV Networks"]   = {'func':self.getNetworks    ,'life':datetime.timedelta(days=MAX_GUIDEDAYS)}
+                funcs["TV Shows"]      = {'func':self.getTVShows     ,'life':datetime.timedelta(days=MAX_GUIDEDAYS)}
+                funcs["TV Genres"]     = {'func':self.getTVGenres    ,'life':datetime.timedelta(days=MAX_GUIDEDAYS)}
+            if not skip_movie:
+                funcs["Movie Genres"]  = {'func':self.getMovieGenres ,'life':datetime.timedelta(days=MAX_GUIDEDAYS)}
+                funcs["Movie Studios"] = {'func':self.getMovieStudios,'life':datetime.timedelta(days=MAX_GUIDEDAYS)}
+            # Mixed Genres intersects TV+Movie genres; useless if both are skipped
+            if not (skip_tv and skip_movie):
+                funcs["Mixed Genres"]  = {'func':self.getMixedGenres ,'life':datetime.timedelta(days=MAX_GUIDEDAYS)}
+            # Mixed (Recently Added, Seasonal, PVR Recordings, PVR Searches) — always
+            # iterated; PVR Recordings/Searches are gated inside their own functions
+            # by Skip_PVR_Recordings / Skip_PVR_Searches.
+            funcs["Mixed"]         = {'func':self.getMixed       ,'life':datetime.timedelta(minutes=FIFTEEN)}
+            funcs["Recommended"]   = {'func':self.getRecommend   ,'life':datetime.timedelta(days=MAX_GUIDEDAYS)}
+            funcs["Services"]      = {'func':self.getServices    ,'life':datetime.timedelta(days=MAX_GUIDEDAYS)}
+            if not skip_music:
+                funcs["Music Genres"]  = {'func':self.getMusicGenres ,'life':datetime.timedelta(days=MAX_GUIDEDAYS)}
+            return funcs
                      
         def __fill(type, func):
             try: items = func()
@@ -237,6 +254,9 @@ class Library:
 
     def getPVRRecordings(self):
         recordList    = []
+        if SETTINGS.getSettingBool('Skip_PVR_Recordings'):
+            self.log('getPVRRecordings, skipped per Skip_PVR_Recordings setting')
+            return recordList
         json_response = self.jsonRPC.getPVRRecordings()
         paths = [item.get('file') for idx, item in enumerate(json_response) if item.get('label','').endswith('(%s)'%(ADDON_NAME))]
         if len(paths) > 0: recordList.append({'name':LANGUAGE(32003),'type':"Mixed",'path':[paths],'logo':self.resources.getLogo({'name':LANGUAGE(32003),'type':"Mixed"})})
@@ -246,6 +266,9 @@ class Library:
 
     def getPVRSearches(self):
         searchList    = []
+        if SETTINGS.getSettingBool('Skip_PVR_Searches'):
+            self.log('getPVRSearches, skipped per Skip_PVR_Searches setting')
+            return searchList
         json_response = self.jsonRPC.getPVRSearches()
         for idx, item in enumerate(json_response):
             if not item.get('file'): continue
@@ -256,6 +279,9 @@ class Library:
 
     def getPlaylists(self):
         PlayList = []
+        if SETTINGS.getSettingBool('Skip_Smartplaylists_Scan'):
+            self.log('getPlaylists, skipped per Skip_Smartplaylists_Scan setting')
+            return PlayList
         for type in ['video','mixed','music']:
             self.updateProgress(self.pCount,'%s: %s'%(self.pMSG,LANGUAGE(32140)),self.pHeader)
             results = self.jsonRPC.getSmartPlaylists(type)
@@ -274,6 +300,9 @@ class Library:
     @cacheit()
     def getTVInfo(self, sortbycount=True):
         self.log('getTVInfo')
+        if SETTINGS.getSettingBool('Skip_TV_Library'):
+            self.log('getTVInfo, skipped per Skip_TV_Library setting')
+            return {'studios':[],'genres':[],'shows':[]}
         if BUILTIN.hasTV():
             NetworkList   = Counter()
             ShowGenreList = Counter()
@@ -320,7 +349,10 @@ class Library:
     @cacheit()
     def getMovieInfo(self, sortbycount=True):
         self.log('getMovieInfo')
-        if BUILTIN.hasMovie():     
+        if SETTINGS.getSettingBool('Skip_Movie_Library'):
+            self.log('getMovieInfo, skipped per Skip_Movie_Library setting')
+            return {'studios':[],'genres':[]}
+        if BUILTIN.hasMovie():
             StudioList     = Counter()
             MovieGenreList = Counter()
             self.updateProgress(self.pCount,'%s: %s'%(self.pMSG,LANGUAGE(32140)),self.pHeader)
@@ -359,6 +391,9 @@ class Library:
     @cacheit()
     def getMusicInfo(self, sortbycount=True):
         self.log('getMusicInfo')
+        if SETTINGS.getSettingBool('Skip_Music_Library'):
+            self.log('getMusicInfo, skipped per Skip_Music_Library setting')
+            return {'genres':[]}
         if BUILTIN.hasMusic():
             MusicGenreList = Counter()
             self.updateProgress(self.pCount,'%s: %s'%(self.pMSG,LANGUAGE(32140)),self.pHeader)

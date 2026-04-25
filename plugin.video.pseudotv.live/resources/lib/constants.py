@@ -61,6 +61,7 @@ CHANNEL_LIMIT       = 999
 AUTOTUNE_LIMIT      = 3
 FILLER_LIMIT        = 250
 QUEUE_CHUNK         = 25
+MAX_BUILDFILELIST_REPARSE = 10 #buildFileList: max page-reparse rounds when the current page is fully filtered (e.g. all extras). Each round fetches up to Page_Limit items via auto-pagination. Caps runaway loops on smartplaylists where most items are filtered out.
 
 FILLER_TYPE         = ['Rating',
                        'Bumper',

@@ -108,7 +108,11 @@ class RulesList:
                     if chrule:
                         ruleInstance = rule.copy()
                         for key, value in list(chrule.get('values',{}).items()):
-                            ruleInstance.optionValues[int(key)] = value
+                            idx = int(key)
+                            if idx < len(ruleInstance.optionValues):
+                                ruleInstance.optionValues[idx] = value
+                            else:
+                                self.log('[%s] loadRules: dropping orphan value at index %s for ruleId %s (optionValues len=%s)'%(citem.get('id'), idx, rule.myId, len(ruleInstance.optionValues)))
                         ruleList.update({str(rule.myId):ruleInstance})
                     elif append: ruleList.update({str(rule.myId):rule.copy()})
                 except Exception as e: log('[%s] loadRules: _load failed! %s\nchrule = %s'%(citem.get('id'), e, chrule), xbmc.LOGERROR)

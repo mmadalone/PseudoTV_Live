@@ -257,7 +257,11 @@ class JSONRPC:
     def getStreamDetails(self, path, media='video'):
         if isStack(path): path = splitStacks(path)[0]
         param = {"method":"Files.GetFileDetails","params":{"file":path,"media":media,"properties":["streamdetails"]}}
-        return self.cacheJSON(param, life=datetime.timedelta(days=MAX_GUIDEDAYS), checksum=getMD5(path)).get('result',{}).get('filedetails',{}).get('streamdetails',{})
+        # Cache TTL is user-configurable via 'Streamdetails_Cache_Days' (default 30, range 1-90).
+        # Cache is keyed by getMD5(path) so file moves invalidate automatically; in-place
+        # re-encodes won't invalidate (path unchanged) but that's the same trade-off as before.
+        ttl_days = max(1, SETTINGS.getSettingInt('Streamdetails_Cache_Days') or 30)
+        return self.cacheJSON(param, life=datetime.timedelta(days=ttl_days), checksum=getMD5(path)).get('result',{}).get('filedetails',{}).get('streamdetails',{})
 
 
     def getFileDetails(self, file, media='video', properties=["duration","runtime"]):

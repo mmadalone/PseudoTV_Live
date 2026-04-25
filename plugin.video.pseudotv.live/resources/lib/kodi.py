@@ -370,10 +370,18 @@ class Settings:
         return xbmcaddon.Addon(id).setSetting(key,value)
 
 
-    def setResetChannels(self, id):
-        ids = self.getResetChannels()
-        if isinstance(id, list): ids.extend(id)
-        else:                    ids.append(id)
+    def setResetChannels(self, id, replace=False):
+        # ADD semantics by default (used by manager when user requests a specific channel reset).
+        # REPLACE semantics when called from builder post-loop to persist the remaining
+        # un-processed list (or empty list to clear the cache after a successful pass).
+        # Without this, the cache only ever grew — channels stuck in clearchannels would
+        # have their EPG wiped on every build round, defeating incremental EPG generation.
+        if replace:
+            ids = list(id) if isinstance(id, list) else ([id] if id else [])
+        else:
+            ids = self.getResetChannels()
+            if isinstance(id, list): ids.extend(id)
+            else:                    ids.append(id)
         return self.setCacheSetting('clearChannels',list(set(ids)))
 
 
