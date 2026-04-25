@@ -100,3 +100,64 @@ It's not committed to the repo because it contains machine-specific paths and ti
 ## Future patch additions
 
 When adding new fixes, prefer one logical commit per fix on top of the squashed base, rather than amending `bb2edfe`. Makes upstream rebases easier when only some of the new commits conflict.
+
+## Release / Kodi repo
+
+The fork ships its own Kodi addon repo so the live install can auto-update from the fork instead of from upstream. Layout:
+
+| Branch | Role |
+|---|---|
+| `master` | upstream mirror (no edits here) |
+| `madteevee-patches` | our source patches + `release.py` + `repository.mmadalone.pseudotv/` |
+| `gh-pages` | published Kodi repo (manifest + zips). Deployed via GitHub Pages. |
+
+Repo URL once Pages is enabled: **https://mmadalone.github.io/PseudoTV_Live/addons.xml**
+
+### One-time GitHub Pages setup
+
+Repository on github.com → **Settings → Pages → Source: "Deploy from a branch" → Branch: `gh-pages` / `(root)` → Save**. Takes ~30 s to first-publish; subsequent pushes to `gh-pages` redeploy automatically.
+
+### One-time Kodi install of the repo addon
+
+1. Download the bootstrap zip from https://mmadalone.github.io/PseudoTV_Live/repository.mmadalone.pseudotv/repository.mmadalone.pseudotv-1.0.0.zip
+2. In Kodi: **Settings → System → Add-ons → Unknown sources** = ON (required to install from zip).
+3. **Settings → Add-ons → Install from zip file** → pick the downloaded zip.
+4. After install, **Settings → Add-ons → Install from repository → mmadalone PseudoTV Live (madteevee) → Video add-ons → PseudoTV Live (madteevee)** → Update / Install. The fork's `0.6.1q+madteevee.X` will replace upstream's `0.6.1q`.
+5. Optional: leave the upstream `repository.pseudotv` enabled too so its resource packs (`resource.images.pseudotv.logos` etc.) keep updating from upstream — those aren't mirrored in the fork repo.
+
+### Cutting a new release (after making patches)
+
+```bash
+cd ~/projects/PseudoTV_Live
+
+# 1. bump version in plugin.video.pseudotv.live/addon.xml
+#    (e.g. 0.6.1q+madteevee.1 -> 0.6.1q+madteevee.2). Use '+' separator
+#    so Kodi treats it as newer than upstream's 0.6.1q.
+
+# 2. build the site (zips + addons.xml + addons.xml.md5)
+python3 release.py
+
+# 3. publish to gh-pages
+git checkout gh-pages
+rsync -a --delete --exclude='.git' --exclude='_site' _site/ ./
+git add -A
+git commit -m "release: pseudotv X.Y.Z"
+git push fork gh-pages
+
+# 4. tag
+git checkout madteevee-patches
+git tag -a v0.6.1q-madteevee.2 -m "fork release v0.6.1q+madteevee.2"
+git push fork madteevee-patches v0.6.1q-madteevee.2
+```
+
+The tag uses `-` instead of `+` because some git tooling chokes on `+` in tag names; the addon version itself stays `0.6.1q+madteevee.2` per PEP-440 local-version semantics.
+
+Within ~30 s of the `gh-pages` push, the new manifest is live; Kodi will pick it up at its next addon-update poll (or **Add-ons → Check for updates** for immediate refresh).
+
+### Mirroring more addons in the fork repo
+
+`release.py`'s `ADDONS` list controls what gets packaged. Currently:
+- `plugin.video.pseudotv.live` (the patched main addon)
+- `repository.mmadalone.pseudotv` (the repo addon itself, so future repo updates also flow through GH Pages)
+
+Resource packs (`resource.images.pseudotv.logos`, bumpers, ratings, etc.) keep coming from upstream's `repository.pseudotv` since they don't need fork-specific patches. If you ever want the fork to be fully self-contained, copy those addon dirs into this repo, add to `release.py`'s `ADDONS` list, rerun.
