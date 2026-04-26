@@ -29,3 +29,10 @@ ignore = [
     "E722",  # bare except - endemic, defer to a focused future cleanup
     "B008",  # function call in default argument - false positives in Kodi APIs
 ]
+
+[tool.pytest.ini_options]
+# Audit item 5: smoke-import test infrastructure (vendored vrt.nu pattern).
+# tests/__init__.py prepends tests/ + addon's resources/lib to sys.path.
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = ["-q", "--strict-markers"]
