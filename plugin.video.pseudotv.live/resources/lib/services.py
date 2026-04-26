@@ -17,8 +17,10 @@
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 #
 # -*- coding: utf-8 -*-
-from globals    import *
-from service    import Service
+import sys
+
+from globals import DIALOG, LANGUAGE
+from service import Service
 
 if __name__ == '__main__': 
     pendingRestart = Service()._start()

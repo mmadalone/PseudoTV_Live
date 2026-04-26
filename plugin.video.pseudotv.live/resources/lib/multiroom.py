@@ -18,7 +18,15 @@
 #
 # -*- coding: utf-8 -*-
 
-from globals    import *
+import datetime
+import sys
+
+from kodi_six import xbmc
+
+from globals import (ADDON_ID, BUILTIN, DIALOG, DUMMY_ICON, FIFTEEN, FileAccess,
+                     LANGUAGE, LISTITEMS, MAX_GUIDEDAYS, MONITOR, PLAYER, PROPERTIES,
+                     SERVER_LOC, SETTINGS, cacheit, dumpJSON, getJSON, hasAddon,
+                     loadJSON, log, requestURL, setJSON, timerit)
 from server     import Discovery
 
 class Service:

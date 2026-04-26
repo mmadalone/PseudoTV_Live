@@ -17,7 +17,13 @@
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 #
 # -*- coding: utf-8 -*-
-from globals     import *
+import heapq
+
+from threading import Lock, Thread
+
+from kodi_six import xbmc
+
+from globals     import SETTINGS, SUSPEND_TIMER, log, timerit
 from pool        import ExecutorPool
 from collections import defaultdict
 

@@ -24,7 +24,12 @@
 # https://tvtropes.org/pmwiki/pmwiki.php/Main/PopCultureHoliday
 # https://fanlore.org/wiki/List_of_Annual_Holidays,_Observances,_and_Events_in_Fandom
 
-from globals     import *
+import calendar
+import datetime
+
+from kodi_six import xbmc
+
+from globals import HOLIDAYS, PROPERTIES, SEASONS, SETTINGS, cacheit, getJSON, log
 
 KEY_QUERY   = {"method":"","order":"","field":'',"operator":'',"value":[]}
 LIMITS      = {"end":-1,"start":0,"total":0}

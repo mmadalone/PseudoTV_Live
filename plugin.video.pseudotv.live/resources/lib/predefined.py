@@ -18,7 +18,11 @@
 
 # -*- coding: utf-8 -*--
 
-from globals    import *
+import re
+
+from kodi_six import xbmc
+
+from globals import dumpJSON, log, quoteString
 
 class Predefined:
     def __init__(self):

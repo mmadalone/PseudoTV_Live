@@ -17,7 +17,21 @@
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 # -*- coding: utf-8 -*-
 
-from globals     import *
+import datetime
+import os
+import random
+import re
+
+from itertools import cycle
+from operator  import itemgetter
+
+from kodi_six import xbmc
+
+from globals     import (ADDON_ID, ADDON_NAME, ADDON_VERSION, BUILTIN, DIALOG, FIFTEEN,
+                         FileAccess, LANGUAGE, MONITOR, PLAYER, PROPERTIES, SETTINGS,
+                         TEXTURES, VFS_TYPES, cacheit, decodePlot, dumpJSON, escapeDirJSON,
+                         getMD5, isFiller, isStack, killit, loadJSON, log, percentDiff,
+                         setDictLST, splitStacks)
 from videoparser import VideoParser
 
 class Service:

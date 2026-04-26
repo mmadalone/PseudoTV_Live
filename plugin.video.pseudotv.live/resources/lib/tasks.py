@@ -17,8 +17,18 @@
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 #
 # -*- coding: utf-8 -*-
+import datetime
+import os
+import re
+import time
 
-from globals    import *
+from globals    import (ADDON_ID, ADDON_NAME, ADDON_URL, ADDON_VERSION, BUILTIN,
+                        CHANNELFLEPATH, DIALOG, FIFTEEN, FILLER_LOC, FILLER_TYPES,
+                        FileAccess, GENREFLEPATH, IGNORE_CHTYPE, LANGUAGE,
+                        LIBRARYFLEPATH, LOGO_LOC, M3UFLEPATH, MOVIE_CHTYPE,
+                        PROPERTIES, PVR_CLIENT_ID, QUEUE_CHUNK, TEMP_LOC, USER_LOC,
+                        XMLTVFLEPATH, cacheit, hasAddon, randomShuffle, requestURL,
+                        setDictLST, togglePVR)
 from cqueue     import *
 from library    import Library
 from autotune   import Autotune

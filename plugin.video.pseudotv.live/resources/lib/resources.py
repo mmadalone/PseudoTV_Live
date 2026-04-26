@@ -18,7 +18,16 @@
 
 # -*- coding: utf-8 -*-
 
-from globals    import *
+import datetime
+import os
+
+from kodi_six import xbmc
+
+from globals    import (ADDON_VERSION, FileAccess, IMAGE_LOC, IMG_EXTS, LANGUAGE, LOGO,
+                        LOGO_LOC, MAX_GUIDEDAYS, MEDIA_LOC, MONITOR, PLAYER, PROPERTIES,
+                        SETTINGS, TEMP_LOC, cacheit, cleanChannelSuffix, getChannelSuffix,
+                        getMD5, hasAddon, isRadio, log, quoteString, setDictLST, slugify,
+                        splitYear, stripRegion, timerit, unquoteString, validString)
 from functools  import reduce
 from difflib    import SequenceMatcher
 from seasonal   import Seasonal 

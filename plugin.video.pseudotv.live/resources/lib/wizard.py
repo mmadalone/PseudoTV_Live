@@ -19,7 +19,6 @@
 # https://github.com/xbmc/xbmc/blob/master/xbmc/input/Key.h
 
 # -*- coding: utf-8 -*-
-from globals   import *
 
 # https://github.com/PseudoTV/PseudoTV_Live/issues/68
 

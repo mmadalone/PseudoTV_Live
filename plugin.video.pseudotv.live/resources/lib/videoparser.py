@@ -17,7 +17,9 @@
 # You should have received a copy of the GNU General Public License
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 
-from globals    import *
+import os
+
+from globals    import FileAccess, MONITOR, log
 from parsers    import MP4Parser
 from parsers    import AVIParser
 from parsers    import MKVParser
@@ -26,35 +28,35 @@ from parsers    import TSParser
 from parsers    import VFSParser
 from parsers    import NFOParser
 from parsers    import YTParser
- 
+
 EXTERNAL_PARSER = [NFOParser.NFOParser]
 try:
-    import pymediainfo
+    import pymediainfo  # noqa: F401  # availability check for optional MediaInfo parser
     from parsers import MediaInfo
     EXTERNAL_PARSER.append(MediaInfo.MediaInfo)
 except: pass
-    
+
 try:
-    import ffmpeg
+    import ffmpeg  # noqa: F401  # availability check for optional FFProbe parser
     from parsers import FFProbe
     EXTERNAL_PARSER.append(FFProbe.FFProbe)
 except: pass
-    
+
 try:
-    import hachoir
+    import hachoir  # noqa: F401  # availability check for optional Hachoir parser
     from parsers import Hachoir
     EXTERNAL_PARSER.append(Hachoir.Hachoir)
 except: pass
 
 try:
-    import moviepy
+    import moviepy  # noqa: F401  # availability check for optional MoviePY parser
     from parsers import MoviePY
-    from numpy.core._multiarray_umath import *
+    from numpy.core._multiarray_umath import *  # noqa: F401, F403  # numpy init for moviepy (vendored 3rd-party convention; out of cleanup scope)
     EXTERNAL_PARSER.append(MoviePY.MoviePY)
 except: pass
 
 try:
-    import cv2
+    import cv2  # noqa: F401  # availability check for optional OpenCV parser
     from parsers import OpenCV
     EXTERNAL_PARSER.append(OpenCV.OpenCV)
 except: pass
