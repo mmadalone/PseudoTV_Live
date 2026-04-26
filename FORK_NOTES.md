@@ -129,12 +129,39 @@ GitHub denies enabling Pages on repos forked from `PseudoTV/PseudoTV_Live` ("Pag
 
 ### Cutting a new release (after making patches)
 
+The release pipeline is automated via `.github/workflows/release.yml`. Pushing a tag matching `v*-madteevee.*` triggers a workflow that runs `release.py`, publishes `_site/` to the `gh-pages` branch, and creates a GitHub Release object. Workflow can also be triggered manually from the Actions tab (`workflow_dispatch`) for republishing without a tag.
+
+#### Automated release (preferred)
+
 ```bash
-cd ~/projects/PseudoTV_Live
+cd ~/_Claude_projects/PseudoTV_Live
 
 # 1. bump version in plugin.video.pseudotv.live/addon.xml
 #    (e.g. 0.6.1q+madteevee.1 -> 0.6.1q+madteevee.2). Use '+' separator
 #    so Kodi treats it as newer than upstream's 0.6.1q.
+#    (Optionally also bump repository.mmadalone.pseudotv/addon.xml when the
+#    repo addon itself changes — rare.)
+
+# 2. commit + push the version bump
+git add plugin.video.pseudotv.live/addon.xml
+git commit -m "bump: pseudotv 0.6.1q+madteevee.2"
+git push fork madteevee-patches
+
+# 3. tag and push the tag — this is what triggers the release workflow
+git tag -a v0.6.1q-madteevee.2 -m "fork release v0.6.1q+madteevee.2"
+git push fork v0.6.1q-madteevee.2
+```
+
+GitHub then runs the workflow: builds zips + `addons.xml`, force-replaces `gh-pages` with the new `_site/`, creates a Release in the Releases tab. Within ~5 min (raw.githubusercontent.com CDN cache), Kodi will see the new version on **Add-ons → Check for updates**.
+
+The tag uses `-` instead of `+` because some git tooling chokes on `+` in tag names; the addon version itself stays `0.6.1q+madteevee.2` per PEP-440 local-version semantics.
+
+#### Manual release (fallback if Actions disabled / for testing)
+
+```bash
+cd ~/_Claude_projects/PseudoTV_Live
+
+# 1. bump version (as above)
 
 # 2. build the site (zips + addons.xml + addons.xml.md5)
 python3 release.py
@@ -146,15 +173,11 @@ git add -A
 git commit -m "release: pseudotv X.Y.Z"
 git push fork gh-pages
 
-# 4. tag
+# 4. tag and push
 git checkout madteevee-patches
 git tag -a v0.6.1q-madteevee.2 -m "fork release v0.6.1q+madteevee.2"
 git push fork madteevee-patches v0.6.1q-madteevee.2
 ```
-
-The tag uses `-` instead of `+` because some git tooling chokes on `+` in tag names; the addon version itself stays `0.6.1q+madteevee.2` per PEP-440 local-version semantics.
-
-Within ~30 s of the `gh-pages` push, the new manifest is live; Kodi will pick it up at its next addon-update poll (or **Add-ons → Check for updates** for immediate refresh).
 
 ### Mirroring more addons in the fork repo
 
