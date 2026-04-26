@@ -19,9 +19,19 @@
 # https://github.com/xbmc/xbmc/blob/master/xbmc/input/Key.h
 
 # -*- coding: utf-8 -*-
-from globals   import *
-from jsonrpc   import JSONRPC
-from ast       import literal_eval
+import os
+import time
+
+from itertools import cycle
+
+from kodi_six import xbmc, xbmcgui
+
+from globals import (ACTION_INVALID, ACTION_MOVE_DOWN, ACTION_MOVE_LEFT, ACTION_MOVE_RIGHT,
+                     ACTION_MOVE_UP, ACTION_PREVIOUS_MENU, ACTION_SELECT_ITEM, ADDON_NAME,
+                     BUILTIN, COLOR_FANART, COLOR_LOGO, DIALOG, LANGUAGE, MEDIA_LOC,
+                     PROPERTIES, SETTINGS, log)
+from jsonrpc import JSONRPC
+from ast     import literal_eval
 
 WH, WIN = BUILTIN.getResolution()
 
