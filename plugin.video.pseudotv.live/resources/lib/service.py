@@ -150,7 +150,12 @@ class Player(xbmc.Player):
                     self.log('getPlayerSysInfo, rejecting leaked nitem: chid=%s vs nitem.citem.id=%s'%(chid, _nid), xbmc.LOGWARNING)
                     _n = {}
                 sysInfo['nitem'] = _n
-            sysInfo.update({'citem':combineDicts(sysInfo.get('citem',{}),__update(sysInfo.get('citem',{}).get('id'))),'runtime':int(self.getPlayerTime())}) #still needed for adv. rules?
+            # Look up the channel in channels.json by sysInfo.chid (always populated from the URL)
+            # rather than by sysInfo.citem.id. citem may be empty for channel-zap URLs that don't carry
+            # fitem; without a lookup hit, citem.logo would be missing and overlay.py:259 falls back to
+            # BUILTIN.getInfoLabel('Art(icon)','Player') — the *previous* channel's art (channel-bug
+            # logo leak symptom). Using chid as the lookup key makes it robust across zap variants.
+            sysInfo.update({'citem':combineDicts(sysInfo.get('citem',{}),__update(sysInfo.get('chid') or sysInfo.get('citem',{}).get('id'))),'runtime':int(self.getPlayerTime())}) #still needed for adv. rules?
             if not sysInfo.get('callback'): sysInfo['callback'] = self.jsonRPC.getCallback(sysInfo)
             PROPERTIES.setEXTProperty('%s.lastPlayed.sysInfo'%(ADDON_ID),encodeString(dumpJSON(sysInfo)))
         return sysInfo
