@@ -29,6 +29,9 @@ git push fork madteevee-patches --force-with-lease
 
 The cumulative-single-commit shape means rebases hit each conflict once instead of N times. If a future patch becomes its own logical unit (e.g. a new feature you'd consider PR'ing back upstream after burying the hatchet), do that one as a separate commit on top of the squashed base.
 
+**Post-rebase checklist** (upstream re-adds these on every rebase; we keep them deleted in the fork):
+- `git rm plugin.video.pseudotv.live/resources/lib/data/station.py plugin.video.pseudotv.live/resources/lib/data/channels_dataclass.py` — broken vestiges (SyntaxError + missing imports), see `findings.md` "Cleanup applied (2026-04-26)".
+
 ## What the fork actually changes
 
 Single commit `bb2edfe` against `0.6.1q` (293 ins / 53 del, 10 files). The commit message has the full breakdown; high-level summary below.
