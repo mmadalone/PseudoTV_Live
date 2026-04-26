@@ -168,7 +168,8 @@ class Utilities:
 
         keys = list(files.keys())
         if not full: keys = keys[:2]
-        if DIALOG.yesnoDialog('%s ?'%(msg)): 
+        msg = LANGUAGE(32119) if full else LANGUAGE(32120)
+        if DIALOG.yesnoDialog('%s ?'%(msg)):
             with BUILTIN.busy_dialog(), PROPERTIES.interruptActivity():
                 for key in keys:
                     if FileAccess.delete(files[key]): DIALOG.notificationDialog(LANGUAGE(32127)%(key.replace(':','')))
