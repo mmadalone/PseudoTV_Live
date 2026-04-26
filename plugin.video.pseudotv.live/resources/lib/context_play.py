@@ -17,7 +17,9 @@
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 
 # -*- coding: utf-8 -*-
-from globals import *
+import sys
+
+from globals import BUILTIN, decodePlot, decodeString, log, threadit, unquoteString
 from plugin  import Plugin
      
 def run(sysARG, fitem: dict={}, nitem: dict={}):

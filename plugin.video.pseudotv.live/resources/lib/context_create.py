@@ -17,8 +17,14 @@
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 
 # -*- coding: utf-8 -*-
-from globals     import *
-from manager     import Manager
+import sys
+
+from kodi_six import xbmcgui
+
+from globals import (ADDON_NAME, ADDON_PATH, BUILTIN, DIALOG, LANGUAGE, MANAGER_XML,
+                     PROPERTIES, cleanLabel, decodePlot, getChannelID, log,
+                     unquoteString)
+from manager import Manager
 
 class Create:
     def __init__(self, sysARG: dict={}, listitem: xbmcgui.ListItem=xbmcgui.ListItem(), fitem: dict={}):

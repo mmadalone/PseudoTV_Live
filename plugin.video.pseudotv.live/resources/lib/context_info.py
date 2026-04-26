@@ -17,8 +17,12 @@
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 
 # -*- coding: utf-8 -*-
-from globals    import *
-from seasonal   import Seasonal 
+import sys
+
+from kodi_six import xbmcgui
+
+from globals  import (BUILTIN, DIALOG, LANGUAGE, LISTITEMS, decodePlot, escapeString,
+                      hasAddon, log, quoteString, unquoteString)
 
 class Info:
     def __init__(self, sysARG: dict={}, listitem: xbmcgui.ListItem=xbmcgui.ListItem(), fitem: dict={}):

@@ -17,9 +17,14 @@
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 
 # -*- coding: utf-8 -*-
-from globals    import *
-from m3u        import M3U
-from xmltvs     import XMLTVS
+import sys
+
+from kodi_six import xbmcgui
+
+from globals import (BUILTIN, DIALOG, LANGUAGE, OSD_TIMER, PROPERTIES, decodePlot,
+                     log, timeString2Seconds)
+from m3u     import M3U
+from xmltvs  import XMLTVS
 
 class Record:
     def __init__(self, sysARG: dict={}, listitem: xbmcgui.ListItem=xbmcgui.ListItem(), fitem: dict={}):
