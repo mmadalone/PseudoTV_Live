@@ -19,6 +19,7 @@
 # -*- coding: utf-8 -*-
 from globals    import *
 from seasonal   import Seasonal
+from ast        import literal_eval
 #todo pinlock
         
 
@@ -400,7 +401,7 @@ class ShowChannelBug(BaseRule): #OVERLAY RULES [1-49]
             self.storedValues[4] = overlay.channelBugFade
             
             overlay.enableChannelBug   = self.optionValues[0]
-            overlay.channelBugX, overlay.channelBugY = eval(self.optionValues[1])
+            overlay.channelBugX, overlay.channelBugY = literal_eval(self.optionValues[1])
             overlay.channelBugColor    = '0x%s'%(self.optionValues[2])
             overlay.channelBugDiffuse  = self.optionValues[3]
             overlay.channelBugFade     = self.optionValues[4]

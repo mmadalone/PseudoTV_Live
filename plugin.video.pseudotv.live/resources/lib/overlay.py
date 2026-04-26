@@ -21,6 +21,7 @@
 # -*- coding: utf-8 -*-
 from globals   import *
 from resources import Resources
+from ast       import literal_eval
 
 WH, WIN = BUILTIN.getResolution()
 
@@ -196,7 +197,7 @@ class Overlay():
         self.channelBugColor  = '0x%s'%((SETTINGS.getSetting('ChannelBug_Color') or 'FFFFFFFF'))
         self.channelBugFade   = SETTINGS.getSettingInt('ChannelBug_Transparency')
         
-        try:    self.channelBugX, self.channelBugY = eval(SETTINGS.getSetting("Channel_Bug_Position_XY")) #user
+        try:    self.channelBugX, self.channelBugY = literal_eval(SETTINGS.getSetting("Channel_Bug_Position_XY")) #user
         except: self.channelBugX, self.channelBugY = abs(int(self.window_w // 9) - self.window_w) - 128, abs(int(self.window_h // 16) - self.window_h) - 128 #auto
 
 
@@ -308,7 +309,7 @@ class OnNext(xbmcgui.WindowXMLDialog):
         self.window     = xbmcgui.Window(12005) 
         self.window_w, self.window_h = WH #self.window_h, self.window_w = (self.window.getHeight(), self.window.getWidth())
                 
-        try:    self.onNextX, self.onNextY = eval(self.onNextPosition) #user
+        try:    self.onNextX, self.onNextY = literal_eval(self.onNextPosition) #user
         except: self.onNextX, self.onNextY = abs(int(self.window_w // 9)), abs(int(self.window_h // 16) - self.window_h) - 356 #auto
     
         self.log('__init__, enableOnNext = %s, onNextMode = %s, onNextX = %s, onNextY = %s'%(bool(self.onNextMode),self.onNextMode,self.onNextX,self.onNextY))
