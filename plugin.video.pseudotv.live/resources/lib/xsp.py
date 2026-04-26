@@ -17,9 +17,14 @@
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 
 # -*- coding: utf-8 -*-
+import datetime
+import re
 
-from globals          import *
-from library          import Library
+from kodi_six import xbmc
+
+from globals import (ADDON_VERSION, FileAccess, MUSIC_TYPES, SETTINGS, TV_TYPES, dumpJSON,
+                     loadJSON, log, parse, quoteString, unescapeString, unquoteString)
+from library import Library
 
 class XSP:
     def __init__(self):
