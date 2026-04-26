@@ -16,7 +16,10 @@
 # You should have received a copy of the GNU General Public License
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 
-from globals    import *
+import re
+
+from kodi_six import xbmc
+from globals  import HEADER, hasAddon, log
 
 class YTParser:
     def determineLength(self, filename: str) -> int and float:

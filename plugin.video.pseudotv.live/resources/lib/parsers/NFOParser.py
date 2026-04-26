@@ -16,7 +16,10 @@
 # You should have received a copy of the GNU General Public License
 # along with PseudoTV Live Live.  If not, see <http://www.gnu.org/licenses/>.
 
-from globals import *
+import os
+
+from kodi_six import xbmc
+from globals  import FileAccess, log, parse
 
 class NFOParser:
     ## NFO EXAMPLE ##

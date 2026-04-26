@@ -16,7 +16,9 @@
 # You should have received a copy of the GNU General Public License
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 
-from globals import *
+import struct
+
+from globals import FileAccess, MONITOR, log
 
 class FLVTagHeader:
     def __init__(self):
