@@ -232,19 +232,24 @@ class Plugin:
                 liz = self._setResume(chid, LISTITEMS.buildItemListItem(self.sysInfo['fitem']))
                 liz.setProperty('sysInfo',encodeString(dumpJSON(self.sysInfo)))
                 self._resolveURL(True, liz)
-            elif self.sysInfo.get('fitem') and self.sysInfo.get('start') <= self.sysInfo.get('now') <= self.sysInfo.get('stop'):#-> VOD called by non-current EPG cell. (Unreliable during playback)  
-                self.sysInfo['mode'] = 'vod'
-                self.sysInfo['name'] = self.sysInfo['fitem'].get('label')
-                self.sysInfo['vid']  = self.sysInfo['fitem'].get('file')
-                self.sysInfo["seek"] = -1
-                self.sysInfo["progresspercentage"] = -1
-                self.log('[%s] playLive, VOD = %s'%(chid, self.sysInfo['vid']))
-                DIALOG.notificationDialog(LANGUAGE(32185)%(self.sysInfo['name']))
-                liz = LISTITEMS.buildItemListItem(self.sysInfo.get('fitem'))
-                liz.setProperty("IsPlayable","true")
-                liz.setProperty('sysInfo',encodeString(dumpJSON(self.sysInfo)))
-                timerit(PLAYER().play)(1.0,[self.sysInfo['vid'],liz,True])
-                self._resolveURL(False, liz)
+            elif self.sysInfo.get('fitem') and self.sysInfo.get('start') <= self.sysInfo.get('now') <= self.sysInfo.get('stop'):#-> EPG now-cell tune (Enter on currently-airing). Join live at the in-programme offset.
+                # Previous behavior here was: switch mode='vod', set seek=-1, play fitem.file from frame 0,
+                # raise the "Now playing VOD" toast. The original comment said "VOD called by non-current
+                # EPG cell" but the condition catches the *currently-airing* cell. Past cells (now > stop)
+                # route through playBroadcast/playVOD instead, so the "non-current" path was never reachable
+                # here. A now-cell tune should join live at the current offset within the programme, not
+                # restart from 0 — and it should stay mode=live so Kodi treats it as PVR live (live timebar,
+                # channel-info OSD), not as a discrete video. seek is computed from now-start; _setResume
+                # honors Seek_Tolerance so a seek under ~60s plays from start (correct for "user tuned right
+                # at programme start").
+                seek = max(0, int(self.sysInfo.get('now',0)) - int(self.sysInfo.get('start',0)))
+                duration_seconds = max(1, int(self.sysInfo.get('stop',0)) - int(self.sysInfo.get('start',0)))
+                self.sysInfo['seek'] = seek
+                self.sysInfo['progresspercentage'] = int(seek * 100 / duration_seconds)
+                self.log('[%s] playLive, joining now-cell at seek=%s/%ss (%s%%)'%(chid, seek, duration_seconds, self.sysInfo['progresspercentage']))
+                liz = self._setResume(chid, LISTITEMS.buildItemListItem(self.sysInfo['fitem']))
+                liz.setProperty('sysInfo', encodeString(dumpJSON(self.sysInfo)))
+                self._resolveURL(True, liz)
             elif vid:#-> onChange callback from "live" or widget or channel switch (change via input not ui)
                 self.log('[%s] playLive, VID = %s'%(chid, vid))
                 liz = self._setResume(chid, xbmcgui.ListItem(name,path=vid))

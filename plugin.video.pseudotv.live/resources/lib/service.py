@@ -129,8 +129,27 @@ class Player(xbmc.Player):
         sysInfo['chpath']     = BUILTIN.getInfoLabel('Filenameandpath','Player')
         
         if sysInfo['isPseudoTV']:
-            if not sysInfo.get('fitem'): sysInfo.update({'fitem':decodePlot(BUILTIN.getInfoLabel('Plot','VideoPlayer'))})
-            if not sysInfo.get('nitem'): sysInfo.update({'nitem':decodePlot(BUILTIN.getInfoLabel('NextPlot','VideoPlayer'))})
+            # Issue #4 hypothesis (c) guard. When the user channel-zaps via fullscreen CH+/-, the
+            # incoming URL has no fitem/nitem, so we fall back to BUILTIN.getInfoLabel('Plot'/'NextPlot',
+            # 'VideoPlayer') — but Kodi's VideoPlayer info-labels lag behind the actual playback
+            # transition. Result: fitem/nitem populated from the *previous* channel's plot, so the OSD
+            # shows the wrong episode metadata, the wrong logo, the wrong next-up programme. Reject any
+            # candidate whose embedded `citem.id` doesn't match our current channel id (`chid`).
+            chid = sysInfo.get('chid')
+            if not sysInfo.get('fitem'):
+                _f = decodePlot(BUILTIN.getInfoLabel('Plot','VideoPlayer'))
+                _fid = (_f or {}).get('citem',{}).get('id')
+                if _fid and chid and _fid != chid:
+                    self.log('getPlayerSysInfo, rejecting leaked fitem: chid=%s vs fitem.citem.id=%s'%(chid, _fid), xbmc.LOGWARNING)
+                    _f = {}
+                sysInfo['fitem'] = _f
+            if not sysInfo.get('nitem'):
+                _n = decodePlot(BUILTIN.getInfoLabel('NextPlot','VideoPlayer'))
+                _nid = (_n or {}).get('citem',{}).get('id')
+                if _nid and chid and _nid != chid:
+                    self.log('getPlayerSysInfo, rejecting leaked nitem: chid=%s vs nitem.citem.id=%s'%(chid, _nid), xbmc.LOGWARNING)
+                    _n = {}
+                sysInfo['nitem'] = _n
             sysInfo.update({'citem':combineDicts(sysInfo.get('citem',{}),__update(sysInfo.get('citem',{}).get('id'))),'runtime':int(self.getPlayerTime())}) #still needed for adv. rules?
             if not sysInfo.get('callback'): sysInfo['callback'] = self.jsonRPC.getCallback(sysInfo)
             PROPERTIES.setEXTProperty('%s.lastPlayed.sysInfo'%(ADDON_ID),encodeString(dumpJSON(sysInfo)))
