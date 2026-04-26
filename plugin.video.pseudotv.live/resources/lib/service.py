@@ -302,20 +302,28 @@ class Player(xbmc.Player):
 
     def toggleOverlay(self, state: bool=SETTINGS.getSettingBool('Overlay_Enable')):
         if state and self.isPlaying():
-            # Close-and-recreate when state=True. A genuine channel change (filtered through
-            # the stale-event guard at onAVStarted) calls toggleOverlay(False) in _onPlay,
-            # but if __chkOverlay's idle timer subsequently calls toggleOverlay(True) while
-            # the overlay handle still exists (or for any rule-driven recall), we rebuild
-            # from the now-correct self.sysInfo instead of no-op'ing the stale instance.
+            # Be idempotent when the overlay is already up-to-date for the current channel.
+            # __chkOverlay's idle-timer thread calls toggleOverlay(True) on every tick (every
+            # few seconds), so unconditional close-and-recreate would cause continuous flicker.
+            # Only rebuild when self._overlay_chid (the chid the existing overlay was built for)
+            # differs from the current self.sysInfo.chid — i.e., when the channel actually
+            # changed. _onPlay already calls toggleOverlay(False) on a real channel change,
+            # which clears _overlay_chid; a subsequent toggleOverlay(True) then sees
+            # self.overlay is None and rebuilds with the new chid.
+            current_chid = self.sysInfo.get('chid','') if isinstance(self.sysInfo, dict) else ''
             if self.overlay is not None:
+                if getattr(self, '_overlay_chid', None) == current_chid:
+                    return  # overlay already showing this channel; no-op (no flicker)
                 try:    self.overlay = self.overlay.close()
                 except: self.overlay = None
             self.overlay = Overlay(player=self)
+            self._overlay_chid = current_chid
             self.overlay.open()
         elif not state and hasattr(self.overlay,'close'):
             self.overlay = self.overlay.close()
+            self._overlay_chid = None
         else: return
-        self.log("toggleOverlay, state = %s, overlay = %s"%(state, self.overlay))
+        self.log("toggleOverlay, state = %s, overlay = %s, chid = %s"%(state, self.overlay, getattr(self, '_overlay_chid', None)))
 
 
     def toggleRestart(self, state: bool=bool(SETTINGS.getSettingInt('Restart_Percentage'))):
