@@ -6,6 +6,8 @@ A maintenance fork of [PseudoTV Live](https://github.com/PseudoTV/PseudoTV_Live)
 
 **Huge thanks to [Lunatixz](https://github.com/Lunatixz) and the upstream PseudoTV Live community for the foundation** — this repo only adds patches and tooling; the core addon is their excellent work. If you enjoy PseudoTV Live, please support [Kodi](https://kodi.tv/contribute/donate) and [Lunatixz](https://www.patreon.com/pseudotv).
 
+> *Vibecoded with [Claude Code](https://www.anthropic.com/claude-code).* Patches are written and validated collaboratively with an AI coding assistant against the maintainer's own Kodi setup — read the commit messages and [findings.md](findings.md)-style docs (where present) for the reasoning behind each change. YMMV on other hardware / library shapes; PRs and issue reports welcome.
+
 [![GitHub release](https://img.shields.io/github/v/release/mmadalone/PseudoTV_Live?style=flat-square)](https://github.com/mmadalone/PseudoTV_Live/releases)
 [![Supports Kodi 19+](https://img.shields.io/badge/Supports-Kodi%2019+-blue.svg?style=flat-square)](https://kodi.tv/download)
 [![License](https://img.shields.io/github/license/PseudoTV/PseudoTV_Live?style=flat-square)](https://github.com/PseudoTV/PseudoTV_Live/blob/master/LICENSE)
