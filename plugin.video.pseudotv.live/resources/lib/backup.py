@@ -18,7 +18,15 @@
 # https://github.com/kodi-community-addons/script.module.simplecache/blob/master/README.md
 # -*- coding: utf-8 -*-
  
-from globals    import *
+import datetime
+import pathlib
+import sys
+
+from kodi_six import xbmc
+
+from globals    import (BACKUP_TIME_FORMAT, BUILTIN, CHANNELFLE_BACKUP,
+                        CHANNELFLE_RESTORE, CHANNELFLEPATH, DIALOG, FileAccess,
+                        LANGUAGE, PROPERTIES, SETTINGS, log, timerit)
 from library    import Library
 from channels   import Channels
 

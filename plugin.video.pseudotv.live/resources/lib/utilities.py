@@ -17,7 +17,23 @@
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 
 # -*- coding: utf-8 -*-
-from globals import *
+import re
+import sys
+
+import requests
+
+from operator import itemgetter
+
+from kodi_six import xbmc, xbmcaddon
+
+from globals import (ADDON_AUTHOR, ADDON_ID, ADDON_NAME, ADDON_PATH, ADDON_VERSION,
+                     BUILTIN, CHANGELOG_FLE, CHANNELFLEPATH, COLOR_LOGO, DIALOG,
+                     FileAccess, GENREFLEPATH, LANGUAGE, LIBRARYFLEPATH, LISTITEMS,
+                     M3UFLEPATH, MANAGER_XML, OVERLAYTOOL_XML, PROPERTIES,
+                     PVR_CLIENT_ID, PVR_CLIENT_NAME, SELECT_DELAY, SETTINGS,
+                     URL_README, URL_SUPPORT, URL_WIKI, URL_WIN_BONJOUR, USER_LOC,
+                     XMLTVFLEPATH, cleanLabel, dumpJSON, escapeString,
+                     findItemsInLST, hasAddon, loadJSON, log, timerit)
 
 
 class Utilities:
