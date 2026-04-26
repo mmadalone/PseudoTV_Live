@@ -171,8 +171,11 @@ class Overlay():
     def __init__(self, *args, **kwargs):
         self.log("__init__")
         self.player     = kwargs.get('player', None)
-        self.sysInfo    = kwargs.get('sysInfo', self.player.sysInfo)
-        
+        # Live-reference sysInfo via @property below. Don't snapshot at __init__ — with the
+        # stale-event filter in place self.player.sysInfo is anchored to the user's latest
+        # tune intent, so reading live picks up channel changes that happen after construction.
+        self._sysInfo_kwarg = kwargs.get('sysInfo')
+
         self.service    = self.player.service
         self.jsonRPC    = self.player.jsonRPC
         self.runActions = self.player.runActions
@@ -194,7 +197,14 @@ class Overlay():
         self.channelBugFade   = SETTINGS.getSettingInt('ChannelBug_Transparency')
         
         try:    self.channelBugX, self.channelBugY = eval(SETTINGS.getSetting("Channel_Bug_Position_XY")) #user
-        except: self.channelBugX, self.channelBugY = abs(int(self.window_w // 9) - self.window_w) - 128, abs(int(self.window_h // 16) - self.window_h) - 128 #auto        
+        except: self.channelBugX, self.channelBugY = abs(int(self.window_w // 9) - self.window_w) - 128, abs(int(self.window_h // 16) - self.window_h) - 128 #auto
+
+
+    @property
+    def sysInfo(self):
+        # Per-instance kwarg override (rules / tests passing sysInfo explicitly) wins; otherwise
+        # read live from the Player so post-construction channel changes are visible at use time.
+        return self._sysInfo_kwarg if self._sysInfo_kwarg is not None else self.player.sysInfo
 
         
     def log(self, msg, level=xbmc.LOGDEBUG):

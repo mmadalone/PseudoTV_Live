@@ -63,6 +63,10 @@ def run(sysARG, fitem: dict={}, nitem: dict={}):
         params['title']      = (params.get('title') or BUILTIN.getInfoLabel('label'))
         params['name']       = (unquoteString(params.get("name",'')) or BUILTIN.getInfoLabel('ChannelName'))
         params['isPlaylist'] = bool(SETTINGS.getSettingInt('Playback_Method'))
+        # Stale-event filter timestamp. Each URL invocation gets its own _tune_ts; carries through
+        # params -> Plugin.sysInfo -> liz.sysInfo -> getPlayerSysInfo -> _onPlay. Player.onAVStarted
+        # uses it to reject back-filled stale events from aborted tunes during fast CH+/- bursts.
+        params['_tune_ts']   = time.time()
         log("Default: run, params = %s"%(params))
         
         if   PROPERTIES.isRunning('togglePVR'): DIALOG.notificationDialog(LANGUAGE(32166))

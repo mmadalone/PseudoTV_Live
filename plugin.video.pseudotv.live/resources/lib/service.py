@@ -83,10 +83,27 @@ class Player(xbmc.Player):
     def onAVStarted(self):
         self.pendingPlay = -1
         self.pendingStop = True
+        pendingItem = self.getPlayerSysInfo()
+
+        # Stale-event filter. During fast CH+/- bursts Kodi back-fills onAVStarted for each aborted
+        # tune in load-finish order, NOT in user-zap order — so the LAST onAVStarted often fires
+        # for the OLDEST tune. Without this guard self.sysInfo gets anchored to the wrong channel,
+        # the channel-bug logo locks to it, and end-of-programme PlayMedia(callback) routes to the
+        # wrong channel. _tune_ts is stamped per default.py URL invocation; events with an older
+        # _tune_ts than what we already processed are aborted tunes the user has moved past. Only
+        # PseudoTV events are filtered — non-pseudotv playback bypasses this guard and runs the
+        # original flow unchanged.
+        if pendingItem.get('isPseudoTV', False):
+            new_ts = pendingItem.get('_tune_ts', 0)
+            cur_ts = self.sysInfo.get('_tune_ts', 0) if isinstance(self.sysInfo, dict) else 0
+            if new_ts and cur_ts and new_ts < cur_ts:
+                self.log('onAVStarted, IGNORING stale event: _tune_ts=%.3f < current=%.3f (chid=%s, vid=%s)'%(new_ts, cur_ts, pendingItem.get('chid'), pendingItem.get('vid')), xbmc.LOGWARNING)
+                return
+
         self.toggleOverlay(False)
-        self.pendingItem = self.getPlayerSysInfo()
-        self.isPseudoTV  = self.pendingItem.get('isPseudoTV',False)
-        self.log('onAVStarted, pendingStop = %s, isPseudoTV = %s, pendingItem = %s'%(self.pendingStop,self.isPseudoTV,self.pendingItem))
+        self.pendingItem = pendingItem
+        self.isPseudoTV  = self.pendingItem.get('isPseudoTV', False)
+        self.log('onAVStarted, pendingStop = %s, isPseudoTV = %s, pendingItem = %s'%(self.pendingStop, self.isPseudoTV, self.pendingItem))
         self._onPlay(sysInfo=self.pendingItem)
         
                 
@@ -284,7 +301,15 @@ class Player(xbmc.Player):
 
 
     def toggleOverlay(self, state: bool=SETTINGS.getSettingBool('Overlay_Enable')):
-        if state and self.overlay is None and self.isPlaying():
+        if state and self.isPlaying():
+            # Close-and-recreate when state=True. A genuine channel change (filtered through
+            # the stale-event guard at onAVStarted) calls toggleOverlay(False) in _onPlay,
+            # but if __chkOverlay's idle timer subsequently calls toggleOverlay(True) while
+            # the overlay handle still exists (or for any rule-driven recall), we rebuild
+            # from the now-correct self.sysInfo instead of no-op'ing the stale instance.
+            if self.overlay is not None:
+                try:    self.overlay = self.overlay.close()
+                except: self.overlay = None
             self.overlay = Overlay(player=self)
             self.overlay.open()
         elif not state and hasattr(self.overlay,'close'):
