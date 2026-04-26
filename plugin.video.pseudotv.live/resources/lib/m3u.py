@@ -260,7 +260,7 @@ class M3U:
         return []
         
 
-    def cleanSelf(self, items, key='id', slug='@%s'%(slugify(ADDON_NAME))): # remove m3u imports (Non PseudoTV Live)
+    def cleanSelf(self, items, key='id', slug='@%s'%(PSEUDOTV_SLUG)): # remove m3u imports (Non PseudoTV Live); stable slug, decoupled from fork's ADDON_NAME rename
         if not slug: return items
         stations   = self.sortStations(self._verify(stations=[station for station in items if station.get(key,'').endswith(slug) and not station.get('media',False)]))
         recordings = self.sortStations(self._verify(recordings=[recording for recording in items if recording.get(key,'').endswith(slug) and recording.get('media',False)]), key='name')

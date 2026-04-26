@@ -123,7 +123,7 @@ class Player(xbmc.Player):
             
         # with self.service.lock:  # Ensure thread safety
         sysInfo = loadJSON(decodeString(self.getPlayerItem().getProperty('sysInfo')))
-        sysInfo['isPseudoTV'] = '@%s'%(slugify(ADDON_NAME)) in sysInfo.get('chid','')
+        sysInfo['isPseudoTV'] = '@%s'%(PSEUDOTV_SLUG) in sysInfo.get('chid','') #stable slug, decoupled from fork's ADDON_NAME rename
         sysInfo['chfile']     = BUILTIN.getInfoLabel('Filename','Player')
         sysInfo['chfolder']   = BUILTIN.getInfoLabel('Folderpath','Player')
         sysInfo['chpath']     = BUILTIN.getInfoLabel('Filenameandpath','Player')

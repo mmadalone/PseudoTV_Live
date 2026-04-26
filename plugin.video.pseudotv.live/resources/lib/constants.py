@@ -26,6 +26,12 @@ from kodi_six      import xbmc, xbmcaddon
 ADDON_ID            = 'plugin.video.pseudotv.live'
 REAL_SETTINGS       = xbmcaddon.Addon(id=ADDON_ID)
 ADDON_NAME          = REAL_SETTINGS.getAddonInfo('name')
+# Stable channel-id slug. Channel IDs were minted with `slugify('PseudoTV Live')` = 'PseudoTV_Live'
+# (the original upstream addon name). When this fork renamed ADDON_NAME to 'PseudoTV Live (madteevee)',
+# slugify(ADDON_NAME) returned 'PseudoTV_Live_madteevee' and broke isPseudoTV detection in service.py
+# (channels suddenly stopped auto-continuing because the player no longer recognized them as ours).
+# Hardcode the slug so it stays decoupled from the user-facing display name.
+PSEUDOTV_SLUG       = 'PseudoTV_Live'
 ADDON_VERSION       = REAL_SETTINGS.getAddonInfo('version')
 ICON                = REAL_SETTINGS.getAddonInfo('icon')
 FANART              = REAL_SETTINGS.getAddonInfo('fanart')

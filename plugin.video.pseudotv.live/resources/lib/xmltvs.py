@@ -182,7 +182,7 @@ class XMLTVS:
         return bytes(text,DEFAULT_ENCODING).decode(DEFAULT_ENCODING,'ignore')
 
              
-    def cleanSelf(self, items: list, key: str='id', slug: str='@%s'%(slugify(ADDON_NAME))) -> list: # remove imports (Non PseudoTV Live), key = {'id':channels,'channel':programmes}
+    def cleanSelf(self, items: list, key: str='id', slug: str='@%s'%(PSEUDOTV_SLUG)) -> list: # remove imports (Non PseudoTV Live), key = {'id':channels,'channel':programmes}; stable slug, decoupled from fork's ADDON_NAME rename
         if not slug: return items
         channels   = list([item for item in items if item.get(key,'').endswith(slug) and len(item.get(key,'').replace(slug,'')) == 32])
         recordings = list([item for item in items if item.get(key,'').endswith(slug) and len(item.get(key,'').replace(slug,'')) == 16])
