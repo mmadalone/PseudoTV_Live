@@ -72,6 +72,7 @@ class Backup:
                     SETTINGS.setSetting('Recover_Backup','%s [B]%s[/B] Channels?'%(LANGUAGE(32107),len(self.getChannels())))
                 return DIALOG.notificationDialog('%s %s'%(LANGUAGE(32110),LANGUAGE(32025)))
         self.hasBackup()
+        ctl = (0,1) #settings return focus
         SETTINGS.openSettings(ctl)
         
 
