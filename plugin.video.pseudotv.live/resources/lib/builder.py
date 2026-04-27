@@ -490,147 +490,215 @@ class Builder:
         return fileList
 
 
+    def _validateRequest(self, citem, errors, items, limits, nlimits, fileList, dirList, path):
+        # Entry validation for buildList: error message, loopback detect, empty items.
+        # Returns True to proceed, False to early-return. Appends to self.pErrors on failure.
+        if errors.get('message'):
+            self.pErrors.append(errors['message'])
+            return False
+
+        elif items == self.loopback and limits != nlimits:# malformed jsonrpc queries will return root response, catch a re-parse and return.
+            self.log("[%s] buildList, loopback detected using path = %s\nreturning: fileList (%s), dirList (%s)"%(citem['id'],path,len(fileList),len(dirList)))
+            self.pErrors.append(LANGUAGE(32030))
+            return False
+
+        elif not items and len(fileList) == 0:
+            self.log("[%s] buildList, no request items found using path = %s\nreturning: fileList (%s), dirList (%s)"%(citem['id'],path,len(fileList),len(dirList)))
+            self.pErrors.append(LANGUAGE(32026))
+            return False
+
+        return True
+
+
+    def _filterFileItem(self, citem, item, file, fileType, dirList, idx, media, path):
+        # Stage 1: directory routing + PVR decode + missing-file/STRM/streamdetails/3D filters.
+        # PVR decode may reassign both `item` and `file`; both flow back via the 3-tuple.
+        if fileType == 'directory':
+            dirList.append(item)
+            # self.updateProgress(self.pCount, message=f'{self.pName}: {int(idx*100)//page}% appending: {item.get("label")}',header=f'{ADDON_NAME}, {self.pMSG}')
+            self.log("[%s] buildList, IDX = %s, appending directory: %s"%(citem['id'],idx,file),xbmc.LOGINFO)
+            return False, item, file
+
+        elif fileType != 'file':
+            return False, item, file
+
+        if file.startswith('pvr://'): #parse encoded fileitem otherwise no relevant meta provided via org. query. playable pvr:// paths are limited in Kodi.
+            self.log("[%s] buildList, IDX = %s, PVR item => FileItem! file = %s"%(citem['id'],idx,file),xbmc.LOGINFO)
+            item = decodePlot(item.get('plot',''))
+            file = item.get('file')
+
+        if not file:
+            self.pErrors.append(LANGUAGE(32031))
+            self.log("[%s] buildList, IDX = %s, skipping missing playable file! path = %s"%(citem['id'],idx,path),xbmc.LOGINFO)
+            return False, item, file
+
+        elif file.lower().endswith('strm') and not self.incStrms:
+            self.pErrors.append('%s STRM'%(LANGUAGE(32027)))
+            self.log("[%s] buildList, IDX = %s, skipping strm file! file = %s"%(citem['id'],idx,file),xbmc.LOGINFO)
+            return False, item, file
+
+        if not item.get('streamdetails',{}).get('video',[]) and not file.startswith(tuple(VFS_TYPES)): #parsing missing meta, kodi rpc bug fails to return streamdetails during Files.GetDirectory.
+            item['streamdetails'] = self.jsonRPC.getStreamDetails(file, media)
+
+        if self.is3D(item) and not self.inc3D:
+            self.pErrors.append('%s 3D'%(LANGUAGE(32027)))
+            self.log("[%s] buildList, IDX = %s skipping 3D file! file = %s"%(citem['id'],idx,file),xbmc.LOGINFO)
+            return False, item, file
+
+        return True, item, file
+
+
+    def _resolveTitles(self, item, dirItem):
+        # Resolve display titles from the item / directory fallbacks.
+        title   = (item.get("title")     or item.get("label") or dirItem.get('label') or '')
+        tvtitle = (item.get("showtitle") or item.get("label") or dirItem.get('label') or '')
+        return title, tvtitle
+
+
+    def _classifyAndLabelItem(self, citem, item, file, dirItem, idx):
+        # Stage 2: TV vs movie classification, extras filter, label building.
+        # Returns True if item passed; False if extras filter rejected or label is empty.
+        # Sets item['label'] and the TV/movie-specific label fields on success.
+        title, tvtitle = self._resolveTitles(item, dirItem)
+
+        if item['type'].startswith(tuple(TV_TYPES)) or item.get("showtitle"): # This is a TV show
+            season  = int(item.get("season","0"))
+            episode = int(item.get("episode","0"))
+            if not file.startswith(tuple(VFS_TYPES)) and not self.incExtras and (season == 0 or episode == 0):
+                self.pErrors.append('%s Extras'%(LANGUAGE(32027)))
+                self.log("[%s] buildList, IDX = %s skipping extras! file = %s"%(citem['id'],idx,file),xbmc.LOGINFO)
+                return False
+
+            label = tvtitle
+            item["tvshowtitle"]  = tvtitle
+            item["episodetitle"] = title
+            item["episodelabel"] = '%s%s'%(title,' (%sx%s)'%(season,str(episode).zfill(2))) #Episode Title (SSxEE) Mimic Kodi's PVR label format
+            item["showlabel"]    = '%s%s'%(item["tvshowtitle"],' - %s'%(item['episodelabel']) if item['episodelabel'] else '')
+        else: # This is a Movie
+            label = title
+            item["episodetitle"] = item.get("tagline","")
+            item["episodelabel"] = item.get("tagline","")
+            item["showlabel"]    = '%s%s'%(item["title"], ' - %s'%(item['episodelabel']) if item['episodelabel'] else '')
+
+        if not label:
+            self.pErrors.append(LANGUAGE(32018)(LANGUAGE(30188)))
+            return False
+
+        item['label'] = label
+        return True
+
+
+    def _extractTrailer(self, item, trailersdict):
+        # Extract trailer from item if enabled and duration > 0; group by genre into trailersdict.
+        if not (item.get('trailer') and self.bctTypes['trailers'].get('enabled',False)):
+            return
+        titem = item.copy()
+        tdur  = self.jsonRPC.getDuration(titem.get('trailer'), accurate=True, save=False)
+        if tdur > 0:
+            titem.update({'label':'%s - %s'%(item["label"],LANGUAGE(30187)),'episodetitle':'%s - %s'%(item["episodetitle"],LANGUAGE(30187)),'episodelabel':'%s - %s'%(item["episodelabel"],LANGUAGE(30187)),'duration':tdur, 'runtime':tdur, 'file':titem['trailer'], 'streamdetails':{}})
+            [trailersdict.setdefault(genre.lower(),[]).append(titem) for genre in (titem.get('genre',[]) or ['resources'])]
+
+
+    def _applyHolidayPlot(self, item, citem, query):
+        # Apply holiday plot prefix if query has a holiday entry. Mutates citem and item.
+        if not query.get('holiday'):
+            return
+        citem['holiday'] = query.get('holiday')
+        holiday = "[B]%s[/B] - [I]%s[/I]"%(query["holiday"]["name"],query["holiday"]["tagline"]) if query["holiday"]["tagline"] else "[B]%s[/B]"%(query["holiday"]["name"])
+        item["plot"] = "%s \n%s"%(holiday,item["plot"])
+
+
+    def _enrichItemMetadata(self, citem, item, file, media, path, dirItem, query, sort, idx, page, seasoneplist, trailersdict, fileList):
+        # Stage 3: duration check + metadata enrichment + trailer extraction + sort routing.
+        # Returns True if item was added to fileList or seasoneplist; False if duration check
+        # failed (caller continues to next iteration).
+        dur = self.jsonRPC.getDuration(file, item, self.accurateDuration, self.saveDuration)
+        if not dur > self.minDuration:
+            self.pErrors.append(LANGUAGE(32032))
+            self.log("[%s] buildList, IDX = %s skipping content no duration meta found! or runtime below minDuration (%s/%s) file = %s"%(citem['id'],idx,dur,self.minDuration,file),xbmc.LOGINFO)
+            return False
+
+        # include media that's duration is above the players seek tolerance & users adv. rule
+        self.updateProgress(self.pCount, message='%s: %s'%(self.pName,int(idx*100)//page)+'%',header='%s, %s'%(ADDON_NAME,self.pMSG))
+
+        item['duration']     = dur
+        item['media']        = media
+        item['originalpath'] = path #use for path sorting/playback verification
+        item['friendly']     = SETTINGS.getFriendlyName()
+        item['remote']       = PROPERTIES.getRemoteHost()
+
+        if item.get("year",0) == 1601: item['year'] = 0 #detect kodi bug that sets a fallback year to 1601 https://github.com/xbmc/xbmc/issues/15554
+        spTitle, spYear = splitYear(item.get('label',''))
+        item['label'] = spTitle
+        if item.get('year',0) == 0 and spYear: item['year'] = spYear #replace missing item year with one parsed from show title
+
+        item['plot'] = (item.get("plot","") or item.get("plotoutline","") or item.get("description","") or LANGUAGE(32020)).strip()
+        self._applyHolidayPlot(item, citem, query)
+
+        item['art'] = (item.get('art',{}) or dirItem.get('art',{}))
+        item.get('art',{})['icon'] = citem['logo']
+
+        self._extractTrailer(item, trailersdict)
+
+        if sort.get("method","") == 'episode' and (int(item.get("season","0")) + int(item.get("episode","0"))) > 0:
+            seasoneplist.append([int(item.get("season","0")), int(item.get("episode","0")), item])
+        else:
+            fileList.append(item)
+
+        return True
+
+
+    def _sortAndShuffleResults(self, citem, fileList, seasoneplist, dirList, sort):
+        # Post-loop sort/shuffle. randomShuffle returns new lists, so we rebind and return.
+        if sort.get("method","").startswith('episode'):
+            self.log("[%s] buildList, sorting by episode"%(citem['id']))
+            seasoneplist.sort(key=lambda seep: seep[1])
+            seasoneplist.sort(key=lambda seep: seep[0])
+            for seepitem in seasoneplist:
+                fileList.append(seepitem[2])
+
+        elif sort.get("method","") == 'random':
+            self.log("[%s] buildList, random shuffling"%(citem['id']))
+            dirList  = randomShuffle(dirList)
+            fileList = randomShuffle(fileList)
+
+        return fileList, dirList
+
+
     def buildList(self, citem: dict, path: str, media: str='video', page: int=SETTINGS.getSettingInt('Page_Limit'), sort: dict={}, limits: dict={}, dirItem: dict={}, query: dict={}):
         self.log("[%s] buildList, media = %s, path = %s\npage = %s, sort = %s, query = %s, limits = %s\ndirItem = %s"%(citem['id'],media,path,page,sort,query,limits,dirItem))
         dirList, fileList, seasoneplist, trailersdict = [], [], [], {}
         items, nlimits, errors = self.jsonRPC.requestList(citem, path, media, page, sort, limits, query)
-        
-        if errors.get('message'):
-            self.pErrors.append(errors['message'])
+
+        if not self._validateRequest(citem, errors, items, limits, nlimits, fileList, dirList, path):
             return fileList, dirList, nlimits, errors
-            
-        elif items == self.loopback and limits != nlimits:# malformed jsonrpc queries will return root response, catch a re-parse and return.
-            self.log("[%s] buildList, loopback detected using path = %s\nreturning: fileList (%s), dirList (%s)"%(citem['id'],path,len(fileList),len(dirList)))
-            self.pErrors.append(LANGUAGE(32030))
-            return fileList, dirList, nlimits, errors
-            
-        elif not items and len(fileList) == 0:
-            self.log("[%s] buildList, no request items found using path = %s\nreturning: fileList (%s), dirList (%s)"%(citem['id'],path,len(fileList),len(dirList)))
-            self.pErrors.append(LANGUAGE(32026))
-            return fileList, dirList, nlimits, errors
-            
-        elif items:
-            self.loopback = items
-            
-            for idx, item in enumerate(items):
-                file     = item.get('file','')
-                fileType = item.get('filetype','file')
-                if not item.get('type'): item['type'] = query.get('key','files')
-                
-                if self.service._interrupt():
-                    self.log("[%s] buildList, _interrupt"%(citem['id']))
-                    self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32213)), header=ADDON_NAME)
-                    self.jsonRPC.autoPagination(citem['id'], path, query, limits) #rollback pagination limits
-                    return [], [], nlimits, errors
 
-                elif fileType == 'directory':
-                    dirList.append(item)
-                    # self.updateProgress(self.pCount, message=f'{self.pName}: {int(idx*100)//page}% appending: {item.get("label")}',header=f'{ADDON_NAME}, {self.pMSG}')
-                    self.log("[%s] buildList, IDX = %s, appending directory: %s"%(citem['id'],idx,file),xbmc.LOGINFO)
+        self.loopback = items
 
-                elif fileType == 'file':                        
-                    if file.startswith('pvr://'): #parse encoded fileitem otherwise no relevant meta provided via org. query. playable pvr:// paths are limited in Kodi.
-                        self.log("[%s] buildList, IDX = %s, PVR item => FileItem! file = %s"%(citem['id'],idx,file),xbmc.LOGINFO)
-                        item = decodePlot(item.get('plot',''))
-                        file = item.get('file')
-                        
-                    if not file:
-                        self.pErrors.append(LANGUAGE(32031))
-                        self.log("[%s] buildList, IDX = %s, skipping missing playable file! path = %s"%(citem['id'],idx,path),xbmc.LOGINFO)
-                        continue
+        for idx, item in enumerate(items):
+            file     = item.get('file','')
+            fileType = item.get('filetype','file')
+            if not item.get('type'): item['type'] = query.get('key','files')
 
-                    elif (file.lower().endswith('strm') and not self.incStrms): 
-                        self.pErrors.append('%s STRM'%(LANGUAGE(32027)))
-                        self.log("[%s] buildList, IDX = %s, skipping strm file! file = %s"%(citem['id'],idx,file),xbmc.LOGINFO)
-                        continue
-                        
-                    if not item.get('streamdetails',{}).get('video',[]) and not file.startswith(tuple(VFS_TYPES)): #parsing missing meta, kodi rpc bug fails to return streamdetails during Files.GetDirectory.
-                        item['streamdetails'] = self.jsonRPC.getStreamDetails(file, media)
+            if self.service._interrupt():
+                self.log("[%s] buildList, _interrupt"%(citem['id']))
+                self.updateProgress(self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32213)), header=ADDON_NAME)
+                self.jsonRPC.autoPagination(citem['id'], path, query, limits) #rollback pagination limits
+                return [], [], nlimits, errors
 
-                    if (self.is3D(item) and not self.inc3D): 
-                        self.pErrors.append('%s 3D'%(LANGUAGE(32027)))
-                        self.log("[%s] buildList, IDX = %s skipping 3D file! file = %s"%(citem['id'],idx,file),xbmc.LOGINFO)
-                        continue
+            process_ok, item, file = self._filterFileItem(citem, item, file, fileType, dirList, idx, media, path)
+            if not process_ok:
+                continue
 
-                    title   = (item.get("title")     or item.get("label") or dirItem.get('label') or '')
-                    tvtitle = (item.get("showtitle") or item.get("label") or dirItem.get('label') or '')
-                    if (item['type'].startswith(tuple(TV_TYPES)) or item.get("showtitle")):# This is a TV show
-                        season  = int(item.get("season","0"))
-                        episode = int(item.get("episode","0"))
-                        if not file.startswith(tuple(VFS_TYPES)) and not self.incExtras and (season == 0 or episode == 0):
-                            self.pErrors.append('%s Extras'%(LANGUAGE(32027)))
-                            self.log("[%s] buildList, IDX = %s skipping extras! file = %s"%(citem['id'],idx,file),xbmc.LOGINFO)
-                            continue
+            if not self._classifyAndLabelItem(citem, item, file, dirItem, idx):
+                continue
 
-                        label = tvtitle
-                        item["tvshowtitle"]  = tvtitle
-                        item["episodetitle"] = title
-                        item["episodelabel"] = '%s%s'%(title,' (%sx%s)'%(season,str(episode).zfill(2))) #Episode Title (SSxEE) Mimic Kodi's PVR label format
-                        item["showlabel"]    = '%s%s'%(item["tvshowtitle"],' - %s'%(item['episodelabel']) if item['episodelabel'] else '')
-                    else: # This is a Movie
-                        label = title
-                        item["episodetitle"] = item.get("tagline","")
-                        item["episodelabel"] = item.get("tagline","")
-                        item["showlabel"]    = '%s%s'%(item["title"], ' - %s'%(item['episodelabel']) if item['episodelabel'] else '')
-                
-                    if not label: 
-                        self.pErrors.append(LANGUAGE(32018)(LANGUAGE(30188)))
-                        continue
-                    
-                    dur = self.jsonRPC.getDuration(file, item, self.accurateDuration, self.saveDuration)
-                    if dur > self.minDuration: #include media that's duration is above the players seek tolerance & users adv. rule
-                        self.updateProgress(self.pCount, message='%s: %s'%(self.pName,int(idx*100)//page)+'%',header='%s, %s'%(ADDON_NAME,self.pMSG))
-                        
-                        item['duration']     = dur
-                        item['media']        = media
-                        item['originalpath'] = path #use for path sorting/playback verification 
-                        item['friendly']     = SETTINGS.getFriendlyName()
-                        item['remote']       = PROPERTIES.getRemoteHost()
-                        
-                        if item.get("year",0) == 1601: item['year'] = 0 #detect kodi bug that sets a fallback year to 1601 https://github.com/xbmc/xbmc/issues/15554
-                        spTitle, spYear = splitYear(label)
-                        item['label'] = spTitle
-                        if item.get('year',0) == 0 and spYear: item['year'] = spYear #replace missing item year with one parsed from show title
-                            
-                        item['plot'] = (item.get("plot","") or item.get("plotoutline","") or item.get("description","") or LANGUAGE(32020)).strip()
-                        if query.get('holiday'):
-                            citem['holiday'] = query.get('holiday')
-                            holiday = "[B]%s[/B] - [I]%s[/I]"%(query["holiday"]["name"],query["holiday"]["tagline"]) if query["holiday"]["tagline"] else "[B]%s[/B]"%(query["holiday"]["name"])
-                            item["plot"] = "%s \n%s"%(holiday,item["plot"])
+            self._enrichItemMetadata(citem, item, file, media, path, dirItem, query, sort, idx, page, seasoneplist, trailersdict, fileList)
 
-                        item['art'] = (item.get('art',{}) or dirItem.get('art',{}))
-                        item.get('art',{})['icon'] = citem['logo']
-                        
-                        if item.get('trailer') and self.bctTypes['trailers'].get('enabled',False):
-                            titem = item.copy()
-                            tdur  = self.jsonRPC.getDuration(titem.get('trailer'), accurate=True, save=False)
-                            if tdur > 0:
-                                titem.update({'label':'%s - %s'%(item["label"],LANGUAGE(30187)),'episodetitle':'%s - %s'%(item["episodetitle"],LANGUAGE(30187)),'episodelabel':'%s - %s'%(item["episodelabel"],LANGUAGE(30187)),'duration':tdur, 'runtime':tdur, 'file':titem['trailer'], 'streamdetails':{}})
-                                [trailersdict.setdefault(genre.lower(),[]).append(titem) for genre in (titem.get('genre',[]) or ['resources'])]
-                        
-                        if sort.get("method","") == 'episode' and (int(item.get("season","0")) + int(item.get("episode","0"))) > 0: 
-                            seasoneplist.append([int(item.get("season","0")), int(item.get("episode","0")), item])
-                        else: 
-                            fileList.append(item)
-                    else: 
-                        self.pErrors.append(LANGUAGE(32032))
-                        self.log("[%s] buildList, IDX = %s skipping content no duration meta found! or runtime below minDuration (%s/%s) file = %s"%(citem['id'],idx,dur,self.minDuration,file),xbmc.LOGINFO)
-
-            if sort.get("method","").startswith('episode'):
-                self.log("[%s] buildList, sorting by episode"%(citem['id']))
-                seasoneplist.sort(key=lambda seep: seep[1])
-                seasoneplist.sort(key=lambda seep: seep[0])
-                for seepitem in seasoneplist: 
-                    fileList.append(seepitem[2])
-                    
-            elif sort.get("method","") == 'random':
-                self.log("[%s] buildList, random shuffling"%(citem['id']))
-                dirList  = randomShuffle(dirList)
-                fileList = randomShuffle(fileList)
-                
-            self.getTrailers(trailersdict)
-            self.log("[%s] buildList, returning (%s) files, (%s) dirs; parsed (%s) trailers"%(citem['id'],len(fileList),len(dirList),len(trailersdict)))
-            return fileList, dirList, nlimits, errors
+        fileList, dirList = self._sortAndShuffleResults(citem, fileList, seasoneplist, dirList, sort)
+        self.getTrailers(trailersdict)
+        self.log("[%s] buildList, returning (%s) files, (%s) dirs; parsed (%s) trailers"%(citem['id'],len(fileList),len(dirList),len(trailersdict)))
+        return fileList, dirList, nlimits, errors
 
  
     def isHD(self, item: dict) -> bool:
