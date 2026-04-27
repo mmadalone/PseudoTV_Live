@@ -18,7 +18,61 @@
 
 # -*- coding: utf-8 -*-
 
-from globals    import *
+import datetime
+import os
+import time
+from itertools  import cycle
+from operator   import itemgetter
+
+from kodi_six   import xbmc
+
+from logger     import log
+from variables  import (
+    ADDON_NAME,
+    COLOR_LOGO,
+    DTFORMAT,
+    FANART,
+    FILLER_LOC,
+    LANGUAGE,
+    LOGO,
+    MAX_BUILDFILELIST_REPARSE,
+    MAX_GUIDEDAYS,
+    MIN_EPG_DURATION,
+    MONITOR,
+    PAGE_LIMIT,
+    PLAYER,
+    SUSPEND_TIMER,
+    TV_TYPES,
+    VFS_TYPES,
+    RULES_ACTION_CHANNEL_BUILD_FILEARRAY_POST,
+    RULES_ACTION_CHANNEL_BUILD_FILEARRAY_PRE,
+    RULES_ACTION_CHANNEL_BUILD_FILELIST_POST,
+    RULES_ACTION_CHANNEL_BUILD_FILELIST_PRE,
+    RULES_ACTION_CHANNEL_BUILD_FILELIST_RETURN,
+    RULES_ACTION_CHANNEL_BUILD_PATH,
+    RULES_ACTION_CHANNEL_BUILD_TIME_POST,
+    RULES_ACTION_CHANNEL_BUILD_TIME_PRE,
+    RULES_ACTION_CHANNEL_CITEM,
+    RULES_ACTION_CHANNEL_START,
+    RULES_ACTION_CHANNEL_STOP,
+    RULES_ACTION_CHANNEL_TEMP_CITEM,
+)
+from globals    import (
+    DIALOG,
+    PROPERTIES,
+    SETTINGS,
+    cleanGroups,
+    cleanImage,
+    decodePlot,
+    getChannelID,
+    getUTCstamp,
+    interleave,
+    mergeDictLST,
+    randomShuffle,
+    roundTimeDown,
+    splitYear,
+)
+from kodi       import setDictLST
 from channels   import Channels
 from xmltvs     import XMLTVS
 from xsp        import XSP
