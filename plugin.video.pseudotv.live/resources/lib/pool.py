@@ -18,10 +18,16 @@
 #
 # -*- coding: utf-8 -*-
  
-from globals            import *
+import os
+import sys
+import time
+from threading import Thread, Timer, enumerate as thread_enumerate
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, TimeoutError
-from itertools          import repeat, count
-from functools          import partial, wraps, reduce, update_wrapper
+from itertools import repeat, count
+from functools import partial, wraps, reduce, update_wrapper
+from variables import REAL_SETTINGS
+from logger import log
+from kodi_six import xbmc
 
 try:
     import multiprocessing
