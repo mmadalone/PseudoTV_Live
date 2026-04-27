@@ -18,8 +18,14 @@
 #
 # -*- coding: utf-8 -*-
 
-from globals    import *
-from functools  import wraps
+import os
+import datetime
+from contextlib import contextmanager
+from threading import Lock
+from functools import wraps
+from variables import ADDON_ID, ADDON_VERSION, MIN_GUIDEDAYS, MONITOR, REAL_SETTINGS
+from logger import log
+from kodi_six import xbmc, xbmcaddon, xbmcgui
 from fileaccess import FileAccess
 
 try:    from simplecache             import SimpleCache
