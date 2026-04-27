@@ -18,7 +18,14 @@
 #
 # -*- coding: utf-8 -*-
 
-from globals    import *
+import os
+import time
+import errno
+import codecs
+import shutil
+from variables import LANGUAGE, MONITOR, REAL_SETTINGS, SETTINGS_LOC
+from logger import log
+from kodi_six import xbmc, xbmcvfs
 
 #constants 
 DEFAULT_ENCODING           = "utf-8"
