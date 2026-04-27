@@ -17,11 +17,47 @@
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 #
 # -*- coding: utf-8 -*-
-from globals    import *
-from overlay    import Background, Restart, Overlay, OnNext
-from rules      import RulesList
-from tasks      import Tasks
-from jsonrpc    import JSONRPC
+import random
+import time
+from math      import ceil, floor
+from threading import Lock, Thread, enumerate as thread_enumerate
+
+from kodi_six  import xbmc, xbmcgui
+
+from logger    import log
+from pool      import timerit
+from variables import (
+    ADDON_ID,
+    ADDON_PATH,
+    BACKGROUND_XML,
+    FIFTEEN,
+    FILLER_TYPE,
+    LANGUAGE,
+    NOTE_WAV,
+    ONNEXT_TIMER,
+    ONNEXT_XML,
+    OSD_TIMER,
+    PSEUDOTV_SLUG,
+    RESTART_XML,
+    RULES_ACTION_PLAYER_CHANGE,
+    RULES_ACTION_PLAYER_START,
+    RULES_ACTION_PLAYER_STOP,
+)
+from globals   import (
+    BUILTIN,
+    DIALOG,
+    PROPERTIES,
+    SETTINGS,
+    combineDicts,
+    decodePlot,
+    roundupDIV,
+    timeString2Seconds,
+)
+from kodi      import decodeString, dumpJSON, encodeString, loadJSON
+from overlay   import Background, Restart, Overlay, OnNext
+from rules     import RulesList
+from tasks     import Tasks
+from jsonrpc   import JSONRPC
 
 class Player(xbmc.Player):
     sysInfo      = {}
