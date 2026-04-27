@@ -18,7 +18,23 @@
 
 # -*- coding: utf-8 -*-
 
-from globals   import *
+import sys
+import time
+
+from six.moves import urllib
+
+from logger    import log
+from pool      import threadit
+from variables import LANGUAGE, MONITOR, PVR_CLIENT_ID
+from globals   import (
+    BUILTIN,
+    DIALOG,
+    PROPERTIES,
+    SETTINGS,
+    decodePlot,
+    hasAddon,
+)
+from kodi      import decodeString, unquoteString
 from plugin    import Plugin
 
 def run(sysARG, fitem: dict={}, nitem: dict={}):
