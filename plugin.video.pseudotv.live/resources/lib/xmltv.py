@@ -451,17 +451,8 @@ class Writer:
             self.settext(e, programme[element])
 
 
-    def addProgramme(self, programme):
-        """
-        Add a single XMLTV 'programme'
-
-        Arguments:
-
-          'programme' -- A dict representing XMLTV data
-        """
-        p = SubElement(self.root, 'programme')
-
-        # programme attributes
+    def _addProgrammeAttrs(self, p, programme):
+        # programme attributes: required (start, channel) + optional (catchup-id, stop, etc.)
         for attr in ('start', 'channel'):
             if attr in programme:
                 self.setattr(p, attr, programme[attr])
@@ -472,15 +463,8 @@ class Writer:
             if attr in programme:
                 self.setattr(p, attr, programme[attr])
 
-        for title in programme['title']:
-            t = SubElement(p, 'title')
-            self.settext(t, title)
-
-        # Sub-title and description
-        for element in ('sub-title', 'desc'):
-            self.set_zero_ormore(programme, element, p)
-
-        # Credits
+    def _addProgrammeCredits(self, p, programme):
+        # credits with 8 credit types per XMLTV DTD
         if 'credits' in programme:
             c = SubElement(p, 'credits')
             for credtype in ('director', 'actor', 'writer', 'adapter',
@@ -490,45 +474,23 @@ class Writer:
                         cred = SubElement(c, credtype)
                         self.settext(cred, name, with_lang=False)
 
-        # Date
-        if 'date' in programme:
-            d = SubElement(p, 'date')
-            self.settext(d, programme['date'], with_lang=False)
-
-        # Category
-        self.set_zero_ormore(programme, 'category', p)
-
-        # Language and original language
-        for element in ('language', 'orig-language'):
-            self.set_zero_orone(programme, element, p)
-
-        # Length
-        if 'length' in programme:
-            l = SubElement(p, 'length')
-            self.setattr(l, 'units', programme['length']['units'])
-            self.settext(l, programme['length']['length'], with_lang=False)
-
-        # Icon
-        if 'icon' in programme:
-            self.seticons(p, programme['icon'])
-
-        # URL
+    def _addProgrammeUrls(self, p, programme):
+        # <url> elements (0..*)
         if 'url' in programme:
             for url in programme['url']:
                 u = SubElement(p, 'url')
                 self.settext(u, url, with_lang=False)
 
-        # Country
-        self.set_zero_ormore(programme, 'country', p)
-
-        # Episode-num
+    def _addProgrammeEpisodeNums(self, p, programme):
+        # <episode-num> elements (0..*) with system attr
         if 'episode-num' in programme:
             for epnum in programme['episode-num']:
                 e = SubElement(p, 'episode-num')
                 self.setattr(e, 'system', epnum[1])
                 self.settext(e, epnum[0], with_lang=False)
 
-        # Video details
+    def _addProgrammeVideo(self, p, programme):
+        # <video> with sub-elements: aspect, quality (text); present, colour (yes/no)
         if 'video' in programme:
             e = SubElement(p, 'video')
             for videlem in ('aspect', 'quality'):
@@ -543,35 +505,35 @@ class Writer:
                     else:
                         self.settext(a, 'no', with_lang=False)
 
-        # Audio details
+    def _addProgrammeAudio(self, p, programme):
+        # <audio> with stereo + present sub-elements.
+        # Bug fix: original line 553 wrote `p = SubElement(a, 'present')` which reassigned the
+        # caller's `p` (the <programme> element) to the <present> element, causing all subsequent
+        # XMLTV emissions to attach to <present> instead. Renamed local to `pa` (present audio).
+        # The bug is currently unreachable (xmltvs.py:434 sets audio as a list, not a dict, so
+        # `'present' in programme['audio']` evaluates False) but the fix is defensive.
         if 'audio' in programme:
             a = SubElement(p, 'audio')
             if 'stereo' in programme['audio']:
                 s = SubElement(a, 'stereo')
                 self.settext(s, programme['audio']['stereo'], with_lang=False)
             if 'present' in programme['audio']:
-                p = SubElement(a, 'present')
+                pa = SubElement(a, 'present')
                 if programme['audio']['present']:
-                    self.settext(p, 'yes', with_lang=False)
+                    self.settext(pa, 'yes', with_lang=False)
                 else:
-                    self.settext(p, 'no', with_lang=False)
+                    self.settext(pa, 'no', with_lang=False)
 
-        # Previously shown
+    def _addProgrammePreviouslyShown(self, p, programme):
+        # <previously-shown> with optional start, channel attrs
         if 'previously-shown' in programme:
             ps = SubElement(p, 'previously-shown')
             for attr in ('start', 'channel'):
                 if attr in programme['previously-shown']:
                     self.setattr(ps, attr, programme['previously-shown'][attr])
 
-        # Premiere / last chance
-        for element in ('premiere', 'last-chance'):
-            self.set_zero_orone(programme, element, p)
-
-        # New
-        if 'new' in programme:
-            n = SubElement(p, 'new')
-
-        # Subtitles
+    def _addProgrammeSubtitles(self, p, programme):
+        # <subtitles> elements (0..*) with optional type attr and <language> sub-element
         if 'subtitles' in programme:
             for subtitles in programme['subtitles']:
                 s = SubElement(p, 'subtitles')
@@ -581,7 +543,8 @@ class Writer:
                     l = SubElement(s, 'language')
                     self.settext(l, subtitles['language'])
 
-        # Rating
+    def _addProgrammeRating(self, p, programme):
+        # <rating> elements (0..*) with optional system attr, required <value>, optional icon
         if 'rating' in programme:
             for rating in programme['rating']:
                 r = SubElement(p, 'rating')
@@ -592,7 +555,8 @@ class Writer:
                 if 'icon' in rating:
                     self.seticons(r, rating['icon'])
 
-        # Star rating
+    def _addProgrammeStarRating(self, p, programme):
+        # <star-rating> elements (0..*); structure mirrors _addProgrammeRating
         if 'star-rating' in programme:
             for star_rating in programme['star-rating']:
                 sr = SubElement(p, 'star-rating')
@@ -603,7 +567,8 @@ class Writer:
                 if 'icon' in star_rating:
                     self.seticons(sr, star_rating['icon'])
 
-        # Review
+    def _addProgrammeReview(self, p, programme):
+        # <review> elements (0..*) with optional type/source/reviewer attrs and required <value>
         if 'review' in programme:
             for review in programme['review']:
                 r = SubElement(p, 'review')
@@ -612,6 +577,92 @@ class Writer:
                         self.setattr(r, attr, review[attr])
                 v = SubElement(r, 'value')
                 self.settext(v, review['value'], with_lang=False)
+
+
+    def addProgramme(self, programme):
+        """
+        Add a single XMLTV 'programme'
+
+        Arguments:
+
+          'programme' -- A dict representing XMLTV data
+        """
+        p = SubElement(self.root, 'programme')
+
+        # programme attributes (required + optional)
+        self._addProgrammeAttrs(p, programme)
+
+        # title (1..*)
+        for title in programme['title']:
+            t = SubElement(p, 'title')
+            self.settext(t, title)
+
+        # Sub-title and description (0..*)
+        for element in ('sub-title', 'desc'):
+            self.set_zero_ormore(programme, element, p)
+
+        # Credits
+        self._addProgrammeCredits(p, programme)
+
+        # Date
+        if 'date' in programme:
+            d = SubElement(p, 'date')
+            self.settext(d, programme['date'], with_lang=False)
+
+        # Category (0..*)
+        self.set_zero_ormore(programme, 'category', p)
+
+        # Language and original language (0..1 each)
+        for element in ('language', 'orig-language'):
+            self.set_zero_orone(programme, element, p)
+
+        # Length
+        if 'length' in programme:
+            l = SubElement(p, 'length')
+            self.setattr(l, 'units', programme['length']['units'])
+            self.settext(l, programme['length']['length'], with_lang=False)
+
+        # Icon
+        if 'icon' in programme:
+            self.seticons(p, programme['icon'])
+
+        # URL (0..*)
+        self._addProgrammeUrls(p, programme)
+
+        # Country (0..*)
+        self.set_zero_ormore(programme, 'country', p)
+
+        # Episode-num (0..*)
+        self._addProgrammeEpisodeNums(p, programme)
+
+        # Video details
+        self._addProgrammeVideo(p, programme)
+
+        # Audio details
+        self._addProgrammeAudio(p, programme)
+
+        # Previously shown
+        self._addProgrammePreviouslyShown(p, programme)
+
+        # Premiere / last chance (0..1 each)
+        for element in ('premiere', 'last-chance'):
+            self.set_zero_orone(programme, element, p)
+
+        # New (boolean flag)
+        if 'new' in programme:
+            n = SubElement(p, 'new')
+
+        # Subtitles (0..*)
+        self._addProgrammeSubtitles(p, programme)
+
+        # Rating (0..*)
+        self._addProgrammeRating(p, programme)
+
+        # Star rating (0..*)
+        self._addProgrammeStarRating(p, programme)
+
+        # Review (0..*)
+        self._addProgrammeReview(p, programme)
 
     def addChannel(self, channel):
         """
