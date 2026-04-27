@@ -19,11 +19,45 @@
 # -*- coding: utf-8 -*-
 import gzip, mimetypes, socket, time
 
-from zeroconf                  import *
-from globals                   import *
-from functools                 import partial
-from six.moves.BaseHTTPServer  import BaseHTTPRequestHandler, HTTPServer
-from six.moves.socketserver    import ThreadingMixIn
+import os
+from contextlib import closing
+from functools  import partial
+from io         import BytesIO
+from threading  import Thread
+
+from six.moves.BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
+from six.moves.socketserver  import ThreadingMixIn
+from zeroconf                import ServiceBrowser, Zeroconf
+
+from kodi_six   import xbmc, xbmcvfs
+
+from logger     import log
+from pool       import timerit
+from variables  import (
+    ADDON_NAME,
+    BONJOURFLE,
+    CHANNELFLE,
+    DEFAULT_ENCODING,
+    DISCOVER_INTERVAL,
+    GENREFLE,
+    GENREFLEPATH,
+    LANGUAGE,
+    LOGO_LOC,
+    M3UFLE,
+    M3UFLEPATH,
+    TEMP_LOC,
+    XMLTVFLE,
+    XMLTVFLEPATH,
+)
+from globals    import (
+    DIALOG,
+    PROPERTIES,
+    SETTINGS,
+    getJSON,
+    requestURL,
+    setJSON,
+)
+from kodi       import dumpJSON, loadJSON, unquoteString
             
 #todo proper REST API to handle server/client communication incl. sync/update triggers.
 #todo incorporate experimental webserver UI to master branch.
@@ -153,12 +187,13 @@ class RequestHandler(BaseHTTPRequestHandler):
         def _sendChunks(path, content):
             self._set_headers(content)
             self.log('do_GET, outgoing path = %s, content = %s'%(path, content))
-            while not self.monitor.abortRequested():
-                chunk = fle.read(64 * 1024).encode(encoding=DEFAULT_ENCODING)
-                if not chunk or self.monitor.waitForAbort(0.0001): break
-                self.send_header('content-length', len(chunk))
-                self.log('do_GET, sending = %s, chunk = %s'%(path, chunk))
-                self.wfile.write(chunk)
+            with xbmcvfs.File(path, "r") as fle:
+                while not self.monitor.abortRequested():
+                    chunk = fle.read(64 * 1024).encode(encoding=DEFAULT_ENCODING)
+                    if not chunk or self.monitor.waitForAbort(0.0001): break
+                    self.send_header('content-length', len(chunk))
+                    self.log('do_GET, sending = %s, chunk = %s'%(path, chunk))
+                    self.wfile.write(chunk)
             self.wfile.close()
 
         def _sendFile(path, content):
@@ -179,7 +214,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     self.log('do_GET, sending = %s, gzip compressing'%(path))
                     self.wfile.write(data)
                     self.wfile.close()
-                else: self._sendChunks(path, content)
+                else: _sendChunks(path, content)
 
         def _sendImage(path, content):
             self.log('do_GET, outgoing path = %s, content = %s'%(path, content))
