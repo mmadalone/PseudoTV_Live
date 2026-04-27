@@ -17,8 +17,18 @@
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 #
 # -*- coding: utf-8 -*-
+import os
 
-from constants import *
+from constants import *  # noqa: F403,F401 — legitimate PEP 8 re-export of constants public API
+from constants import (
+    CHANNELFLE,
+    GENREFLE,
+    LIBRARYFLE,
+    M3UFLE,
+    PROVIDERFLE,
+    REAL_SETTINGS,
+    XMLTVFLE,
+)
 
 #variables
 PAGE_LIMIT          = int((REAL_SETTINGS.getSetting('Page_Limit')  or "25"))
