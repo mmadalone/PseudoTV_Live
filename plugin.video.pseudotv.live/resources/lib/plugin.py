@@ -17,9 +17,47 @@
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 
 # -*- coding: utf-8 -*-
-from globals     import *
-from jsonrpc     import JSONRPC
-from rules       import RulesList
+import datetime
+import random
+import sys
+from contextlib import contextmanager
+
+from kodi_six            import xbmc, xbmcgui, xbmcplugin
+from infotagger.listitem import ListItemInfoTag
+
+from logger     import log
+from pool       import timerit
+from fileaccess import FileAccess
+from variables  import (
+    ADDON_ID,
+    ADDON_NAME,
+    LANGUAGE,
+    OSD_TIMER,
+    PLAYER,
+    RADIO_ITEM_LIMIT,
+    REAL_SETTINGS,
+    RULES_ACTION_PLAYBACK_RESUME,
+    VFS_TYPES,
+    WEB_TYPES,
+)
+from globals    import (
+    BUILTIN,
+    DIALOG,
+    LISTITEMS,
+    PROPERTIES,
+    SETTINGS,
+    combineDicts,
+    decodePlot,
+    getUTCstamp,
+    hasAddon,
+    interleave,
+    randomShuffle,
+    strpTime,
+    timeString2Seconds,
+)
+from kodi       import decodeString, dumpJSON, encodeString, loadJSON
+from jsonrpc    import JSONRPC
+from rules      import RulesList
 
 
 class Plugin:
