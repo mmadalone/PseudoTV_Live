@@ -17,9 +17,67 @@
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 
 # -*- coding: utf-8 -*-
-from globals    import *
-from seasonal   import Seasonal
+import datetime
+import os
+import random
+import re
+import time
 from ast        import literal_eval
+from threading  import Timer
+
+from kodi_six   import xbmc, xbmcgui
+
+from logger     import log
+from fileaccess import FileAccess
+from variables  import (
+    ADDON_NAME,
+    ADDON_PATH,
+    BACKUP_TIME_FORMAT,
+    COLOR_LOGO,
+    FANART,
+    FILLER_LOC,
+    LANGUAGE,
+    LOGO,
+    MEDIA_LOC,
+    MIN_GUIDEDAYS,
+    MONITOR,
+    OVERLAYTOOL_XML,
+    RULEFLE_ITEM,
+    SELECT_DELAY,
+    TEMP_LOC,
+    TV_TYPES,
+    RULES_ACTION_CHANNEL_BUILD_FILEARRAY_POST,
+    RULES_ACTION_CHANNEL_BUILD_FILEARRAY_PRE,
+    RULES_ACTION_CHANNEL_BUILD_FILELIST_POST,
+    RULES_ACTION_CHANNEL_BUILD_FILELIST_PRE,
+    RULES_ACTION_CHANNEL_BUILD_FILELIST_RETURN,
+    RULES_ACTION_CHANNEL_BUILD_PATH,
+    RULES_ACTION_CHANNEL_BUILD_TIME_PRE,
+    RULES_ACTION_CHANNEL_CITEM,
+    RULES_ACTION_CHANNEL_START,
+    RULES_ACTION_CHANNEL_STOP,
+    RULES_ACTION_CHANNEL_TEMP_CITEM,
+    RULES_ACTION_OVERLAY_CLOSE,
+    RULES_ACTION_OVERLAY_OPEN,
+    RULES_ACTION_PLAYBACK_RESUME,
+    RULES_ACTION_PLAYER_CHANGE,
+    RULES_ACTION_PLAYER_START,
+    RULES_ACTION_PLAYER_STOP,
+)
+from globals    import (
+    BUILTIN,
+    PROPERTIES,
+    SETTINGS,
+    frange,
+    getJSON,
+    getUTCstamp,
+    interleave,
+    randomShuffle,
+    requestURL,
+    setJSON,
+)
+from kodi       import Dialog, findItemsInLST, getMD5
+from seasonal   import Seasonal
 #todo pinlock
         
 
