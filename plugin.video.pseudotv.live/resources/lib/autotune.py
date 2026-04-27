@@ -18,7 +18,35 @@
 
 # -*- coding: utf-8 -*-
 
-from globals    import *
+import random
+import sys
+
+from kodi_six   import xbmc
+
+from logger     import log
+from pool       import poolit, timerit
+from fileaccess import FileAccess
+from variables  import (
+    ADDON_ID,
+    ADDON_NAME,
+    AUTOTUNE_LIMIT,
+    AUTOTUNE_TYPES,
+    CHANNEL_LIMIT,
+    LANGUAGE,
+    LOGO,
+    M3UFLEPATH,
+)
+from globals    import (
+    BUILTIN,
+    DIALOG,
+    LISTITEMS,
+    PROPERTIES,
+    SETTINGS,
+    chkLogo,
+    getChannelID,
+    getChannelSuffix,
+    isRadio,
+)
 from library    import Library
 from channels   import Channels
 
