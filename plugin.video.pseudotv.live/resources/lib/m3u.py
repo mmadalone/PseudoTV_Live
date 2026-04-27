@@ -35,6 +35,7 @@ from fileaccess import FileAccess, FileLock
 from variables  import (
     ADDON_ID,
     ADDON_NAME,
+    AUTOTUNE_TYPES,
     BROADCAST_URL,
     CHANNEL_LIMIT,
     COLOR_LOGO,
@@ -463,7 +464,7 @@ class M3U:
             start += decimal.Decimal(step)
 
         stations  = self.sortStations(stations)
-        chstart   = roundup((CHANNEL_LIMIT * len(CHAN_TYPES)+1))  # noqa: F821 — latent NameError, CHAN_TYPES never defined in addon (master 0.6.1q); preserved pending review.
+        chstart   = roundup((CHANNEL_LIMIT * len(AUTOTUNE_TYPES)+1))
         chmin     = int(chstart + (multiplier*1000))
         chmax     = int(chmin + (CHANNEL_LIMIT))
         chrange   = list(frange(chmin,chmax,0.1))
