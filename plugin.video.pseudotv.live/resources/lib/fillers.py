@@ -163,6 +163,91 @@ class Fillers:
         return setDictLST(items)
     
 
+    def _injectPreRolls(self, fileItem, runtime, chtype, chname, dbtype, fmpaa, fcodec, fgenre):
+        # Determine pre-roll type for this fileItem and inject any pre-roll cells.
+        # Returns (preRollItems, updatedRuntime).
+        preRollItems = []
+        newRuntime   = runtime
+
+        if dbtype.startswith(tuple(MOVIE_TYPES)):
+            ftype   = 'ratings'
+            preKeys = [fmpaa, fcodec]
+        elif dbtype.startswith(tuple(TV_TYPES)):
+            ftype   = 'bumpers'
+            preKeys = [chname, fgenre]
+        else:
+            ftype   = None
+
+        if ftype:
+            preFileList = []
+            if self.bctTypes[ftype].get('enabled',False) and chtype not in IGNORE_CHTYPE:
+                preFileList.extend(self.getSingle(ftype, preKeys, chanceBool(self.bctTypes[ftype].get('chance',0))))
+
+            for i, item in enumerate(setDictLST(preFileList)):
+                if (item.get('duration') or 0) > 0:
+                    newRuntime += item.get('duration')
+                    self.log('[%s] injectBCTs, adding pre-roll %s - %s'%(self.citem.get('id'),item.get('duration'),item.get('file')))
+                    self.builder.updateProgress(self.builder.pCount,message='Filling Pre-Rolls %s%%'%(int(i*100//len(preFileList))),header='%s, %s'%(ADDON_NAME,self.builder.pMSG))
+                    item.update({'title':'Pre-Roll','episodetitle':item.get('label'),'genre':['Pre-Roll'],'plot':item.get('plot',item.get('file')),'path':item.get('file')})
+                    preRollItems.append(self.builder.buildCells(self.citem,item.get('duration'),entries=1,info=item)[0])
+
+        return preRollItems, newRuntime
+
+
+    def _collectPostRollCandidates(self, runtime, chtype, chname, fgenre):
+        # Gather post-roll candidates (adverts + trailers) and the runtime budget.
+        # Preserves original 'last value wins' postFillRuntime semantics: the
+        # variable is reassigned per ftype iteration; trailers (last) determines
+        # the final budget. Returns (postFileList, postFillRuntime, postAuto).
+        postFileList    = []
+        postFillRuntime = MIN_EPG_DURATION
+
+        for ftype in ['adverts','trailers']:
+            postIgnoreTypes = {'adverts':IGNORE_CHTYPE + MOVIE_CHTYPE,'trailers':IGNORE_CHTYPE}[ftype]
+            postFillRuntime = diffRuntime(runtime) if self.bctTypes[ftype]['auto'] else MIN_EPG_DURATION
+            if self.bctTypes[ftype].get('enabled',False) and chtype not in postIgnoreTypes:
+                postFileList.extend(self.getMulti(ftype, [chname, fgenre], self.bctTypes[ftype]['max'] if self.bctTypes[ftype]['auto'] else self.bctTypes[ftype]['min'], chanceBool(self.bctTypes[ftype].get('chance',0))))
+
+        postAuto     = (self.bctTypes['adverts']['auto'] | self.bctTypes['trailers']['auto'])
+        postFileList = randomShuffle(postFileList)
+
+        return postFileList, postFillRuntime, postAuto
+
+
+    def _fillPostRolls(self, postFileList, postFillRuntime, postAuto, runtime):
+        # Drain post-roll candidates under runtime budget. Re-queues too-large
+        # items, increments postCounter, exits when all remaining items have
+        # been seen and don't fit (auto-stop) or budget is exhausted.
+        # `runtime` is passed only for the diagnostic log line preserving the
+        # original message format.
+        postRollItems = []
+        postCounter   = 0
+
+        if len(postFileList) > 0:
+            i = 0
+            self.log('[%s] injectBCTs, post-roll current runtime %s, available runtime %s, available content %s'%(self.citem.get('id'),runtime, postFillRuntime,len(postFileList)))
+            while not self.builder.service.monitor.abortRequested() and postFillRuntime > 0 and len(postFileList) > 0:
+                if self.builder.service.monitor.waitForAbort(0.0001): break
+                else:
+                    i += 1
+                    item = postFileList.pop(0)
+                    if (item.get('duration') or 0) == 0: continue
+                    elif postAuto and postCounter >= len(postFileList):
+                        self.log('[%s] injectBCTs, unused post roll runtime %s %s/%s'%(self.citem.get('id'),postFillRuntime,postCounter,len(postFileList)))
+                        break
+                    elif postFillRuntime >= item.get('duration'):
+                        postFillRuntime -= item.get('duration')
+                        self.log('[%s] injectBCTs, adding post-roll %s - %s'%(self.citem.get('id'),item.get('duration'),item.get('file')))
+                        self.builder.updateProgress(self.builder.pCount,message='Filling Post-Rolls %s%%'%(int(i*100//len(postFileList))),header='%s, %s'%(ADDON_NAME,self.builder.pMSG))
+                        item.update({'title':'Post-Roll','episodetitle':item.get('label'),'genre':['Post-Roll'],'plot':item.get('plot',item.get('file')),'path':item.get('file')})
+                        postRollItems.append(self.builder.buildCells(self.citem,item.get('duration'),entries=1,info=item)[0])
+                    elif postFillRuntime < item.get('duration'):
+                        postFileList.append(item)
+                        postCounter += 1
+
+        return postRollItems
+
+
     def injectBCTs(self, fileList):
         nfileList = []
         for idx, fileItem in enumerate(fileList):
@@ -170,7 +255,7 @@ class Fillers:
             else:
                 runtime = fileItem.get('duration',0)
                 if runtime == 0: continue
-                
+
                 chtype  = self.citem.get('type','')
                 chname  = self.citem.get('name','')
                 fitem   = fileItem.copy()
@@ -179,65 +264,17 @@ class Fillers:
                 fcodec  = (fileItem.get('streamdetails',{}).get('audio') or [{}])[0].get('codec','')
                 fgenre  = (fileItem.get('genre') or self.citem.get('group') or '')
                 if isinstance(fgenre,list) and len(fgenre) > 0: fgenre = fgenre[0]
-                
-                #pre roll - bumpers/ratings
-                if dbtype.startswith(tuple(MOVIE_TYPES)):
-                    ftype   = 'ratings'
-                    preKeys = [fmpaa, fcodec]
-                elif dbtype.startswith(tuple(TV_TYPES)):
-                    ftype   = 'bumpers'
-                    preKeys = [chname, fgenre]
-                else:
-                    ftype   = None
-                
-                if ftype:
-                    preFileList = []
-                    if self.bctTypes[ftype].get('enabled',False) and chtype not in IGNORE_CHTYPE:
-                        preFileList.extend(self.getSingle(ftype, preKeys, chanceBool(self.bctTypes[ftype].get('chance',0))))
 
-                    for i, item in enumerate(setDictLST(preFileList)):
-                        if (item.get('duration') or 0) > 0:
-                            runtime += item.get('duration')
-                            self.log('[%s] injectBCTs, adding pre-roll %s - %s'%(self.citem.get('id'),item.get('duration'),item.get('file')))
-                            self.builder.updateProgress(self.builder.pCount,message='Filling Pre-Rolls %s%%'%(int(i*100//len(preFileList))),header='%s, %s'%(ADDON_NAME,self.builder.pMSG))
-                            item.update({'title':'Pre-Roll','episodetitle':item.get('label'),'genre':['Pre-Roll'],'plot':item.get('plot',item.get('file')),'path':item.get('file')})
-                            nfileList.append(self.builder.buildCells(self.citem,item.get('duration'),entries=1,info=item)[0])
+                # pre roll - bumpers/ratings
+                preRollItems, runtime = self._injectPreRolls(fileItem, runtime, chtype, chname, dbtype, fmpaa, fcodec, fgenre)
+                nfileList.extend(preRollItems)
 
                 # original media
                 nfileList.append(fileItem)
                 self.log('[%s] injectBCTs, adding media %s - %s'%(self.citem.get('id'),fileItem.get('duration'),fileItem.get('file')))
-                
-                # post roll - adverts/trailers
-                postFileList = []
-                for ftype in ['adverts','trailers']:
-                    postIgnoreTypes = {'adverts':IGNORE_CHTYPE + MOVIE_CHTYPE,'trailers':IGNORE_CHTYPE}[ftype]
-                    postFillRuntime = diffRuntime(runtime) if self.bctTypes[ftype]['auto'] else MIN_EPG_DURATION
-                    if self.bctTypes[ftype].get('enabled',False) and chtype not in postIgnoreTypes:
-                        postFileList.extend(self.getMulti(ftype, [chname, fgenre], self.bctTypes[ftype]['max'] if self.bctTypes[ftype]['auto'] else self.bctTypes[ftype]['min'], chanceBool(self.bctTypes[ftype].get('chance',0))))
 
-                postAuto = (self.bctTypes['adverts']['auto'] | self.bctTypes['trailers']['auto'])
-                postCounter = 0
-                if len(postFileList) > 0:
-                    i = 0
-                    postFileList = randomShuffle(postFileList)
-                    self.log('[%s] injectBCTs, post-roll current runtime %s, available runtime %s, available content %s'%(self.citem.get('id'),runtime, postFillRuntime,len(postFileList)))
-                    while not self.builder.service.monitor.abortRequested() and postFillRuntime > 0 and len(postFileList) > 0:
-                        if self.builder.service.monitor.waitForAbort(0.0001): break
-                        else:
-                            i += 1
-                            item = postFileList.pop(0)
-                            if (item.get('duration') or 0) == 0: continue
-                            elif postAuto and postCounter >= len(postFileList):
-                                self.log('[%s] injectBCTs, unused post roll runtime %s %s/%s'%(self.citem.get('id'),postFillRuntime,postCounter,len(postFileList)))
-                                break
-                            elif postFillRuntime >= item.get('duration'):
-                                postFillRuntime -= item.get('duration')
-                                self.log('[%s] injectBCTs, adding post-roll %s - %s'%(self.citem.get('id'),item.get('duration'),item.get('file')))
-                                self.builder.updateProgress(self.builder.pCount,message='Filling Post-Rolls %s%%'%(int(i*100//len(postFileList))),header='%s, %s'%(ADDON_NAME,self.builder.pMSG))
-                                item.update({'title':'Post-Roll','episodetitle':item.get('label'),'genre':['Post-Roll'],'plot':item.get('plot',item.get('file')),'path':item.get('file')})
-                                nfileList.append(self.builder.buildCells(self.citem,item.get('duration'),entries=1,info=item)[0])
-                            elif postFillRuntime < item.get('duration'):
-                                postFileList.append(item)
-                                postCounter += 1
+                # post roll - adverts/trailers
+                postFileList, postFillRuntime, postAuto = self._collectPostRollCandidates(runtime, chtype, chname, fgenre)
+                nfileList.extend(self._fillPostRolls(postFileList, postFillRuntime, postAuto, runtime))
         self.log('[%s] injectBCTs, finished'%(self.citem.get('id')))
         return nfileList
