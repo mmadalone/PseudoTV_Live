@@ -60,14 +60,6 @@ SETTINGS            = DIALOG.settings
 LISTITEMS           = DIALOG.listitems
 BUILTIN             = DIALOG.builtin
 
-def slugify(s, lowercase=False):
-  if lowercase: s = s.lower()
-  s = s.strip()
-  s = re.sub(r'[^\w\s-]', '', s)
-  s = re.sub(r'[\s_-]+', '_', s)
-  s = re.sub(r'^-+|-+$', '', s)
-  return s
-        
 def validString(s):
     return "".join(x for x in s if (x.isalnum() or x not in '\\/:*?"<>|'))
         

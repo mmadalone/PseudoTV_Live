@@ -59,9 +59,8 @@ from globals    import (
     getRecordID,
     hasFile,
     setURL,
-    slugify,
 )
-from kodi       import decodeString, encodeString, getThumb, quoteString
+from kodi       import decodeString, encodeString, getThumb, quoteString, slugify
 from channels   import Channels
 
 M3U_TEMP = {"id"                : "",

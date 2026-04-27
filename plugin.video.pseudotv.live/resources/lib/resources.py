@@ -26,8 +26,9 @@ from kodi_six import xbmc
 from globals    import (ADDON_VERSION, FileAccess, IMAGE_LOC, IMG_EXTS, LANGUAGE, LOGO,
                         LOGO_LOC, MAX_GUIDEDAYS, MEDIA_LOC, MONITOR, PLAYER, PROPERTIES,
                         SETTINGS, TEMP_LOC, cacheit, cleanChannelSuffix, getChannelSuffix,
-                        getMD5, hasAddon, isRadio, log, quoteString, setDictLST, slugify,
+                        getMD5, hasAddon, isRadio, log, quoteString, setDictLST,
                         splitYear, stripRegion, timerit, unquoteString, validString)
+from kodi       import slugify
 from functools  import reduce
 from difflib    import SequenceMatcher
 from seasonal   import Seasonal 

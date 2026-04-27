@@ -60,10 +60,9 @@ from globals    import (
     getUTCstamp,
     roundTimeDown,
     setURL,
-    slugify,
     strpTime,
 )
-from kodi       import encodeString, getThumb, quoteString, setDictLST
+from kodi       import encodeString, getThumb, quoteString, setDictLST, slugify
 from seasonal   import Seasonal
 
 #todo check for empty recordings/channel meta and trigger refresh/rebuild empty xmltv via Kodi json rpc?

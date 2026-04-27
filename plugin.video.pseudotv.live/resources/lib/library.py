@@ -49,8 +49,8 @@ from globals    import (
     getChannelSuffix,
     getJSON,
     setJSON,
-    slugify,
 )
+from kodi       import slugify
 from predefined import Predefined
 from resources  import Resources
 from channels   import Channels
