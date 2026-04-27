@@ -18,7 +18,20 @@
 
 # -*- coding: utf-8 -*-
 
-from globals    import *
+import random
+from operator import itemgetter
+
+from kodi_six  import xbmc
+
+from logger    import log
+from variables import (
+    CHANNEL_ITEM,
+    CHANNEL_LIMIT,
+    CHANNELFLE_DEFAULT,
+    CHANNELFLEPATH,
+    LANGUAGE,
+)
+from globals   import PROPERTIES, SETTINGS, getJSON, setJSON
 #todo create dataclasses for all jsons
 # https://pypi.org/project/dataclasses-json/
 class Channels:
