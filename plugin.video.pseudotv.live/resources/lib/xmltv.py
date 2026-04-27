@@ -34,7 +34,15 @@ PARTICULAR PURPOSE. See the GNU Lesser General Public License for more details.
 You should have received a copy of the GNU Lesser General Public License along
 with this software; if not, see <http://www.gnu.org/licenses/>.
 """
-from globals               import *
+import xml.sax.saxutils
+from xml.etree.ElementTree import (
+    Element, ElementTree, SubElement, XMLParser, fromstring, parse as ETparse,
+)
+
+from kodi_six  import xbmc
+
+from variables import DEFAULT_ENCODING, DTFORMAT, DTZFORMAT
+from logger    import log
 
 # The Python-XMLTV version
 VERSION = "1.4.4_PSEUDOTV"
