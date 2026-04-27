@@ -18,9 +18,53 @@
 
 # -*- coding: utf-8 -*-
 
+import datetime
+import os
+import random
+import re
+import time
+from operator        import itemgetter
+from xml.dom.minidom import Document, parse
+
 import xmltv
-from globals    import *
-from seasonal   import Seasonal 
+
+from kodi_six   import xbmc
+
+from logger     import log
+from pool       import poolit
+from fileaccess import FileAccess, FileLock
+from variables  import (
+    ADDON_ID,
+    ADDON_NAME,
+    COLOR_LOGO,
+    DEFAULT_ENCODING,
+    DTFORMAT,
+    EPG_ARTWORK,
+    FANART,
+    GENREFLE_DEFAULT,
+    GENREFLEPATH,
+    LANG,
+    LANGUAGE,
+    MIN_GUIDEDAYS,
+    PSEUDOTV_SLUG,
+    TEMP_LOC,
+    VOD_URL,
+    XMLTVFLEPATH,
+)
+from globals    import (
+    DIALOG,
+    cleanImage,
+    cleanMPAA,
+    decodePlot,
+    encodePlot,
+    getUTCstamp,
+    roundTimeDown,
+    setURL,
+    slugify,
+    strpTime,
+)
+from kodi       import encodeString, getThumb, quoteString, setDictLST
+from seasonal   import Seasonal
 
 #todo check for empty recordings/channel meta and trigger refresh/rebuild empty xmltv via Kodi json rpc?
 
