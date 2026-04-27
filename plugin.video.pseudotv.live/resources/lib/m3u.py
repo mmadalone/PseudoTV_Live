@@ -113,127 +113,187 @@ class M3U:
         return log('%s: %s'%(self.__class__.__name__,msg),level)
 
 
+    def _coerceMatchValue(self, key, value, mitem):
+        # Per-key type dispatch for an EXTINF attribute regex match. Mutates
+        # mitem in-place. Extracted from _parseExinfLine to keep CC ≤ 12.
+        if value.group(1) is None:
+            return
+        elif key == 'logo':
+            mitem[key] = value.group(1)
+        elif key == 'number':
+            try:    mitem[key] = int(value.group(1))
+            except: mitem[key] = float(value.group(1))#todo why was this needed?
+        elif key == 'group':
+            mitem[key] = [_f for _f in sorted(list(set((value.group(1)).split(';')))) if _f]
+        elif key in ['radio','favorite','realtime','media']:
+            mitem[key] = (value.group(1)).lower() == 'true'
+        else:
+            mitem[key] = value.group(1)
+
+
+    def _parseMetadataLine(self, nline, mitem):
+        # Parse one extended-metadata line (#EXTGRP / #KODIPROP / #EXTVLCOPT /
+        # #EXT-X-PLAYLIST-TYPE) and mutate mitem. Returns True if the line was
+        # a recognized metadata prefix, False if caller should treat it as a
+        # URL line / skip. Extracted from _scanMetadataLines to keep CC ≤ 12.
+        if nline.startswith('#EXTGRP'):
+            grop = re.compile('^#EXTGRP:(.*)$', re.IGNORECASE).search(nline)
+            if grop is not None:
+                mitem['group'].extend(grop.group(1).split(';'))
+                mitem['group'] = sorted(set(mitem['group']))
+            return True
+        elif nline.startswith('#KODIPROP:'):
+            prop = re.compile('^#KODIPROP:(.*)$', re.IGNORECASE).search(nline)
+            if prop is not None: mitem.setdefault('kodiprops',[]).append(prop.group(1))
+            return True
+        elif nline.startswith('#EXTVLCOPT'):
+            copt = re.compile('^#EXTVLCOPT:(.*)$', re.IGNORECASE).search(nline)
+            if copt is not None:  mitem.setdefault('extvlcopt',[]).append(copt.group(1))
+            return True
+        elif nline.startswith('#EXT-X-PLAYLIST-TYPE'):
+            xplay = re.compile('^#EXT-X-PLAYLIST-TYPE:(.*)$', re.IGNORECASE).search(nline)
+            if xplay is not None: mitem['x-playlist-type'] = xplay.group(1)
+            return True
+        return False
+
+
+    def _parseExinfLine(self, line, chCount, data):
+        # Parse one #EXTINF line into a mitem dict. Returns the dict, or None if
+        # tvg-id is missing (caller should skip — fixes a latent AttributeError
+        # on `match['id'].group(1)` when external M3U entries lack tvg-id="").
+        match = {'label'             :re.compile(',(.*)'                        , re.IGNORECASE).search(line),
+                 'id'                :re.compile('tvg-id=\"(.*?)\"'             , re.IGNORECASE).search(line),
+                 'name'              :re.compile('tvg-name=\"(.*?)\"'           , re.IGNORECASE).search(line),
+                 'group'             :re.compile('group-title=\"(.*?)\"'        , re.IGNORECASE).search(line),
+                 'number'            :re.compile('tvg-chno=\"(.*?)\"'           , re.IGNORECASE).search(line),
+                 'logo'              :re.compile('tvg-logo=\"(.*?)\"'           , re.IGNORECASE).search(line),
+                 'radio'             :re.compile('radio=\"(.*?)\"'              , re.IGNORECASE).search(line),
+                 'tvg-shift'         :re.compile('tvg-shift=\"(.*?)\"'          , re.IGNORECASE).search(line),
+                 'catchup'           :re.compile('catchup=\"(.*?)\"'            , re.IGNORECASE).search(line),
+                 'catchup-source'    :re.compile('catchup-source=\"(.*?)\"'     , re.IGNORECASE).search(line),
+                 'catchup-days'      :re.compile('catchup-days=\"(.*?)\"'       , re.IGNORECASE).search(line),
+                 'catchup-correction':re.compile('catchup-correction=\"(.*?)\"' , re.IGNORECASE).search(line),
+                 'provider'          :re.compile('provider=\"(.*?)\"'           , re.IGNORECASE).search(line),
+                 'provider-type'     :re.compile('provider-type=\"(.*?)\"'      , re.IGNORECASE).search(line),
+                 'provider-logo'     :re.compile('provider-logo=\"(.*?)\"'      , re.IGNORECASE).search(line),
+                 'provider-countries':re.compile('provider-countries=\"(.*?)\"' , re.IGNORECASE).search(line),
+                 'provider-languages':re.compile('provider-languages=\"(.*?)\"' , re.IGNORECASE).search(line),
+                 'media'             :re.compile('media=\"(.*?)\"'              , re.IGNORECASE).search(line),
+                 'media-dir'         :re.compile('media-dir=\"(.*?)\"'          , re.IGNORECASE).search(line),
+                 'media-size'        :re.compile('media-size=\"(.*?)\"'         , re.IGNORECASE).search(line),
+                 'realtime'          :re.compile('realtime=\"(.*?)\"'           , re.IGNORECASE).search(line)}
+
+        # Bug fix (item 7 4/4): defensive null-check on tvg-id before any
+        # .group(1) access. Original line 169 would AttributeError when
+        # match['id'] is None (line lacked tvg-id="..." attribute). Pseudotv-
+        # generated M3U always sets tvg-id, but external imports via
+        # M3U.importM3U() may omit it.
+        if match['id'] is None:
+            self.log('_load, EXTINF entry without tvg-id, skipping')
+            return None
+
+        mitem = self.getMitem()
+        mitem.update({'number' :chCount,
+                      'logo'   :LOGO,
+                      'catchup':''}) #set default parameters
+
+        for key, value in list(match.items()):
+            if value is None:
+                if data.get(key,None) is not None:
+                    self.log('_load, using #EXTM3U "%s" value for #EXTINF'%(key))
+                    value = data[key] #no local EXTINF value found; use global EXTM3U if applicable.
+                else: continue
+            self._coerceMatchValue(key, value, mitem)
+
+        return mitem
+
+
+    def _scanMetadataLines(self, lines, idx, mitem):
+        # Forward-scan from EXTINF for extended metadata lines. Mutates mitem
+        # in-place with #EXTGRP groups, #KODIPROP props, #EXTVLCOPT options,
+        # #EXT-X-PLAYLIST-TYPE, and the URL.
+        #
+        # Bug fix (item 7 4/4): original line 207 used `.append(grop.group(1)
+        # .split(';'))` which appended a LIST to mitem['group'], producing
+        # mixed strings-and-lists that crashed `set()` at line 208 on
+        # unhashable list elements. Changed to `.extend(...)` so each split
+        # element appends individually, preserving the flat-list invariant.
+        for nidx in range(idx+1,len(lines)):
+            try:
+                nline = lines[nidx].rstrip()
+                if   nline.startswith('#EXTINF:'): break
+                elif self._parseMetadataLine(nline, mitem): continue
+                elif nline.startswith('##'): continue
+                elif not nline: continue
+                else: mitem['url'] = nline
+            except Exception as e: self.log('_load, error parsing m3u! %s'%(e))
+
+
+    def _validateExinfItem(self, mitem):
+        # Fill missing name/label fallbacks, apply favorite override, validate
+        # required fields. Returns False if the entry should be skipped.
+        #Fill missing with similar parameters.
+        mitem['name']     = (mitem.get('name')     or mitem.get('label') or '')
+        mitem['label']    = (mitem.get('label')    or mitem.get('name')  or '')
+        mitem['favorite'] = (mitem.get('favorite') or False)
+
+        #Set Fav. based on group value.
+        if LANGUAGE(32019) in mitem['group'] and not mitem['favorite']:
+            mitem['favorite'] = True
+
+        #Core m3u parameters missing, ignore entry.
+        if not mitem.get('id') or not mitem.get('name') or not mitem.get('number'):
+            self.log('_load, SKIPPED MISSING META m3u item = %s'%mitem)
+            return False
+
+        return True
+
+
     def _load(self, file=M3UFLEPATH):
         self.log('_load, file = %s'%file)
         if file.startswith('http'):
             url  = file
             file = os.path.join(TEMP_LOC,slugify(url))
             setURL(url,file)
-            
-        if FileAccess.exists(file): 
+
+        if FileAccess.exists(file):
             fle   = FileAccess.open(file, 'r')
             lines = (fle.readlines())
             fle.close()
-            
+
             chCount = 0
             data    = {}
             filter  = []
-            
+
             for idx, line in enumerate(lines):
                 line = line.rstrip()
-                
+
                 if line.startswith('#EXTM3U'):
                     data = {'tvg-shift'         :re.compile('tvg-shift=\"(.*?)\"'          , re.IGNORECASE).search(line),
                             'x-tvg-url'         :re.compile('x-tvg-url=\"(.*?)\"'          , re.IGNORECASE).search(line),
                             'catchup-correction':re.compile('catchup-correction=\"(.*?)\"' , re.IGNORECASE).search(line)}
-                            
+
                     # if SETTINGS.getSettingInt('Import_XMLTV_TYPE') == 2 and file == os.path.join(TEMP_LOC,slugify(SETTINGS.getSetting('Import_M3U_URL'))):
                         # if data.get('x-tvg-url').group(1):
                             # self.log('_load, using #EXTM3U "x-tvg-url"')
                             # SETTINGS.setSetting('Import_XMLTV_M3U',data.get('x-tvg-url').group(1))
-                           
+
                 elif line.startswith('#EXTINF:'):
                     chCount += 1
-                    match = {'label'             :re.compile(',(.*)'                        , re.IGNORECASE).search(line),
-                             'id'                :re.compile('tvg-id=\"(.*?)\"'             , re.IGNORECASE).search(line),
-                             'name'              :re.compile('tvg-name=\"(.*?)\"'           , re.IGNORECASE).search(line),
-                             'group'             :re.compile('group-title=\"(.*?)\"'        , re.IGNORECASE).search(line),
-                             'number'            :re.compile('tvg-chno=\"(.*?)\"'           , re.IGNORECASE).search(line),
-                             'logo'              :re.compile('tvg-logo=\"(.*?)\"'           , re.IGNORECASE).search(line),
-                             'radio'             :re.compile('radio=\"(.*?)\"'              , re.IGNORECASE).search(line),
-                             'tvg-shift'         :re.compile('tvg-shift=\"(.*?)\"'          , re.IGNORECASE).search(line),
-                             'catchup'           :re.compile('catchup=\"(.*?)\"'            , re.IGNORECASE).search(line),
-                             'catchup-source'    :re.compile('catchup-source=\"(.*?)\"'     , re.IGNORECASE).search(line),
-                             'catchup-days'      :re.compile('catchup-days=\"(.*?)\"'       , re.IGNORECASE).search(line),
-                             'catchup-correction':re.compile('catchup-correction=\"(.*?)\"' , re.IGNORECASE).search(line),
-                             'provider'          :re.compile('provider=\"(.*?)\"'           , re.IGNORECASE).search(line),
-                             'provider-type'     :re.compile('provider-type=\"(.*?)\"'      , re.IGNORECASE).search(line),
-                             'provider-logo'     :re.compile('provider-logo=\"(.*?)\"'      , re.IGNORECASE).search(line),
-                             'provider-countries':re.compile('provider-countries=\"(.*?)\"' , re.IGNORECASE).search(line),
-                             'provider-languages':re.compile('provider-languages=\"(.*?)\"' , re.IGNORECASE).search(line),
-                             'media'             :re.compile('media=\"(.*?)\"'              , re.IGNORECASE).search(line),
-                             'media-dir'         :re.compile('media-dir=\"(.*?)\"'          , re.IGNORECASE).search(line),
-                             'media-size'        :re.compile('media-size=\"(.*?)\"'         , re.IGNORECASE).search(line),
-                             'realtime'          :re.compile('realtime=\"(.*?)\"'           , re.IGNORECASE).search(line)}
-                    
-                    if match['id'].group(1) in filter:
-                        self.log('_load, filtering duplicate %s'%(match['id'].group(1)))
-                        continue
-                    filter.append(match['id'].group(1)) #filter dups, todo find where dups originate from. 
-                    
-                    mitem = self.getMitem()
-                    mitem.update({'number' :chCount,
-                                  'logo'   :LOGO,
-                                  'catchup':''}) #set default parameters
-                    
-                    for key, value in list(match.items()):
-                        if value is None:
-                            if data.get(key,None) is not None:
-                                self.log('_load, using #EXTM3U "%s" value for #EXTINF'%(key))
-                                value = data[key] #no local EXTINF value found; use global EXTM3U if applicable.
-                            else: continue
-                        
-                        if value.group(1) is None:
-                            continue
-                        elif key == 'logo':
-                            mitem[key] = value.group(1)
-                        elif key == 'number':
-                            try:    mitem[key] = int(value.group(1))
-                            except: mitem[key] = float(value.group(1))#todo why was this needed?
-                        elif key == 'group':
-                            mitem[key] = [_f for _f in sorted(list(set((value.group(1)).split(';')))) if _f]
-                        elif key in ['radio','favorite','realtime','media']:
-                            mitem[key] = (value.group(1)).lower() == 'true'
-                        else:
-                            mitem[key] = value.group(1)
+                    mitem = self._parseExinfLine(line, chCount, data)
+                    if mitem is None:
+                        continue  # entry lacks tvg-id
 
-                    for nidx in range(idx+1,len(lines)):
-                        try:
-                            nline = lines[nidx].rstrip()
-                            if   nline.startswith('#EXTINF:'): break
-                            elif nline.startswith('#EXTGRP'):
-                                grop = re.compile('^#EXTGRP:(.*)$', re.IGNORECASE).search(nline)
-                                if grop is not None: 
-                                    mitem['group'].append(grop.group(1).split(';'))
-                                    mitem['group'] = sorted(set(mitem['group']))
-                            elif nline.startswith('#KODIPROP:'):
-                                prop = re.compile('^#KODIPROP:(.*)$', re.IGNORECASE).search(nline)
-                                if prop is not None: mitem.setdefault('kodiprops',[]).append(prop.group(1))
-                            elif nline.startswith('#EXTVLCOPT'):
-                                copt = re.compile('^#EXTVLCOPT:(.*)$', re.IGNORECASE).search(nline)
-                                if copt is not None:  mitem.setdefault('extvlcopt',[]).append(copt.group(1))
-                            elif nline.startswith('#EXT-X-PLAYLIST-TYPE'):
-                                xplay = re.compile('^#EXT-X-PLAYLIST-TYPE:(.*)$', re.IGNORECASE).search(nline)
-                                if xplay is not None: mitem['x-playlist-type'] = xplay.group(1)
-                            elif nline.startswith('##'): continue
-                            elif not nline: continue
-                            else: mitem['url'] = nline
-                        except Exception as e: self.log('_load, error parsing m3u! %s'%(e))
-                            
-                    #Fill missing with similar parameters.
-                    mitem['name']     = (mitem.get('name')     or mitem.get('label') or '')
-                    mitem['label']    = (mitem.get('label')    or mitem.get('name')  or '')
-                    mitem['favorite'] = (mitem.get('favorite') or False)
-                    
-                    #Set Fav. based on group value.
-                    if LANGUAGE(32019) in mitem['group'] and not mitem['favorite']:
-                        mitem['favorite'] = True
-                    
-                    #Core m3u parameters missing, ignore entry.
-                    if not mitem.get('id') or not mitem.get('name') or not mitem.get('number'): 
-                        self.log('_load, SKIPPED MISSING META m3u item = %s'%mitem)
+                    if mitem['id'] in filter:
+                        self.log('_load, filtering duplicate %s'%(mitem['id']))
                         continue
-                        
+                    filter.append(mitem['id']) #filter dups, todo find where dups originate from.
+
+                    self._scanMetadataLines(lines, idx, mitem)
+
+                    if not self._validateExinfItem(mitem):
+                        continue
+
                     self.log('_load, m3u item = %s'%mitem)
                     yield mitem
         
