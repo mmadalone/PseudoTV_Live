@@ -18,7 +18,39 @@
 
 # -*- coding: utf-8 -*-
 
-from globals    import *
+import datetime
+import json
+from collections import Counter
+from operator    import itemgetter
+
+from kodi_six   import xbmc
+
+from logger     import log
+from cache      import cacheit
+from variables  import (
+    ADDON_ID,
+    ADDON_NAME,
+    AUTOTUNE_TYPES,
+    COLOR_LOGO,
+    FIFTEEN,
+    LANGUAGE,
+    LIBRARYFLE_DEFAULT,
+    LIBRARYFLEPATH,
+    LOGO,
+    MAX_GUIDEDAYS,
+    MONITOR,
+    PLAYER,
+)
+from globals    import (
+    BUILTIN,
+    DIALOG,
+    PROPERTIES,
+    SETTINGS,
+    getChannelSuffix,
+    getJSON,
+    setJSON,
+    slugify,
+)
 from predefined import Predefined
 from resources  import Resources
 from channels   import Channels
