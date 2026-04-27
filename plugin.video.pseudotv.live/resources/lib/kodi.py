@@ -17,15 +17,71 @@
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 #
 # -*- coding: utf-8 -*-
-import json, uuid, zlib, base64
-
-from globals     import *
-from six.moves   import urllib 
-from fileaccess  import FileAccess
-from json2html   import Json2Html
+import base64
+import binascii
+import datetime
+import hashlib
+import json
+import os
+import platform
+import re
+import time
+import uuid
+import zlib
 from collections import Counter, OrderedDict
 from contextlib  import contextmanager, closing
+from operator    import itemgetter
+from socket      import gethostbyname, gethostname
+from threading   import Timer
+
+import pyqrcode
+from six.moves           import urllib
 from infotagger.listitem import ListItemInfoTag
+from json2html           import Json2Html
+
+from kodi_six   import xbmc, xbmcaddon, xbmcgui
+
+from logger     import log
+from cache      import Cache, cacheit
+from pool       import poolit, timerit
+from fileaccess import FileAccess
+from variables  import (
+    ACTION_PREVIOUS_MENU,
+    ADDON_ID,
+    ADDON_NAME,
+    ADDON_PATH,
+    ADDON_VERSION,
+    ALT_PLAYLISTS,
+    AUTOCLOSE_DELAY,
+    AUTOTUNE_TYPES,
+    BONJOURFLE,
+    BUSY_XML,
+    COLOR_LOGO,
+    DEFAULT_ENCODING,
+    DIALOG_SELECT,
+    DTFORMAT,
+    DUMMY_ICON,
+    FANART,
+    FIFTEEN,
+    GENREFLE,
+    ICON,
+    LANGUAGE,
+    LOGO,
+    LOGO_LOC,
+    M3UFLE,
+    MONITOR,
+    MUSIC_LISTITEM_TYPES,
+    MUSIC_TYPES,
+    PROMPT_DELAY,
+    PVR_CLIENT_ID,
+    PVR_CLIENT_LOC,
+    REAL_SETTINGS,
+    REMOTEFLE,
+    SELECT_DELAY,
+    TEMP_LOC,
+    VIDEO_LISTITEM_TYPES,
+    XMLTVFLE,
+)
 
 def slugify(s, lowercase=False):
   if lowercase: s = s.lower()
@@ -185,7 +241,7 @@ class Settings:
  
     def openGuide(self, instance=ADDON_NAME):
         def __match(label):
-            items = jsonRPC.getDirectory({"directory":baseURL}).get('files',[])
+            items = jsonRPC.getDirectory({"directory":baseURL}).get('files',[])  # noqa: F821 — closure over enclosing-scope jsonRPC bound below
             for item in items:
                 if label.lower() == item.get('label','').lower(): return item
             for item in items:
@@ -351,7 +407,7 @@ class Settings:
         
 
     def setSettingList(self, key, values):
-        return self.setSetting(key,('|').join(value))
+        return self.setSetting(key,('|').join(values))
                    
                    
     def setSettingFloat(self, key, value):  
@@ -1604,7 +1660,7 @@ class Dialog:
             return self.listitems.buildMenuListItem(resource['name'],resource['description'],resource['thumbnail'],url=resource['addonid'])
              
         def __getResources():
-            return jsonRPC.getAddons({"enabled":True})
+            return jsonRPC.getAddons({"enabled":True})  # noqa: F821 — closure over enclosing-scope jsonRPC bound below
         
         from jsonrpc import JSONRPC
         jsonRPC = JSONRPC()
@@ -1736,25 +1792,26 @@ class Dialog:
             if not enumSEL is None: return enumLST[enumSEL]
                   
         def order(params={}):
-            enums   = jsonRPC.getEnums("List.Sort",type="order") 
+            enums   = jsonRPC.getEnums("List.Sort",type="order")  # noqa: F821 — closure over enclosing buildDXSP scope (jsonRPC bound below)
             enumLST = list(sorted([_f for _f in enums if _f]))
             enumSEL = self.selectDialog(list(sorted([l.title() for l in enumLST])),header="Select order",preselect=enumLST.index(params.get('order',{}).get('direction','ascending')),useDetails=False, multi=False)
             if not enumSEL is None: return enumLST[enumSEL]
-            
+
         def method(params={}):
-            enums   = jsonRPC.getEnums("List.Sort",type="method") 
+            enums   = jsonRPC.getEnums("List.Sort",type="method")  # noqa: F821 — closure over enclosing buildDXSP scope (jsonRPC bound below)
             enumLST = list(sorted([_f for _f in enums if _f]))
             enumSEL = self.selectDialog(list(sorted([l.title() for l in enumLST])),header="Select method",preselect=enumLST.index(params.get('order',{}).get('method','random')),useDetails=False, multi=False)
             if not enumSEL is None: return enumLST[enumSEL]
-            
+
         def field(params={}, rule={}):
-            if   params.get('type') == 'songs':       enums = jsonRPC.getEnums("List.Filter.Fields.Songs"   , type='items')
-            elif params.get('type') == 'albums':      enums = jsonRPC.getEnums("List.Filter.Fields.Albums"  , type='items')
-            elif params.get('type') == 'artists':     enums = jsonRPC.getEnums("List.Filter.Fields.Artists" , type='items')
-            elif params.get('type') == 'tvshows':     enums = jsonRPC.getEnums("List.Filter.Fields.TVShows" , type='items')
-            elif params.get('type') == 'episodes':    enums = jsonRPC.getEnums("List.Filter.Fields.Episodes", type='items')
-            elif params.get('type') == 'movies':      enums = jsonRPC.getEnums("List.Filter.Fields.Movies"  , type='items')
-            elif params.get('type') == 'musicvideos': enums = jsonRPC.getEnums("List.Filter.Fields.MusicVideos")
+            # All `jsonRPC.getEnums` calls below close over enclosing buildDXSP scope (jsonRPC bound after this function definition).
+            if   params.get('type') == 'songs':       enums = jsonRPC.getEnums("List.Filter.Fields.Songs"   , type='items')  # noqa: F821
+            elif params.get('type') == 'albums':      enums = jsonRPC.getEnums("List.Filter.Fields.Albums"  , type='items')  # noqa: F821
+            elif params.get('type') == 'artists':     enums = jsonRPC.getEnums("List.Filter.Fields.Artists" , type='items')  # noqa: F821
+            elif params.get('type') == 'tvshows':     enums = jsonRPC.getEnums("List.Filter.Fields.TVShows" , type='items')  # noqa: F821
+            elif params.get('type') == 'episodes':    enums = jsonRPC.getEnums("List.Filter.Fields.Episodes", type='items')  # noqa: F821
+            elif params.get('type') == 'movies':      enums = jsonRPC.getEnums("List.Filter.Fields.Movies"  , type='items')  # noqa: F821
+            elif params.get('type') == 'musicvideos': enums = jsonRPC.getEnums("List.Filter.Fields.MusicVideos")  # noqa: F821
             elif params.get('type') == 'mixed':       enums = ['playlist', 'virtualfolder']
             else: return
             enumLST = list(sorted([_f for _f in enums if _f]))
@@ -1762,7 +1819,7 @@ class Dialog:
             if not enumSEL is None: return enumLST[enumSEL]
 
         def operator(params={}, rule={}):
-            enumLST = sorted(jsonRPC.getEnums("List.Filter.Operators"))
+            enumLST = sorted(jsonRPC.getEnums("List.Filter.Operators"))  # noqa: F821 — closure over enclosing buildDXSP scope (jsonRPC bound below)
             if rule.get("field") != 'date':
                 if 'inthelast'    in enumLST: enumLST.remove('inthelast')
                 if 'notinthelast' in enumLST: enumLST.remove('notinthelast')
