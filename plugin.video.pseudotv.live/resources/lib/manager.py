@@ -17,14 +17,73 @@
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 # -*- coding: utf-8 -*-
 
-from globals    import *
-from cache      import Cache
+import os
+import random
+import time
+from contextlib import contextmanager
+
+from kodi_six            import xbmc, xbmcgui
+from infotagger.listitem import ListItemInfoTag
+
+from logger     import log
+from cache      import Cache, cacheit
+from pool       import poolit
+from fileaccess import FileAccess
+from variables  import (
+    ADDON_NAME,
+    CHANNEL_LIMIT,
+    CHANNELFLE,
+    COLOR_AVAILABLE_CHANNEL,
+    COLOR_FAVORITE_CHANNEL,
+    COLOR_LOCKED_CHANNEL,
+    COLOR_LOGO,
+    COLOR_RADIO_CHANNEL,
+    COLOR_UNAVAILABLE_CHANNEL,
+    DB_TYPES,
+    DUMMY_ICON,
+    EPG_ARTWORK,
+    FANART,
+    FIFTEEN,
+    GROUP_TYPES,
+    HEADER,
+    ICON,
+    LANGUAGE,
+    LOGO,
+    LOGO_LOC,
+    MONITOR,
+    PLAYER,
+    SELECT_DELAY,
+    VFS_TYPES,
+    WEB_TYPES,
+)
+from globals    import (
+    BUILTIN,
+    DIALOG,
+    LISTITEMS,
+    PROPERTIES,
+    SETTINGS,
+    cleanLabel,
+    diffLSTDICT,
+    getChannelID,
+    isMixed_XSP,
+    isRadio,
+    requestURL,
+    validString,
+)
+from kodi       import (
+    dumpJSON,
+    findItemsInLST,
+    getMD5,
+    getThumb,
+    loadJSON,
+    setDictLST,
+    unquoteString,
+)
 from channels   import Channels
 from jsonrpc    import JSONRPC
 from rules      import RulesList
 from resources  import Resources
 from xsp        import XSP
-from infotagger.listitem import ListItemInfoTag
 
 # Actions
 ACTION_MOVE_LEFT     = 1
@@ -543,7 +602,7 @@ class Manager(xbmcgui.WindowXMLDialog):
                           'radio'   :__validateBool,
                           'favorite':__validateBool}.get(key,None)
         try:
-            with toggleSpinner():
+            with self.toggleSpinner():
                 retval, citem = KEY_VALIDATION(value,citem)
                 if retval is None:
                     DIALOG.notificationDialog(LANGUAGE(32077)%key.title()) 
