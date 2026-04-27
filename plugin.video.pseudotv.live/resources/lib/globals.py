@@ -35,7 +35,25 @@ from xml.etree.ElementTree import ElementTree, Element, SubElement, XMLParser, f
 from xml.etree.ElementTree import parse as ETparse
 from typing                import Dict, List, Union, Optional
 
-from variables           import *
+from variables           import *  # noqa: F403,F401 — legitimate PEP 8 re-export of variables/constants public API
+from variables           import (
+    ADDON_NAME,
+    ADDON_VERSION,
+    DEFAULT_ENCODING,
+    DTJSONFORMAT,
+    FIFTEEN,
+    HEADER,
+    HTML_ESCAPE,
+    LANGUAGE,
+    LOGO,
+    MONITOR,
+    PSEUDOTV_SLUG,
+    PVR_CLIENT_ID,
+    PVR_CLIENT_NAME,
+    REAL_SETTINGS,
+    VFS_TYPES,
+    WEB_TYPES,
+)
 from kodi_six            import xbmc, xbmcaddon, xbmcplugin, xbmcgui, xbmcvfs
 from contextlib          import contextmanager, closing
 from socket              import gethostbyname, gethostname
@@ -46,7 +64,15 @@ from operator            import itemgetter
 from logger              import log
 from cache               import Cache, cacheit
 from pool                import killit, timeit, poolit, executeit, timerit, threadit
-from kodi                import *
+from kodi                import *  # noqa: F403,F401 — legitimate PEP 8 re-export of kodi public API
+from kodi                import (
+    Dialog,
+    decodeString,
+    dumpJSON,
+    encodeString,
+    loadJSON,
+    setDictLST,
+)
 from fileaccess          import FileAccess, FileLock
 from collections         import defaultdict, Counter, OrderedDict
 from six.moves           import urllib 
