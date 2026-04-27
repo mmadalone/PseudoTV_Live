@@ -18,8 +18,12 @@
 #
 # -*- coding: utf-8 -*-
 
-import json,traceback
-from globals import *
+import json
+import traceback
+import time
+import datetime
+from variables import ADDON_ID, ADDON_VERSION, DTFORMAT, REAL_SETTINGS
+from kodi_six import xbmc, xbmcgui
 
 def log(event, level=xbmc.LOGDEBUG):
     """
