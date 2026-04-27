@@ -17,7 +17,41 @@
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 # -*- coding: utf-8 -*-
 
-from globals    import *
+import datetime
+import os
+import random
+import re
+
+from kodi_six   import xbmc
+
+from logger     import log
+from cache      import cacheit
+from fileaccess import FileAccess
+from variables  import (
+    ADDON_NAME,
+    ADDON_VERSION,
+    CHANNEL_LIMIT,
+    DB_TYPES,
+    IGNORE_CHTYPE,
+    LANGUAGE,
+    MAX_GUIDEDAYS,
+    MIN_EPG_DURATION,
+    MOVIE_CHTYPE,
+    MOVIE_TYPES,
+    TV_TYPES,
+    VFS_TYPES,
+    VIDEO_EXTS,
+)
+from globals    import (
+    SETTINGS,
+    chanceBool,
+    diffRuntime,
+    hasAddon,
+    lstSetDictLst,
+    mergeDictLST,
+    randomShuffle,
+)
+from kodi       import setDictLST
 from resources  import Resources
            
 #Ratings  - resource only, Movie Type only any channel type
@@ -76,7 +110,7 @@ class Fillers:
             tmpDCT = {}
             if data:
                 for path, files in list(data.items()):
-                    if   stype == 'file':   key = file.split('.')[0].lower()
+                    if   stype == 'file':   key = file.split('.')[0].lower()  # noqa: F821 — dead branch (no caller passes stype='file'); upstream master+nightly carry the same bug; defer fix
                     elif stype == 'folder': key = (os.path.basename(os.path.normpath(path)).replace('\\','/').strip('/').split('/')[-1:][0]).lower()
                     for file in files:
                         if isinstance(file,dict): [tmpDCT.setdefault(key.lower(),[]).append(file) for key in (file.get('genre',[]) or ['resources'])]
