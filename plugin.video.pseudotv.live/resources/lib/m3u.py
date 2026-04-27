@@ -19,7 +19,49 @@
 
 # -*- coding: utf-8 -*-
 
-from globals    import *
+import decimal
+import os
+import random
+import re
+import time
+from operator   import itemgetter
+
+from six.moves  import urllib
+
+from kodi_six   import xbmc
+
+from logger     import log
+from fileaccess import FileAccess, FileLock
+from variables  import (
+    ADDON_ID,
+    ADDON_NAME,
+    BROADCAST_URL,
+    CHANNEL_LIMIT,
+    COLOR_LOGO,
+    DVR_URL,
+    EPG_ARTWORK,
+    FANART,
+    HOST_LOGO,
+    LANGUAGE,
+    LIVE_URL,
+    LOGO,
+    M3UFLEPATH,
+    MONITOR,
+    PSEUDOTV_SLUG,
+    RADIO_URL,
+    RESUME_URL,
+    TEMP_LOC,
+    TV_URL,
+)
+from globals    import (
+    SETTINGS,
+    cleanImage,
+    getRecordID,
+    hasFile,
+    setURL,
+    slugify,
+)
+from kodi       import decodeString, encodeString, getThumb, quoteString
 from channels   import Channels
 
 M3U_TEMP = {"id"                : "",
@@ -76,7 +118,7 @@ class M3U:
         if file.startswith('http'):
             url  = file
             file = os.path.join(TEMP_LOC,slugify(url))
-            saveURL(url,file)
+            setURL(url,file)
             
         if FileAccess.exists(file): 
             fle   = FileAccess.open(file, 'r')
@@ -422,7 +464,7 @@ class M3U:
             start += decimal.Decimal(step)
 
         stations  = self.sortStations(stations)
-        chstart   = roundup((CHANNEL_LIMIT * len(CHAN_TYPES)+1))
+        chstart   = roundup((CHANNEL_LIMIT * len(CHAN_TYPES)+1))  # noqa: F821 — latent NameError, CHAN_TYPES never defined in addon (master 0.6.1q); preserved pending review.
         chmin     = int(chstart + (multiplier*1000))
         chmax     = int(chmin + (CHANNEL_LIMIT))
         chrange   = list(frange(chmin,chmax,0.1))
