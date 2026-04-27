@@ -43,7 +43,7 @@ from itertools           import cycle, chain, zip_longest, islice
 from xml.sax.saxutils    import escape, unescape
 from operator            import itemgetter
 
-from logger              import *
+from logger              import log
 from cache               import Cache, cacheit
 from pool                import killit, timeit, poolit, executeit, timerit, threadit
 from kodi                import *
@@ -405,7 +405,7 @@ def combineDicts(dict1={}, dict2={}):
 def mergeDictLST(dict1={},dict2={}):
     for k, v in list(dict2.items()):
         dict1.setdefault(k,[]).extend(v)
-        setDictLST()
+        setDictLST()  # no-op — uses default lst=[]; kept for parity with upstream pattern
     return dict1
     
 def lstSetDictLst(lst=[]):
@@ -488,7 +488,7 @@ def percentDiff(org, new):
         
 def pagination(list, end):
     for start in range(0, len(list), end):
-        yield seq[start:start+end]
+        yield list[start:start+end]
 
 def isCenterlized():
     default = 'special://profile/addon_data/plugin.video.pseudotv.live/cache'
