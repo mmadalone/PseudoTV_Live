@@ -19,9 +19,43 @@
 # https://github.com/xbmc/xbmc/blob/master/xbmc/input/Key.h
 
 # -*- coding: utf-8 -*-
-from globals   import *
+import binascii
+import json
+from ast  import literal_eval
+from math import floor
+
+from kodi_six  import xbmc, xbmcgui
+
+from logger    import log
+from pool      import timerit
+from variables import (
+    ACTION_MOVE_DOWN,
+    ACTION_MOVE_UP,
+    ACTION_PREVIOUS_MENU,
+    ACTION_SELECT_ITEM,
+    ADDON_ID,
+    BING_WAV,
+    COLOR_FANART,
+    COLOR_LOGO,
+    LANGUAGE,
+    LOGO,
+    ONNEXT_TIMER,
+    OSD_TIMER,
+    RULES_ACTION_OVERLAY_CLOSE,
+    RULES_ACTION_OVERLAY_OPEN,
+)
+from globals   import (
+    BUILTIN,
+    DIALOG,
+    LISTITEMS,
+    SETTINGS,
+    epochTime,
+    isFiller,
+    roundupDIV,
+    validString,
+)
+from kodi      import dumpJSON, encodeString, getThumb
 from resources import Resources
-from ast       import literal_eval
 
 WH, WIN = BUILTIN.getResolution()
 
