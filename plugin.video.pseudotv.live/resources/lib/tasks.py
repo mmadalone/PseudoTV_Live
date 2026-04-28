@@ -334,7 +334,13 @@ class Tasks(object):
                 if len(self.service.logoQue) > 0:
                     chname = FileAccess.loadJSON(self.service.logoQue.pop())
                     self.log("chkQUES, queuing = %s\nlogoQue:%s"%(len(self.service.logoQue),chname))
-                    self.service._que(library.resources.getLogo,-1,*(chname,library.resources.getCache(param.get('name')),True))
+                    # `chname` is the dict loaded from logoQue (queueLogo stores {'name': ...}).
+                    # Nightly upstream referenced `param.get('name')` here, but `param` is only
+                    # assigned in the postQue / jsonQue branches above — when the only non-empty
+                    # queue is logoQue, that's an UnboundLocalError that aborts chkQUES and stops
+                    # logo cache priming, which in turn fails getLogo lookups during channel tune
+                    # and the playback chain crashes downstream.
+                    self.service._que(library.resources.getLogo,-1,*(chname,library.resources.getCache(chname.get('name')),True))
         del library
         
                 
