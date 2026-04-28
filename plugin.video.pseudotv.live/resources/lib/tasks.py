@@ -131,7 +131,10 @@ class Tasks(object):
         
         if not self.service.isClient:
             self._chkEpochTimer('chkFiles'    , self.chkFiles         , 600   , 1)#10MINS
-            self._chkEpochTimer('chkLibrary'  , self.chkLibrary       , 3600  , 2)#1HR
+            # 'Library_Walk_Interval' (hours, default 12, range 1-72) controls how often
+            # the autotune library types are re-walked. Channel-build still fires immediately
+            # via _chkPropTimer('chkUpdate') on user actions, so this only paces background work.
+            self._chkEpochTimer('chkLibrary'  , self.chkLibrary       , max(1, SETTINGS.getSettingInt('Library_Walk_Interval') or 12) * 3600 , 2)
             
         #immediate run, bypass schedule
         self._chkPropTimer('chkPVRRefresh'    , self.chkPVRRefresh    , 1) 
@@ -179,6 +182,13 @@ class Tasks(object):
 
     def chkKodiSettings(self):
         self.log('chkKodiSettings')
+        # When 'Decouple_Kodi_PVR' is enabled, the user has opted to make pseudotv's
+        # Min_Days, Max_Days, and OSD_Timer authoritative. Skip the auto-sync from
+        # Kodi's PVR settings (epg.pastdaystodisplay / epg.futuredaystodisplay /
+        # pvrmenu.displaychannelinfo) so the user's values aren't overwritten hourly.
+        if SETTINGS.getSettingBool('Decouple_Kodi_PVR'):
+            self.log('chkKodiSettings, Decouple_Kodi_PVR enabled; skipping Kodi PVR sync')
+            return
         MIN_GUIDEDAYS = SETTINGS.setSettingInt('Min_Days' ,self.jsonRPC.getSettingValue('epg.pastdaystodisplay'     ,default=1))
         MAX_GUIDEDAYS = SETTINGS.setSettingInt('Max_Days' ,self.jsonRPC.getSettingValue('epg.futuredaystodisplay'   ,default=3))
         OSD_TIMER     = SETTINGS.setSettingInt('OSD_Timer',self.jsonRPC.getSettingValue('pvrmenu.displaychannelinfo',default=5))

@@ -284,7 +284,11 @@ class JSONRPC(object):
     def getStreamDetails(self, path, media='video'):
         if isStack(path): path = splitStacks(path)[0]
         param = {"method":"Files.GetFileDetails","params":{"file":path,"media":media,"properties":["streamdetails"]}}
-        return self.cacheJSON(param, life=datetime.timedelta(days=MAX_GUIDEDAYS), checksum=FileAccess._getMD5(path)).get('result',{}).get('filedetails',{}).get('streamdetails',{})
+        # Cache TTL is user-configurable via 'Streamdetails_Cache_Days' (default 30, range 1-90).
+        # Master-fork tunable: replaces the hardcoded MAX_GUIDEDAYS (3 days) so HDD-backed
+        # libraries don't re-spin the disk for unchanged files every few days.
+        ttl_days = max(1, SETTINGS.getSettingInt('Streamdetails_Cache_Days') or 30)
+        return self.cacheJSON(param, life=datetime.timedelta(days=ttl_days), checksum=FileAccess._getMD5(path)).get('result',{}).get('filedetails',{}).get('streamdetails',{})
 
 
     def getFileDetails(self, file, media='video', properties=["duration","runtime"]):

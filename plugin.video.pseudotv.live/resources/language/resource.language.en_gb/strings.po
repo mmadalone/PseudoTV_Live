@@ -2514,3 +2514,78 @@ msgstr ""
 msgctxt "#33311"
 msgid "Periodically populate channels based on your top 25 Kodi content by category.\nDisable to enable Channel Manager."
 msgstr ""
+
+# Master-fork HDD-quiet tunables (forward-ported on madteevee-on-nightly).
+# Re-apply from .bak after upstream addon updates.
+
+msgctxt "#30900"
+msgid "Decouple from Kodi PVR settings"
+msgstr ""
+
+msgctxt "#30901"
+msgid "Streamdetails cache (days)"
+msgstr ""
+
+msgctxt "#30902"
+msgid "Library walk interval (hours)"
+msgstr ""
+
+msgctxt "#30903"
+msgid "Skip PVR recordings scan"
+msgstr ""
+
+msgctxt "#30904"
+msgid "Skip PVR searches scan"
+msgstr ""
+
+msgctxt "#30905"
+msgid "Skip music library scan"
+msgstr ""
+
+msgctxt "#30906"
+msgid "Skip TV library aggregation"
+msgstr ""
+
+msgctxt "#30907"
+msgid "Skip movie library aggregation"
+msgstr ""
+
+msgctxt "#30908"
+msgid "Skip smartplaylist discovery"
+msgstr ""
+
+msgctxt "#33900"
+msgid "When enabled, pseudotv's Min Days, Max Days and OSD Timer stop auto-syncing from Kodi's PVR settings every hour. Required to set Max Days higher than Kodi's epg.futuredaystodisplay. NOTE: After changing Max Days, restart Kodi for downstream caches to pick up the new value."
+msgstr ""
+
+msgctxt "#33901"
+msgid "How long pseudotv keeps cached file streamdetails before re-querying Kodi. Longer = fewer HDD spinups but staler data after re-encodes in place. Default 30. Cache is keyed per file by path; file moves automatically invalidate."
+msgstr ""
+
+msgctxt "#33902"
+msgid "How often pseudotv refreshes its cache of TV/movie/music library types. Channel building still responds to event triggers immediately. Default 12. Increase to reduce HDD activity for libraries that don't change often; decrease if you autotune frequently."
+msgstr ""
+
+msgctxt "#33903"
+msgid "Skip the pvr://recordings/tv/active/ enumeration. Useful if you don't record from PVR. The recordings autotune source will be empty until disabled."
+msgstr ""
+
+msgctxt "#33904"
+msgid "Skip the pvr://search/tv/savedsearches/ enumeration. Useful if you don't use PVR saved searches. The searches autotune source will be empty until disabled."
+msgstr ""
+
+msgctxt "#33905"
+msgid "Skip the AudioLibrary.GetGenres scan. Useful if you don't use audio for pseudotv channels. Music Genres autotune list will be empty until disabled."
+msgstr ""
+
+msgctxt "#33906"
+msgid "Skip the VideoLibrary.GetTVShows scan (the heaviest single scanner). Useful if you don't autotune TV channels. TV Networks / TV Shows / TV Genres autotune lists will be empty until disabled."
+msgstr ""
+
+msgctxt "#33907"
+msgid "Skip the VideoLibrary.GetMovies scan. Useful if you don't autotune movie channels. Movie Genres / Movie Studios autotune lists will be empty until disabled."
+msgstr ""
+
+msgctxt "#33908"
+msgid "Skip the special://profile/playlists/{video,mixed,music}/ enumeration used by the autotune wizard. Does NOT affect channel building (your XSP-backed channels still resolve via Files.GetDirectory at build time). Playlists autotune list will be empty until disabled."
+msgstr ""
