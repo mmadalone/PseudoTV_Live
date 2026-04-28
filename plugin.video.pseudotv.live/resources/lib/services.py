@@ -82,7 +82,22 @@ class Player(xbmc.Player):
 
         
     def onAVStarted(self):
-        self.pendingItem.update({'invoked':-1,'pending':False,'item':self.getplayingItem()})
+        # _tune_ts filter (madteevee fork): drop stale onAVStarted events from aborted fast-zap
+        # tunes. Kodi back-fills onAVStarted in load-finish order, not user-zap order, so the
+        # LAST event often corresponds to the FIRST tune in a CH+/CH- burst. Without this guard
+        # player state anchors to the wrong channel; the overlay logo locks to it; and end-of-
+        # programme PlayMedia(callback) routes to the wrong channel. _max_tune_ts is monotonic
+        # and survives across onPlayBackStarted (which clears item/last but leaves it intact).
+        newItem = self.getplayingItem()
+        if newItem.get('isPseudoTV', False):
+            new_ts = newItem.get('_tune_ts', 0)
+            cur_ts = self.pendingItem.get('_max_tune_ts', 0)
+            if new_ts and cur_ts and new_ts < cur_ts:
+                self.log('onAVStarted, IGNORING stale event: _tune_ts=%.3f < max=%.3f (chid=%s, vid=%s)'%(new_ts, cur_ts, newItem.get('chid'), newItem.get('vid')), xbmc.LOGWARNING)
+                return
+            if new_ts > cur_ts:
+                self.pendingItem['_max_tune_ts'] = new_ts
+        self.pendingItem.update({'invoked':-1,'pending':False,'item':newItem})
         self.log('onAVStarted, pendingItem = %s'%(self.pendingItem))
         self._onPlay(self.pendingItem.get('item',{}))
         
