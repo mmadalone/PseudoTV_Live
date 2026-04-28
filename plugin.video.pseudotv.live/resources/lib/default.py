@@ -20,10 +20,15 @@
 from globals    import *
 from logger     import log
 from plugin     import Plugin
-from pool       import threadit, debounceit
+from pool       import threadit
 
-@debounceit(int(REAL_SETTINGS.getSetting('RPC_Delay')))
 def _run(mode, sysInfo={}):
+    # No @debounceit decorator — nightly added one with RPC_Delay (interpreted as seconds,
+    # default 1s) which coalesced rapid CH+/CH- presses into a single delayed plugin call.
+    # Intermediate setResolvedUrl invocations never fired, so Kodi PVR showed the chiron for
+    # each press but only opened the last channel after the user paused. Master fork ran each
+    # plugin invocation immediately and used MONITOR().waitForAbort(RPC_Delay/1000) as a
+    # tiny post-play thread-settle sleep below.
     Plugin(mode, sysInfo)
     
 if __name__ == '__main__':

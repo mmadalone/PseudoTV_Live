@@ -1,5 +1,8 @@
 ### NOTICE: The madteevee fork rides on upstream/nightly; things may still break! ####
 
+v.0.7.3+madteevee.11
+- Removed @debounceit decorator from default.py:_run. Nightly's RPC_Delay setting is interpreted as seconds (default 1s), which coalesced rapid CH+/CH- presses between PseudoTV channels — only the last press's plugin call survived; intermediate setResolvedUrl invocations never fired, so the PVR chiron showed for each but only the last channel actually opened after the user paused. Master fork had no debounce; each plugin invocation runs immediately. Restored.
+
 v.0.7.3+madteevee.10
 - interruptActivity / suspendActivity context managers now allow reentrant calls from the same thread. Was busy-waiting forever on its own per-thread flag (set by the outer context entry) on every reentry, deadlocking Manager.saveChanges (the channel-move save spinner that didn't dismiss + 'controls temporarily locked' toast).
 
