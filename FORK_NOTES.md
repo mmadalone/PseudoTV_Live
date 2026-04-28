@@ -1,13 +1,13 @@
 # mmadalone/PseudoTV_Live — fork notes
 
-Personal fork of [PseudoTV/PseudoTV_Live](https://github.com/PseudoTV/PseudoTV_Live) at upstream tag `0.6.1q`. Maintained for the **madteevee** Kodi install (RPi5 + HDD-backed media libraries) where upstream's stock build cadence and library-walk patterns were causing chronic HDD wake-ups, EPG generation gaps, and a few outright bugs.
+Personal fork of [PseudoTV/PseudoTV_Live](https://github.com/PseudoTV/PseudoTV_Live), rebased onto `upstream/nightly` (PseudoTV `0.7.3+nightly`) as of 2026-04-28. Maintained for the **madteevee** Kodi install (RPi5 + HDD-backed media libraries). The previous master-based branch (`0.6.1q+madteevee.14`) is preserved at tag `pre-nightly-rebase` and on archive branch `madteevee-patches-0.6.1q-archive` (after burn-in switch).
 
 ## Branch layout
 
 | Branch | Purpose |
 |---|---|
-| `master` | Mirrors upstream `PseudoTV/PseudoTV_Live:master`. Updated via `git fetch upstream && git push fork master` (no local changes here). |
-| `madteevee-patches` | Cumulative patches for our install. Squashed into a single commit so `git rebase upstream/master` is one merge resolution rather than ten. |
+| `madteevee-patches` | (current default) Patches on top of `upstream/nightly`. Each fix is its own commit so future cherry-picks against newer nightly tips stay surgical. |
+| `madteevee-patches-0.6.1q-archive` | Snapshot of the previous master-based fork, kept for reference / rollback. Tag `pre-nightly-rebase` points at the same tip. |
 
 ## Maintenance workflow
 
@@ -15,60 +15,38 @@ Personal fork of [PseudoTV/PseudoTV_Live](https://github.com/PseudoTV/PseudoTV_L
 # Pull upstream changes
 git fetch upstream
 
-# Update local mirror (no-op if upstream hasn't moved)
-git checkout master
-git merge --ff-only upstream/master
-git push fork master
-
-# Rebase our patches against upstream
+# Rebase our patches against the latest nightly
 git checkout madteevee-patches
-git rebase upstream/master
+git rebase upstream/nightly
 # resolve any conflicts, then:
 git push fork madteevee-patches --force-with-lease
 ```
 
-The cumulative-single-commit shape means rebases hit each conflict once instead of N times. If a future patch becomes its own logical unit (e.g. a new feature you'd consider PR'ing back upstream after burying the hatchet), do that one as a separate commit on top of the squashed base.
+Each forward-ported fix sits on its own commit (executescript wrapper, PSEUDOTV_SLUG, B3, B6, `_tune_ts`, build infra, logos addon) so that conflicts during a future `git rebase upstream/nightly` localize to the file that changed instead of one big merge resolution.
 
-**Post-rebase checklist** (upstream re-adds these on every rebase; we keep them deleted in the fork):
-- `git rm plugin.video.pseudotv.live/resources/lib/data/station.py plugin.video.pseudotv.live/resources/lib/data/channels_dataclass.py` — broken vestiges (SyntaxError + missing imports), see `findings.md` "Cleanup applied (2026-04-26)".
+## What the fork actually changes (post-rebase to nightly)
 
-## What the fork actually changes
+Most of the master-era fork patches landed in nightly upstream. The forward-ported set is now smaller — only the bugs nightly still has and the fork-specific decoupling.
 
-Single commit `bb2edfe` against `0.6.1q` (293 ins / 53 del, 10 files). The commit message has the full breakdown; high-level summary below.
+### Forward-ported from the master-era fork
 
-### Bug fixes (would be PR-worthy if not for the upstream relationship)
+| Commit | What broke (in nightly) | Where |
+|---|---|---|
+| `kodi.py executescript wrapper` | `xbmc.executescript()` is the wrong API — takes only a path, but callers pass `'foo.py, ARG1, ARG2'`. Comma-args become part of the filename and `CFileUtils::Exists()` fails, script never runs. Replaced with `xbmc.executebuiltin('RunScript(...)')` which parses commas correctly. | `kodi.py:1193-1200` |
+| `PSEUDOTV_SLUG` decoupling | nightly generates chids via `Globals._slugify(ADDON_NAME)`. Renaming the addon to `PseudoTV Live (madteevee)` slugifies to a new value; existing channels saved with the old slug stop matching → `isPseudoTV` check fails → channels appear non-PseudoTV. The constant pins the slug to `'PseudoTV_Live'` regardless of display name. | `constants.py:53`, `globals.py:48,54`, `services.py:115`, `m3u.py:277`, `xmltvs.py:239` |
+| B3 don't-clrStation-on-empty | nightly's per-channel `else: __clrStation(citem)` wipes M3U/XMLTV references whenever a build returns empty (BUILD_AT_MAX, paginate-stalled, or transient). Master B3 only clears via the explicit reset flow (channel manager) — never from the build path. | `builder.py:289-298` |
+| B6 paginate-past-extras | when `dirList` drains but pagination shows more content (`end < total`) and the page is unfilled, re-insert the last path. Handles "first page is all extras / 3D / sub-min-duration / strm" — without it, channels with skewed first pages bail empty. Capped at `MAX_BUILDFILELIST_REPARSE=10`. | `builder.py:401-432`, `constants.py:78` |
+| `_tune_ts` filter (fast-zap) | Kodi back-fills `onAVStarted` in load-finish order, not user-zap order. During fast CH+/CH- bursts the LAST event often corresponds to the FIRST tune, anchoring player state to the wrong channel. Each `default.py` invocation stamps a per-tune timestamp; `services.onAVStarted` drops events whose `_tune_ts` is older than the max seen so far (gated on `isPseudoTV`). | `default.py:52-58`, `services.py:84-101` |
 
-| # | Severity | What broke | Where |
-|---|---|---|---|
-| 1 | Spammed log | `loadRules: list assignment index out of range` × 161 in one log; `EvenShowsRule` silently dropped from every channel | `rules.py:111`, `builder.py:_injectRules` |
-| 2 | EPG gaps | Channels whose first `Files.GetDirectory` page was entirely filtered (extras / strm / 3D) bailed empty; `__clrChannel` then **deleted** them | `builder.py:buildFileList` |
-| 3 | Channel loss | Every transient build failure (RPC timeout, interrupt, filter-races) wiped the channel entirely; recovery required a full rebuild | `builder.py:build()` |
-| 4 | UI confusion | `BUILD_AT_MAX` (max-days reached, station refresh OK) and `BUILD_INTERRUPTED` (transient, leave state alone) both returned bare `True`; an interrupt-during-build left M3U entries with no programmes | `builder.py:getFileList`, sentinels added |
-| 5 | Cache thrash | TV Shows / Recommended / Services TTLs were `hours=MAX_GUIDEDAYS` (= 3 hours) instead of `days=` (= 3 days). Already fixed in nightly | `library.py:updateLibrary` |
-| 6 | Misleading toast | "Unable to reload <PVR> while playing..." fired whenever `Enable_PVR_RELOAD=false`, regardless of whether anything was playing — `string #30023` is unrelated to the actual gate | `globals.py:togglePVR` |
-| 7 | **EPG never extends** | `clearchannels` simplecache row never drained because `setResetChannels` was add-only. Stuck channel IDs caused `__clrChannel` on every build, wiping future programmes and rebuilding from `now`. **This was the actual cause of "Rebuild Library doesn't extend the EPG"** | `kodi.py:setResetChannels`, `builder.py:setResetChannels` call site |
+### Already in nightly upstream (no longer in the fork)
 
-Bug #7 is probably affecting a lot of upstream users without their knowledge.
+These were master-era fork patches that nightly merged. The fork no longer carries them:
 
-### Tunables added (HDD activity reduction; all defaults preserve current behaviour)
-
-| Setting | Default | Range | Effect |
-|---|---|---|---|
-| `Decouple_Kodi_PVR` | false | bool | Stops `chkKodiSettings` overwriting `Min_Days` / `Max_Days` / `OSD_Timer` from Kodi PVR every hour. Required to set `Max_Days` higher than Kodi's `epg.futuredaystodisplay`. |
-| `Streamdetails_Cache_Days` | 30 | 1-90 | Replaces hardcoded `MAX_GUIDEDAYS` (3) for the `Files.GetFileDetails` cache. |
-| `Library_Walk_Interval` | 12 | 1-72 (h) | Replaces hardcoded `3600` for `chkLibrary` task scheduling. Channel-build still triggers immediately via `chkUpdate` event-trigger on user actions. |
-| `Skip_PVR_Recordings` | false | bool | Skips `getPVRRecordings` (`pvr://recordings/tv/active/`). |
-| `Skip_PVR_Searches` | false | bool | Skips `getPVRSearches` (`pvr://search/tv/savedsearches/`). |
-| `Skip_Music_Library` | false | bool | Skips `getMusicInfo` (`AudioLibrary.GetGenres`). |
-| `Skip_TV_Library` | false | bool | Skips `getTVInfo` (`VideoLibrary.GetTVShows` — biggest single scanner). |
-| `Skip_Movie_Library` | false | bool | Skips `getMovieInfo` (`VideoLibrary.GetMovies`). |
-| `Skip_Smartplaylists_Scan` | false | bool | Skips `getPlaylists` (autotune scan; doesn't affect channel building). |
-
-Defaults match upstream behaviour, so a fresh install behaves identically. Skipped types are gated at the `__funcs()` dict level so the progress dialog doesn't even flash their type names — not just a function-level no-op.
-
-### Minor
-
-- `RPC_Timer` default 3 → 5 (300 s) for users with large XSP libraries on slow disks.
+- EvenShowsRule schema (Issue #1) — nightly's version has 3 slots wired to Force_Episode/Force_Random.
+- Quota / PageLimit rule consolidation — nightly merged these as `HandleLimits` (rule 951).
+- Library-walk tunables (`Decouple_Kodi_PVR`, `Streamdetails_Cache_Days`, `Library_Walk_Interval`, `Skip_*`) — superseded by nightly's `Cache_MEM_Limit`, recursive-depth controls, and Client Only mode.
+- `setResetChannels` clearchannels-drain fix (Issue #7) — fixed differently in nightly via the singleton XMLTVS pattern.
+- `RPC_Timer` rename — nightly renamed to `RPC_Wait`, the value carries through default.
 
 ## How to apply this fork to a Kodi install
 
@@ -110,8 +88,7 @@ The fork ships its own Kodi addon repo so the live install can auto-update from 
 
 | Branch | Role |
 |---|---|
-| `master` | upstream mirror (no edits here) |
-| `madteevee-patches` | our source patches + `release.py` + `repository.mmadalone.pseudotv/` |
+| `madteevee-patches` | our source patches on top of `upstream/nightly` + `release.py` + `repository.mmadalone.pseudotv/` |
 | `gh-pages` | published Kodi repo (manifest + zips). Served via `raw.githubusercontent.com` directly (Pages is disabled on this fork — see below). |
 
 Repo URL: **https://raw.githubusercontent.com/mmadalone/PseudoTV_Live/gh-pages/addons.xml**
@@ -127,7 +104,7 @@ GitHub denies enabling Pages on repos forked from `PseudoTV/PseudoTV_Live` ("Pag
 1. Download the bootstrap zip from https://raw.githubusercontent.com/mmadalone/PseudoTV_Live/gh-pages/repository.mmadalone.pseudotv/repository.mmadalone.pseudotv-1.0.1.zip
 2. In Kodi: **Settings → System → Add-ons → Unknown sources** = ON (required to install from zip).
 3. **Settings → Add-ons → Install from zip file** → pick the downloaded zip.
-4. After install, **Settings → Add-ons → Install from repository → mmadalone PseudoTV Live (madteevee) → Video add-ons → PseudoTV Live (madteevee)** → Update / Install. The fork's `0.6.1q+madteevee.X` will replace upstream's `0.6.1q`.
+4. After install, **Settings → Add-ons → Install from repository → mmadalone PseudoTV Live (madteevee) → Video add-ons → PseudoTV Live (madteevee)** → Update / Install. The fork's `0.7.3+madteevee.X` will replace upstream's `0.7.3+nightly` (or any earlier version).
 5. Optional: leave the upstream `repository.pseudotv` enabled too so its resource packs keep updating from upstream — most of them aren't mirrored in the fork repo.
    - Exception: `resource.images.pseudotv.logos.madteevee` IS shipped from the fork repo (a parallel logos addon with the same content as upstream's `resource.images.pseudotv.logos` plus custom additions). Different addon ID so it coexists with upstream's official one.
 
@@ -141,27 +118,27 @@ The release pipeline is automated via `.github/workflows/release.yml`. Pushing a
 cd ~/_Claude_projects/PseudoTV_Live
 
 # 1. bump version in plugin.video.pseudotv.live/addon.xml
-#    (e.g. 0.6.1q+madteevee.1 -> 0.6.1q+madteevee.2). Use '+' separator
-#    so Kodi treats it as newer than upstream's 0.6.1q.
+#    (e.g. 0.7.3+madteevee.1 -> 0.7.3+madteevee.2). Use '+' separator
+#    so Kodi treats it as newer than upstream's 0.7.3+nightly.
 #    Bump resource.images.pseudotv.logos.madteevee/addon.xml in lockstep:
-#    its version's last digit MUST match the plugin's madteevee.NN
-#    (plugin v0.6.1q+madteevee.14 → logos v0.0.14, etc.).
+#    plugin .madteevee.N → logos 0.1.N (epoch-shifted from the master-era
+#    0.0.N to clear Kodi's semver upgrade gate after the rebase reset).
 #    (Optionally also bump repository.mmadalone.pseudotv/addon.xml when the
 #    repo addon itself changes — rare.)
 
 # 2. commit + push the version bump
 git add plugin.video.pseudotv.live/addon.xml resource.images.pseudotv.logos.madteevee/addon.xml
-git commit -m "bump: pseudotv 0.6.1q+madteevee.2"
+git commit -m "bump: pseudotv 0.7.3+madteevee.2"
 git push fork madteevee-patches
 
 # 3. tag and push the tag — this is what triggers the release workflow
-git tag -a v0.6.1q-madteevee.2 -m "fork release v0.6.1q+madteevee.2"
-git push fork v0.6.1q-madteevee.2
+git tag -a v0.7.3-madteevee.2 -m "fork release v0.7.3+madteevee.2"
+git push fork v0.7.3-madteevee.2
 ```
 
 GitHub then runs the workflow: builds zips + `addons.xml`, force-replaces `gh-pages` with the new `_site/`, creates a Release in the Releases tab. Within ~5 min (raw.githubusercontent.com CDN cache), Kodi will see the new version on **Add-ons → Check for updates**.
 
-The tag uses `-` instead of `+` because some git tooling chokes on `+` in tag names; the addon version itself stays `0.6.1q+madteevee.2` per PEP-440 local-version semantics.
+The tag uses `-` instead of `+` because some git tooling chokes on `+` in tag names; the addon version itself stays `0.7.3+madteevee.2` per PEP-440 local-version semantics.
 
 #### Manual release (fallback if Actions disabled / for testing)
 
@@ -182,8 +159,8 @@ git push fork gh-pages
 
 # 4. tag and push
 git checkout madteevee-patches
-git tag -a v0.6.1q-madteevee.2 -m "fork release v0.6.1q+madteevee.2"
-git push fork madteevee-patches v0.6.1q-madteevee.2
+git tag -a v0.7.3-madteevee.2 -m "fork release v0.7.3+madteevee.2"
+git push fork madteevee-patches v0.7.3-madteevee.2
 ```
 
 ### Mirroring more addons in the fork repo
