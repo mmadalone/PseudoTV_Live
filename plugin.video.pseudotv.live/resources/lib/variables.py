@@ -64,17 +64,26 @@ class Globals:
         
     @staticmethod
     def _decodePlot(text: str = '') -> dict:
-        # FileAccess._decodeString returns dict (pickle path), str (raw decode path), or ''
-        # (empty/error). The function annotation pledges dict, and several callers
-        # (xmltvs.__filterProgrammes:264, services.getplayingItem:138) chain `.get('citem',{})`
-        # immediately. Coerce non-dict returns so the contract is enforced — without this,
-        # any programme whose 'desc' decoded to a non-pickle string crashes the cleanProgrammes
-        # pipeline, _load fails, XMLTVDATA stays empty, and _save KeyError-cascades.
+        # Decode both encoding formats found in the wild:
+        #   - nightly upstream encodes via pickle (FileAccess._decodeString returns dict).
+        #   - master-era fork encoded via dumpJSON+UTF-8 (returns a JSON string), and
+        #     iptvsimple may still have those plots cached in its EPG database long after
+        #     the addon upgraded to nightly. Without the JSON fallback, matchChannel cannot
+        #     decode broadcastnow.plot from those cached entries — citem.id is missing,
+        #     no PVR item is found, and channel tunes silently no-op.
+        # Returns {} for any decode failure or unrecognised payload.
         if isinstance(text, str):
             plot = re.search(r'\[COLOR item=\"(.+?)\"]\[/COLOR]', text)
             if plot:
                 decoded = FileAccess._decodeString(plot.group(1))
-                return decoded if isinstance(decoded, dict) else {}
+                if isinstance(decoded, dict): return decoded
+                if isinstance(decoded, str) and decoded:
+                    try:
+                        import json as _json
+                        parsed = _json.loads(decoded)
+                        if isinstance(parsed, dict): return parsed
+                    except Exception:
+                        pass
         return {}
         
     @staticmethod
