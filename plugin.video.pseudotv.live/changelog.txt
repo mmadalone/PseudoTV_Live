@@ -1,5 +1,8 @@
 ### NOTICE: The madteevee fork rides on upstream/nightly; things may still break! ####
 
+v.0.7.3+madteevee.12
+- Fixed Utility menu addon error (Settings → Miscellaneous → Utility menu). buildMenu in utilities.py referenced _runCleanup/_runReload/_runRestart/_runFillers/_runLibrary/_runCPUBench/_runIOBench as bare names, but nightly converted them to @staticmethod on Utilities — bare-name lookup NameErrored before the menu could open. Refer through the class so static lookup resolves. Also added the missing _runLibrary static method (referenced at buildMenu line 195 but not defined anywhere in nightly upstream — body mirrors upstream/master). Same fix applied to the _runUpdate call inside _runCleanup at line 168.
+
 v.0.7.3+madteevee.11
 - Removed @debounceit decorator from default.py:_run. Nightly's RPC_Delay setting is interpreted as seconds (default 1s), which coalesced rapid CH+/CH- presses between PseudoTV channels — only the last press's plugin call survived; intermediate setResolvedUrl invocations never fired, so the PVR chiron showed for each but only the last channel actually opened after the user paused. Master fork had no debounce; each plugin invocation runs immediately. Restored.
 
