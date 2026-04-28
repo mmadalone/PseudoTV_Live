@@ -109,19 +109,21 @@
                 <!-- </setting> -->
             </group>
             <group id="3" label="30160">
-                <setting id="Launch_SmartplaylistEditor" type="string" label="30138" help="33138" parent="33138">
+                <!-- madteevee: converted from type="string"+control-button+close=true to type="action".
+                     The old pattern fires <data> while the addon-settings dialog is still modal, so
+                     ActivateWindow is rejected with "active modal dialogs" before <close> takes effect.
+                     type="action" defers ActivateWindow until after the settings dialog dismisses,
+                     which is how Launch_IPTVSimple already works in this same panel. -->
+                <setting id="Launch_SmartplaylistEditor" type="action" label="30138" help="33138" parent="33138">
                     <level>1</level>
-                    <default/>
+                    <data>ActivateWindow(10025,"library://video/playlists.xml/",return)</data>
                     <constraints>
                         <allowempty>true</allowempty>
                     </constraints>
-                    <control type="button" format="action">
-                        <data>ActivateWindow(10025,"library://video/playlists.xml/")</data>
-                        <close>true</close>
-                    </control>
                 </setting>
-                <setting id="Launch_NodeEditor" type="string" label="30137" help="33137">
+                <setting id="Launch_NodeEditor" type="action" label="30137" help="33137">
                     <level>1</level>
+                    <data>ActivateWindow(10001,plugin://plugin.library.node.editor,return)</data>
                     <constraints>
                         <allowempty>true</allowempty>
                     </constraints>
@@ -133,21 +135,13 @@
                             </and>
                         </dependency>
                     </dependencies>
-                    <control type="button" format="action">
-                        <data>ActivateWindow(10001,plugin://plugin.library.node.editor)</data>
-                        <close>true</close>
-                    </control>
                 </setting>
-                <setting id="Launch_LiveSettings" type="string" label="30157" help="33157">
+                <setting id="Launch_LiveSettings" type="action" label="30157" help="33157">
                     <level>1</level>
-                    <default/>
+                    <data>ActivateWindow(10021)</data>
                     <constraints>
                         <allowempty>true</allowempty>
                     </constraints>
-                    <control type="button" format="action">
-                        <data>ActivateWindow(10021)</data>
-                        <close>true</close>
-                    </control>
                 </setting>
                 <setting id="Launch_IPTVSimple" type="action" label="30071" help="33071">
                     <level>1</level>
