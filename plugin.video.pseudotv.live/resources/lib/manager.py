@@ -410,7 +410,7 @@ class Manager(xbmcgui.WindowXMLDialog):
                      "rules"    : {'func':__getRule  , 'kwargs':{'citem':citem, 'rules' :self.rule.loadRules([citem]).get(citem['id'],{})}},
                      "radio"    : {'func':__getBool  , 'kwargs':{'citem':citem, 'state' :citem.get('radio',False)}},
                      "favorite" : {'func':__getBool  , 'kwargs':{'citem':citem, 'state' :citem.get('favorite',False)}},
-                     "enabled"  : {'func':__getBool  , 'kwargs':{'citem':citem, 'state' :citem.get('enabled',False)}},
+                     "enabled"  : {'func':__getBool  , 'kwargs':{'citem':citem, 'state' :citem.get('enabled',True)}},
                      "changed"  : {'func':__getBool  , 'kwargs':{'citem':citem, 'state' :citem.get('changed',False)}}}
               
         action = KEY_INPUT.get(key) 
