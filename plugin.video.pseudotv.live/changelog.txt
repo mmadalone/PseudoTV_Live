@@ -1,5 +1,8 @@
 ### NOTICE: The madteevee fork rides on upstream/nightly; things may still break! ####
 
+v.0.7.3+madteevee.17
+- _openAfterCloseSettings now uses Dialog.Close(all,true) instead of Dialog.Close(addonsettings,true). v.16 traces confirmed the named-form Dialog.Close fired and the 200ms wait elapsed, but ActivateWindow was still refused with "active modal dialogs" — the named close didn't actually dismiss the modal under Kodi 21 (either name mismatch or a stacked dialog above the addon-settings one). Dialog.Close(all,true) is reliable: closes every active modal regardless of name. Wait bumped 200ms→300ms for safety.
+
 v.0.7.3+madteevee.16
 - Smartplay editor / Node editor / PVR & Live TV settings buttons now actually open their target windows. Earlier attempts via XML alone (v.13/v.14/v.15) failed because Kodi refuses ActivateWindow while the addon-settings modal is still on screen ("Activate of window 'NNNNN' refused because there are active modal dialogs"), and ActivateWindow — unlike Addon.OpenSettings used by Launch_IPTVSimple — has no built-in dialog-stacking handling. Routed the three buttons through the existing Utilities._run RunScript dispatcher (utilities.py) using a small _openAfterCloseSettings helper that issues Dialog.Close(addonsettings,true), waits 200ms via xbmc.Monitor().waitForAbort, then fires ActivateWindow. Settings.xml entries keep their v.15 schema (type="action" + <control type="button" format="action"><close>true</close></control>) so the v.14 "missing <control>" regression cannot recur.
 

@@ -196,12 +196,16 @@ class Utilities(object):
         # madteevee: settings buttons whose <data> fires ActivateWindow get
         # refused by Kodi while the addon-settings modal is still up
         # ("Activate of window 'NNNNN' refused because there are active modal
-        # dialogs"). Close the modal explicitly, give Kodi's main thread a
-        # beat to actually dismiss it, then activate. Used by the Smartplay
+        # dialogs"). Close all modals explicitly, give Kodi's main thread a
+        # beat to actually dismiss them, then activate. Used by the Smartplay
         # editor / Node editor / PVR & Live TV settings launchers via the
         # _run dispatcher (see settings.xml RunScript wiring).
-        BUILTIN.executebuiltin('Dialog.Close(addonsettings,true)')
-        xbmc.Monitor().waitForAbort(0.2)
+        # Dialog.Close(all,true) is used instead of the named 'addonsettings'
+        # form because v.16 traces showed the named form firing successfully
+        # but the modal was still active 200ms later (either name mismatch
+        # under Kodi 21 or a stacked dialog above the addon-settings one).
+        BUILTIN.executebuiltin('Dialog.Close(all,true)')
+        xbmc.Monitor().waitForAbort(0.3)
         BUILTIN.executebuiltin('ActivateWindow(%s)'%(activate_args))
 
     @staticmethod
