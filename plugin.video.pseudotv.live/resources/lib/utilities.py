@@ -165,20 +165,28 @@ class Utilities(object):
                 for key in keys:
                     if FileAccess.delete(files[key]): DIALOG.notificationDialog(LANGUAGE(32127)%(key.replace(':','')))
                     else:                             DIALOG.notificationDialog('Utilities: %s %s'%((LANGUAGE(32127)%(key.replace(':',''))),LANGUAGE(32052)))
-        _runUpdate(full)
+        Utilities._runUpdate(full)
 
     @staticmethod
     def _runReload():
         if DIALOG.yesnoDialog('Utilities: %s?'%(LANGUAGE(32121)%(xbmcaddon.Addon(PVR_CLIENT_ID).getAddonInfo('name')))):
             PROPERTIES.setPropTimer('chkPVRRefresh')#refresh pvr guide
-            
+
     @staticmethod
     def _runRestart():
         return PROPERTIES.setPendingRestart()
-            
+
     @staticmethod
     def _runFillers():
         return PROPERTIES.setPropTimer('chkFillers')
+
+    @staticmethod
+    def _runLibrary():
+        # madteevee: missing in nightly upstream — buildMenu line 195 references it.
+        # Body mirrors upstream/master utilities.py:_runLibrary.
+        PROPERTIES.setPropertyBool('ForceLibrary',True)
+        PROPERTIES.setEpochTimer('chkLibrary')
+        DIALOG.notificationDialog('%s %s'%(LANGUAGE(30199),LANGUAGE(30200)))
 
     @staticmethod
     def _runUpdate(full=False):
@@ -187,15 +195,18 @@ class Utilities(object):
               
     @staticmethod
     def buildMenu(select=None):
+        # madteevee: nightly upstream wrote these as bare names but the targets are
+        # @staticmethod on Utilities, so the closure can't resolve them and Utility menu
+        # NameErrors before opening. Refer through the class so static lookup works.
         items = [
-                 {'label':LANGUAGE(32117)                  ,'label2':LANGUAGE(32120),'icon':LOGO_COLOR,'func':_runCleanup  , 'hide':True ,'args':(False,)}, #"Rebuild M3U/XMLTV"
-                 {'label':LANGUAGE(32118)                  ,'label2':LANGUAGE(32119),'icon':LOGO_COLOR,'func':_runCleanup  , 'hide':True ,'args':(True,)}, #"Clean Start"
-                 {'label':LANGUAGE(32121)%(PVR_CLIENT_NAME),'label2':LANGUAGE(32122),'icon':LOGO_COLOR,'func':_runReload   , 'hide':False},#"Force PVR reload"
-                 {'label':LANGUAGE(32123)                  ,'label2':LANGUAGE(32124),'icon':LOGO_COLOR,'func':_runRestart  , 'hide':False},#"Force PTVL reload"
-                 {'label':LANGUAGE(32159)                  ,'label2':LANGUAGE(33159),'icon':LOGO_COLOR,'func':_runLibrary  , 'hide':False},
-                 {'label':LANGUAGE(32180)                  ,'label2':LANGUAGE(33180),'icon':LOGO_COLOR,'func':_runFillers  , 'hide':False},
-                 {'label':LANGUAGE(30205)                  ,'label2':LANGUAGE(30205),'icon':LOGO_COLOR,'func':_runCPUBench , 'hide':False},
-                 {'label':LANGUAGE(30208)                  ,'label2':LANGUAGE(30208),'icon':LOGO_COLOR,'func':_runIOBench  , 'hide':False},
+                 {'label':LANGUAGE(32117)                  ,'label2':LANGUAGE(32120),'icon':LOGO_COLOR,'func':Utilities._runCleanup  , 'hide':True ,'args':(False,)}, #"Rebuild M3U/XMLTV"
+                 {'label':LANGUAGE(32118)                  ,'label2':LANGUAGE(32119),'icon':LOGO_COLOR,'func':Utilities._runCleanup  , 'hide':True ,'args':(True,)}, #"Clean Start"
+                 {'label':LANGUAGE(32121)%(PVR_CLIENT_NAME),'label2':LANGUAGE(32122),'icon':LOGO_COLOR,'func':Utilities._runReload   , 'hide':False},#"Force PVR reload"
+                 {'label':LANGUAGE(32123)                  ,'label2':LANGUAGE(32124),'icon':LOGO_COLOR,'func':Utilities._runRestart  , 'hide':False},#"Force PTVL reload"
+                 {'label':LANGUAGE(32159)                  ,'label2':LANGUAGE(33159),'icon':LOGO_COLOR,'func':Utilities._runLibrary  , 'hide':False},
+                 {'label':LANGUAGE(32180)                  ,'label2':LANGUAGE(33180),'icon':LOGO_COLOR,'func':Utilities._runFillers  , 'hide':False},
+                 {'label':LANGUAGE(30205)                  ,'label2':LANGUAGE(30205),'icon':LOGO_COLOR,'func':Utilities._runCPUBench , 'hide':False},
+                 {'label':LANGUAGE(30208)                  ,'label2':LANGUAGE(30208),'icon':LOGO_COLOR,'func':Utilities._runIOBench  , 'hide':False},
                  ]
 
         with BUILTIN.busy_dialog():
