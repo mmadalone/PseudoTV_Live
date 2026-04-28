@@ -9,11 +9,51 @@ import os
 from shutil import copyfile
 
 
+class _KodiFile:
+    """Thin wrapper that maps Kodi xbmcvfs.File semantics onto a Python file object.
+
+    Kodi's xbmcvfs.File.read([bytes]) interprets bytes=0 (and omitted) as "read
+    all"; Python's open().read(0) reads zero bytes. Without this wrapper, addon
+    code that calls fle.read() (default bytes=0) gets an empty string and the
+    caller fails downstream (e.g. getJSON returns {}).
+    """
+
+    def __init__(self, f):
+        self._f = f
+
+    def read(self, num_bytes=0):
+        return self._f.read(-1 if num_bytes <= 0 else num_bytes)
+
+    def readBytes(self, num_bytes=0):
+        return self._f.read(-1 if num_bytes <= 0 else num_bytes)
+
+    def write(self, data):
+        return self._f.write(data)
+
+    def close(self):
+        return self._f.close()
+
+    def seek(self, *args):
+        return self._f.seek(*args)
+
+    def tell(self):
+        return self._f.tell()
+
+    def __getattr__(self, name):
+        return getattr(self._f, name)
+
+
 def File(path, flags='r'):
-    """A reimplementation of the xbmcvfs File() function"""
+    """A reimplementation of the xbmcvfs File() function.
+
+    Kodi's real xbmcvfs.File() auto-resolves special:// paths internally; mirror
+    that here so test imports that read addon-data files succeed when the stub
+    payload is staged under tests/userdata/. Returns a _KodiFile wrapper so
+    read(0)-means-all matches Kodi's behaviour, not Python's.
+    """
     assert isinstance(path, str)
     assert isinstance(flags, str)
-    return open(path, flags)  # pylint: disable=consider-using-with
+    return _KodiFile(open(translatePath(path), flags))  # pylint: disable=consider-using-with
 
 
 def Stat(path):
