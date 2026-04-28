@@ -110,11 +110,11 @@ class Fillers:
             tmpDCT = {}
             if data:
                 for path, files in list(data.items()):
-                    if   stype == 'file':   key = file.split('.')[0].lower()  # noqa: F821 — dead branch (no caller passes stype='file'); upstream master+nightly carry the same bug; defer fix
-                    elif stype == 'folder': key = (os.path.basename(os.path.normpath(path)).replace('\\','/').strip('/').split('/')[-1:][0]).lower()
+                    folder_key = (os.path.basename(os.path.normpath(path)).replace('\\','/').strip('/').split('/')[-1:][0]).lower() if stype == 'folder' else None
                     for file in files:
                         if isinstance(file,dict): [tmpDCT.setdefault(key.lower(),[]).append(file) for key in (file.get('genre',[]) or ['resources'])]
                         else:
+                            key = file.split('.')[0].lower() if stype == 'file' else folder_key
                             dur = self.jsonRPC.getDuration(os.path.join(path,file), accurate=True)
                             if dur > 0: tmpDCT.setdefault(key.lower(),[]).append({'file':os.path.join(path,file),'duration':dur,'label':'%s - %s'%(path.strip('/').split('/')[-1:][0],file.split('.')[0])})
             self.log('[%s] buildSource, __sortItems: stype = %s, items = %s'%(self.citem.get('id'),stype,len(tmpDCT)))
