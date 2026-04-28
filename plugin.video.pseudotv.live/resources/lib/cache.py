@@ -281,7 +281,7 @@ class _Cache(object):
                     retries += 1
                     self.log("_execute_sql, retrying DB commit...", xbmc.LOGWARNING)
                     self.service._sleep(LOCK_MAX_FILE_DELAY)
-                except Exception:
+                except Exception as e:
                     self.log("_execute_sql, connection ERROR ! -- %s" % str(e), xbmc.LOGERROR)
                     break
                     

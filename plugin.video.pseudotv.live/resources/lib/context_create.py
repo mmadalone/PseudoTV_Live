@@ -94,7 +94,7 @@ def _auto(start=1, count=-1):
                     select = DIALOG.selectDialog(menu,multi=False)
                     if not select is None: 
                         try: return eval(menu[select].getPath())()
-                        except Exception: log("Create: _auto, failed! %s"%(e), xbmc.LOGERROR)
+                        except Exception as e: log("Create: _auto, failed! %s"%(e), xbmc.LOGERROR)
                 return False #Cancel
         else: return True #Has Channnels / No Kodi Library
         

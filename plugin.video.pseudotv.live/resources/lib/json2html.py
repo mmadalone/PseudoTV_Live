@@ -24,8 +24,8 @@ import json as json_parser
 
 if sys.version_info[:2] < (3, 0):
     from cgi import escape as html_escape
-    text = unicode
-    text_types = (unicode, str)
+    text = unicode  # noqa: F821 — Python 2 dead branch; Kodi xbmc.python is always Python 3
+    text_types = (unicode, str)  # noqa: F821 — Python 2 dead branch
 else:
     from html import escape as html_escape
     text = str

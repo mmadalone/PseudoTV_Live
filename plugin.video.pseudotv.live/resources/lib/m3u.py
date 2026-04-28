@@ -249,7 +249,7 @@ class M3U(object):
                             continue
                         fle.write('%s\n'%(station['url']))
                     return True
-                except Exception: self.log("_save, failed! %s"%(e), xbmc.LOGERROR)
+                except Exception as e: self.log("_save, failed! %s"%(e), xbmc.LOGERROR)
                 finally:
                     if hasattr(fle, 'close'): 
                         fle.close()
