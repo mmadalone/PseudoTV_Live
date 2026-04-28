@@ -286,10 +286,17 @@ class Builder(object):
                                         if preview: return fileList
                             else: updated.add(__hasProgrammes(citem))
                                 
-                            if any(updated): 
-                                completed.add(__addStation(citem)) #add m3u station if lineup available. 
+                            if any(updated):
+                                completed.add(__addStation(citem)) #add m3u station if lineup available.
                                 PROPERTIES.setPropTimer('chkPVRRefresh')#refresh pvr guide
-                            else: __clrStation(citem) #remove m3u/xmltv references when no valid programmes found.
+                            else:
+                                # B3 forward-port (madteevee): don't __clrStation on transient/empty build.
+                                # buildVideo can return True (Valid Channel w/o programmes — BUILD_AT_MAX),
+                                # an empty list (paginate-stalled), or False mid-suspend — none of those
+                                # mean the channel is gone. Keep prior M3U/XMLTV state so the next
+                                # chkLibrary cycle can retry. M3U/XMLTV are removed via channel manager
+                                # only — never from the build path. Mirrors master B3's behavior.
+                                self.log('[%s] buildChannels, preserving M3U/XMLTV across transient empty (no __clrStation)'%(citem['id']), xbmc.LOGWARNING)
                             __setStation()
                         except Exception as e: self.log("buildChannels, failed! %s"%(e), xbmc.LOGERROR)
                     if any(changes): self.channels.setChannels()
