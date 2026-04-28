@@ -801,18 +801,26 @@ class Properties(object):
 
     @contextmanager
     def interruptActivity(self, wait=-1): #quit background task
-        while not self.monitor.abortRequested() and (self.isInterruptActivity() or self.isLockActivity()):
-            if wait > 0: wait -= CPU_CYCLE #wait -1 runs indefinitely. 
+        # Reentrancy guard — a thread re-entering interruptActivity would otherwise busy-wait
+        # forever on its own per-thread flag below. The set/getProperty path appends thread
+        # id via _getKey, so each thread gets its own slot; same thread re-reading reads
+        # True (set by outer entry) and the while loop spins. When already inside, just
+        # yield through without re-setting the flags — the outer scope owns the lifecycle.
+        if self.isInterruptActivity():
+            yield
+            return
+        while not self.monitor.abortRequested() and self.isLockActivity():
+            if wait > 0: wait -= CPU_CYCLE #wait -1 runs indefinitely.
             if self.monitor.waitForAbort(CPU_CYCLE) or int(wait) == 0: break
         self.setPendingInterrupt(self.setInterruptActivity(True))
         try: yield
-        finally: 
+        finally:
             self.setPendingInterrupt(self.setInterruptActivity(False))
-        
-           
+
+
     def setInterruptActivity(self, state=True): # context state
         return self.setProperty('%s.interruptActivity'%(ADDON_ID),state)
-        
+
 
     def isInterruptActivity(self): # context state
         return self.getProperty('%s.interruptActivity'%(ADDON_ID),False)
@@ -828,8 +836,14 @@ class Properties(object):
         
     @contextmanager
     def suspendActivity(self, wait=-1): #pause background task.
-        while not self.monitor.abortRequested() and (self.isSuspendActivity() or self.isLockActivity()):
-            if wait > 0: wait -= CPU_CYCLE #wait -1 runs indefinitely. 
+        # Reentrancy guard — same pattern as interruptActivity above. Without this, a
+        # thread re-entering suspendActivity busy-waits forever on its own per-thread
+        # flag. When already inside, just yield through.
+        if self.isSuspendActivity():
+            yield
+            return
+        while not self.monitor.abortRequested() and self.isLockActivity():
+            if wait > 0: wait -= CPU_CYCLE #wait -1 runs indefinitely.
             if self.monitor.waitForAbort(CPU_CYCLE) or int(wait) == 0: break
         self.setPendingSuspend(self.setSuspendActivity(True))
         try: yield
