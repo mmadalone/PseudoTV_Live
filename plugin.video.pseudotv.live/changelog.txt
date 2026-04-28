@@ -1,5 +1,8 @@
 ### NOTICE: The madteevee fork rides on upstream/nightly; things may still break! ####
 
+v.0.7.3+madteevee.9
+- services.getplayingItem now returns {} early when sysInfo decode yields a non-dict (which is what happens for every non-pseudotv playback — the listitem has no sysInfo property, _decodeString('') returns ''). Was raising AttributeError 'str object has no attribute get' inside onAVStarted on every non-pseudotv tune; the unhandled exception corrupted service-thread state and downstream Manager.saveChanges deadlocked.
+
 v.0.7.3+madteevee.8
 - Channels._load called self._setSetting() before the loaded data was merged into self.channelDATA, so the Open_Manager status string ("[B]N[/B] Channels" shown next to the Channel Manager button on the addon's settings page) was always written with N=0 regardless of the file's actual count. Moved the _setSetting call to after the merge in __init__.
 

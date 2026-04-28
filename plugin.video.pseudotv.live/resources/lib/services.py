@@ -127,6 +127,15 @@ class Player(xbmc.Player):
 
     def getplayingItem(self):
         playingItem = FileAccess._decodeString(self.getPlayerItem().getProperty('sysInfo'))
+        # _decodeString returns '' (str) when the listitem has no sysInfo property — the case for
+        # every non-pseudotv playback (Kodi library file, regular IPTV, addon-as-source, etc.).
+        # Without this guard, the .get('chid','') call below raises AttributeError every time
+        # onAVStarted fires for non-pseudotv content, and the resulting CPythonInvoker exception
+        # corrupts service-thread state (downstream saveChanges/builder flows then deadlock).
+        # Return an empty dict so callers see playingItem.get('isPseudoTV', False) == False and
+        # take the non-pseudotv path cleanly.
+        if not isinstance(playingItem, dict):
+            return {}
         if '@%s'%(PSEUDOTV_SLUG) in playingItem.get('chid',''):
             playingItem['isPseudoTV'] = True
             playingItem['chfile']     = BUILTIN.getInfoLabel('Filename','Player')
