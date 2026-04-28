@@ -1,5 +1,8 @@
 ### NOTICE: The madteevee fork rides on upstream/nightly; things may still break! ####
 
+v.0.7.3+madteevee.10
+- interruptActivity / suspendActivity context managers now allow reentrant calls from the same thread. Was busy-waiting forever on its own per-thread flag (set by the outer context entry) on every reentry, deadlocking Manager.saveChanges (the channel-move save spinner that didn't dismiss + 'controls temporarily locked' toast).
+
 v.0.7.3+madteevee.9
 - services.getplayingItem now returns {} early when sysInfo decode yields a non-dict (which is what happens for every non-pseudotv playback — the listitem has no sysInfo property, _decodeString('') returns ''). Was raising AttributeError 'str object has no attribute get' inside onAVStarted on every non-pseudotv tune; the unhandled exception corrupted service-thread state and downstream Manager.saveChanges deadlocked.
 
