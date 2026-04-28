@@ -75,6 +75,7 @@ SERVICE_INTERVAL    = 5.0   #secs
 SUSPEND_INTERVAL    = 2.5   #secs
 DISCOVER_INTERVAL   = 30    #secs
 MIN_EPG_DURATION    = 10800 #secs
+MAX_BUILDFILELIST_REPARSE = 10  # B6 forward-port: cap reparses in buildFileList when first page yields 0 items (extras-only) but more content exists
 TIMEOUT_EXECUTOR    = 1800
 TIMEOUT_EXECUTORS   = 10800
 ONNEXT_TIMER        = 15

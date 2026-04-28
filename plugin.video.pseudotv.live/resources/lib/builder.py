@@ -401,6 +401,8 @@ class Builder(object):
         fileList = []
         dirCount = -1
         dirList  = [{'file':path}]
+        npath    = path  # B6: latest dir path, for reparse when first page is all-extras
+        reparseCount = 0 # B6: capped at MAX_BUILDFILELIST_REPARSE
         self.log("[%s] buildFileList, path = %s\nsort = %s, limits = %s, page = %s"%(citem['id'], path, sort, limits, page))
         while not self.monitor.abortRequested():
             if self.service._interrupt():
@@ -412,6 +414,19 @@ class Builder(object):
                 self.pDialog = DIALOG._updateProgress(self.pDialog, self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32145)), header=self.pHeader)
                 continue
             elif len(dirList) == 0 or dirCount >= self.recursiveLimit:
+                # B6 forward-port (madteevee): if dirList drained but pagination shows more
+                # content (end < total) and the page is unfilled, re-insert the last path.
+                # Handles the case where the first page is entirely filtered out (extras / 3D
+                # / sub-min-duration / strm) — without the reparse the channel would bail
+                # empty. Capped at MAX_BUILDFILELIST_REPARSE for pathological smartplaylists.
+                if (len(dirList) == 0 and dirCount < self.recursiveLimit
+                        and len(fileList) < page
+                        and limits.get('end',0) < limits.get('total',0)
+                        and reparseCount < MAX_BUILDFILELIST_REPARSE):
+                    reparseCount += 1
+                    dirList.insert(0, {'file': npath})
+                    self.log('[%s] buildFileList, B6 reparse path (%s/%s) end=%s/total=%s, fileList=%s/%s'%(citem['id'],reparseCount,MAX_BUILDFILELIST_REPARSE,limits.get('end'),limits.get('total'),len(fileList),page))
+                    continue
                 if self.padFilelist and len(fileList) > 0 and len(fileList) < page: fileList = __padFileList(fileList,page)
                 elif len(fileList) < page and len(dirList) > dirCount: self.pErrors.append(LANGUAGE(32262))
                 self.log('[%s] buildFileList, no more folders to parse or recursive limit met.'%(citem['id']))
@@ -420,6 +435,7 @@ class Builder(object):
                 dirCount += 1
                 dir   = dirList.pop(0)
                 path  = dir.get('file')
+                npath = path  # B6: track for reparse
                 if dir.get("label"): self.pDialog = DIALOG._updateProgress(self.pDialog, self.pCount, message=f'parsing folder: {dir.get("label")}',header=self.pHeader)
                 subfileList, subdirList, limits, errors = self.buildList(citem, path, media, abs(page - len(fileList)), sort, limits, dir, query) #parse all directories under root. Flattened hierarchies recommended to stream line channel building.
 
