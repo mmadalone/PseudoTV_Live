@@ -1,0 +1,38 @@
+[tool.ruff]
+# Kodi Matrix (Kodi 19) is the addon's minimum supported runtime per
+# addon.xml's `xbmc.python 3.0.1` requirement. Matrix ships Python 3.8.
+target-version = "py38"
+line-length = 120
+extend-exclude = [
+    "zips",
+    "_site",
+    "wiki",
+    "logs",
+    "addon_generator.py",
+    "addon_generator_zip_only.py",
+    "release.py",
+    "plugin.video.pseudotv.live/resources/lib/zeroconf.py",
+    "plugin.video.pseudotv.live/resources/lib/data",
+]
+
+[tool.ruff.lint]
+# Conservative starter set. Expand later (audit item 6) once we have
+# pre-commit + manual review pipeline in place.
+#   E   pycodestyle errors
+#   F   pyflakes (undefined names, unused imports - real bugs)
+#   B   flake8-bugbear (mutable defaults, etc. - real bugs)
+#   S   bandit-equivalent security checks
+select = ["E", "F", "B", "S"]
+ignore = [
+    "E501",  # line too long - existing code is intentionally wide
+    "E701",  # multiple statements on one line - house style, 1180 instances
+    "E722",  # bare except - endemic, defer to a focused future cleanup
+    "B008",  # function call in default argument - false positives in Kodi APIs
+]
+
+[tool.pytest.ini_options]
+# Audit item 5: smoke-import test infrastructure (vendored vrt.nu pattern).
+# tests/__init__.py prepends tests/ + addon's resources/lib to sys.path.
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = ["-q", "--strict-markers"]

@@ -7,15 +7,21 @@ jobs:
     runs-on: ubuntu-latest
     name: Kodi addon checker
     steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python 3.14.3
-      uses: actions/setup-python@v1
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
       with:
-        python-version: 3.14.3
+        python-version: '3.11'  # matches Kodi Omega's runtime
     - name: Install addon checker
       run: |
         pip install -q kodi-addon-checker
     - name: Check with addon-checker
       run: |
         kodi-addon-checker --branch omega plugin.video.pseudotv.live
-        
+    - name: Compile-time syntax check (audit item 5 gate)
+      run: |
+        python -m compileall -q plugin.video.pseudotv.live/resources/lib
+    - name: Install pytest deps + run smoke-import tests (audit item 5)
+      run: |
+        pip install -q pytest requests six pyqrcode polib
+        pytest tests/
