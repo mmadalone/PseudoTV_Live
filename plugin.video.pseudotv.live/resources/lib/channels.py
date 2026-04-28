@@ -34,6 +34,11 @@ class Channels(object):
         self.channelRULE = self.channelTEMP.pop('rules')
         self.channelTEMP['rules'] = {}
         self.channelDATA.update(self._load())
+        # Refresh Open_Manager count NOW that self.channelDATA has the loaded channels.
+        # _load() called _setSetting() before this update — at that point self.channelDATA
+        # was still the post-pop empty template, so the setting always wrote "0 Channels"
+        # regardless of how many channels the file actually held.
+        self._setSetting()
         self.channelDATA_OLD = self.channelDATA.copy()
         
         
@@ -48,7 +53,6 @@ class Channels(object):
         
     def _load(self) -> dict:
         channelDATA = FileAccess.getJSON(self.channelFile)
-        self._setSetting()
         self.log('_load, file = %s\nchannels = %s'%(self.channelFile,len(channelDATA.get('channels',[]))))
         return channelDATA
     
