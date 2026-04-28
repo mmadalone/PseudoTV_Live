@@ -64,9 +64,17 @@ class Globals:
         
     @staticmethod
     def _decodePlot(text: str = '') -> dict:
+        # FileAccess._decodeString returns dict (pickle path), str (raw decode path), or ''
+        # (empty/error). The function annotation pledges dict, and several callers
+        # (xmltvs.__filterProgrammes:264, services.getplayingItem:138) chain `.get('citem',{})`
+        # immediately. Coerce non-dict returns so the contract is enforced — without this,
+        # any programme whose 'desc' decoded to a non-pickle string crashes the cleanProgrammes
+        # pipeline, _load fails, XMLTVDATA stays empty, and _save KeyError-cascades.
         if isinstance(text, str):
             plot = re.search(r'\[COLOR item=\"(.+?)\"]\[/COLOR]', text)
-            if plot: return FileAccess._decodeString(plot.group(1))
+            if plot:
+                decoded = FileAccess._decodeString(plot.group(1))
+                return decoded if isinstance(decoded, dict) else {}
         return {}
         
     @staticmethod
