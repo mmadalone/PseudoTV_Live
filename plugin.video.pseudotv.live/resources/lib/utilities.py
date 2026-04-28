@@ -183,9 +183,12 @@ class Utilities(object):
     @staticmethod
     def _runLibrary():
         # madteevee: missing in nightly upstream — buildMenu line 195 references it.
-        # Body mirrors upstream/master utilities.py:_runLibrary.
-        PROPERTIES.setPropertyBool('ForceLibrary',True)
-        PROPERTIES.setEpochTimer('chkLibrary')
+        # Master's body used setPropertyBool/setEpochTimer/ForceLibrary, none of which
+        # exist in nightly. chkLibrary is dispatched only via _chkEpochTimer (tasks.py:137),
+        # which reads the 'chkLibrary' EXT property as next-run-epoch and fires when
+        # epoch >= nextrun. Clearing the property makes the next service tick treat
+        # chkLibrary as overdue and queue it.
+        PROPERTIES.clrEXTProperty('chkLibrary')
         DIALOG.notificationDialog('%s %s'%(LANGUAGE(30199),LANGUAGE(30200)))
 
     @staticmethod
