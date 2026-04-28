@@ -1,5 +1,8 @@
 ### NOTICE: The madteevee fork rides on upstream/nightly; things may still break! ####
 
+v.0.7.3+madteevee.15
+- Smartplay editor / Node editor / PVR & Live TV settings buttons disappeared from PseudoTV Settings entirely after v.14. v.14 converted them to type="action" but dropped the <control> block. Kodi's setting schema requires <control> on action settings too — without it, CSetting logged 'missing <control> tag of "Launch_SmartplaylistEditor"' (and the other two) and silently dropped them at load. Restored <control type="button" format="action"><close>true</close></control> while keeping <data> at the setting level — same shape Launch_IPTVSimple uses successfully in the same panel. The data-at-setting-level routes through Kodi's action subsystem (avoids the v.13 modal-refusal), and the schema is satisfied.
+
 v.0.7.3+madteevee.14
 - Settings → Smartplay editor / Node editor / PVR & Live TV settings buttons now actually open their target windows. The old XML used type="string" with a control-button+close=true wrapper, which fires <data> while the addon-settings dialog is still modal — Kodi rejected the ActivateWindow with "active modal dialogs" before close took effect. Confirmed via log ('Activate of window 10025/10001/10021 refused because there are active modal dialogs'). Converted all three to type="action" (the same style Launch_IPTVSimple uses successfully in the same panel), which defers the activation until after the dialog dismisses. Added the standard ',return' arg to the two ActivateWindow calls that take a path so back-button returns to home instead of looping.
 
