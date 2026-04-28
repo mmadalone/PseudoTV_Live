@@ -236,7 +236,7 @@ class XMLTVS(object):
         return programmes
         
         
-    def cleanSelf(self, items: list=[], key: str='id', slug: str='@%s'%(Globals._slugify(ADDON_NAME))) -> list: # remove (Non PseudoTV Live), key = {'id':channels,'channel':programmes}
+    def cleanSelf(self, items: list=[], key: str='id', slug: str='@%s'%(PSEUDOTV_SLUG)) -> list: # remove (Non PseudoTV Live), key = {'id':channels,'channel':programmes}
         if not slug: return items
         channels   = list([item for item in items if item.get(key,'').endswith(slug) and len(item.get(key,'').replace(slug,'')) == 32])
         recordings = list([item for item in items if item.get(key,'').endswith(slug) and len(item.get(key,'').replace(slug,'')) == 16])

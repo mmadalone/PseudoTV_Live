@@ -112,7 +112,7 @@ class Player(xbmc.Player):
 
     def getplayingItem(self):
         playingItem = FileAccess._decodeString(self.getPlayerItem().getProperty('sysInfo'))
-        if '@%s'%(Globals._slugify(ADDON_NAME)) in playingItem.get('chid',''):
+        if '@%s'%(PSEUDOTV_SLUG) in playingItem.get('chid',''):
             playingItem['isPseudoTV'] = True
             playingItem['chfile']     = BUILTIN.getInfoLabel('Filename','Player')
             playingItem['chfolder']   = BUILTIN.getInfoLabel('Folderpath','Player')

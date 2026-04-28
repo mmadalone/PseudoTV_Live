@@ -50,6 +50,7 @@ from requests.adapters     import HTTPAdapter, Retry
 ADDON_ID            = 'plugin.video.pseudotv.live'
 REAL_SETTINGS       = xbmcaddon.Addon(id=ADDON_ID)
 ADDON_NAME          = REAL_SETTINGS.getAddonInfo('name')
+PSEUDOTV_SLUG       = 'PseudoTV_Live'  # decouples chid generation from ADDON_NAME — fork rename mustn't change channel IDs
 ADDON_VERSION       = REAL_SETTINGS.getAddonInfo('version')
 ICON                = REAL_SETTINGS.getAddonInfo('icon')
 FANART              = REAL_SETTINGS.getAddonInfo('fanart')
