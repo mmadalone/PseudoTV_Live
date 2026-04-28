@@ -36,6 +36,7 @@ SITE_DIR = REPO_ROOT / "_site"
 ADDONS = [
     ("plugin.video.pseudotv.live", "plugin.video.pseudotv.live"),
     ("repository.mmadalone.pseudotv", "repository.mmadalone.pseudotv"),
+    ("resource.images.pseudotv.logos.madteevee", "resource.images.pseudotv.logos.madteevee"),
 ]
 
 # Files/dirs to exclude from the addon zip

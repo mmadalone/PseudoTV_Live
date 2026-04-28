@@ -128,7 +128,8 @@ GitHub denies enabling Pages on repos forked from `PseudoTV/PseudoTV_Live` ("Pag
 2. In Kodi: **Settings → System → Add-ons → Unknown sources** = ON (required to install from zip).
 3. **Settings → Add-ons → Install from zip file** → pick the downloaded zip.
 4. After install, **Settings → Add-ons → Install from repository → mmadalone PseudoTV Live (madteevee) → Video add-ons → PseudoTV Live (madteevee)** → Update / Install. The fork's `0.6.1q+madteevee.X` will replace upstream's `0.6.1q`.
-5. Optional: leave the upstream `repository.pseudotv` enabled too so its resource packs (`resource.images.pseudotv.logos` etc.) keep updating from upstream — those aren't mirrored in the fork repo.
+5. Optional: leave the upstream `repository.pseudotv` enabled too so its resource packs keep updating from upstream — most of them aren't mirrored in the fork repo.
+   - Exception: `resource.images.pseudotv.logos.madteevee` IS shipped from the fork repo (a parallel logos addon with the same content as upstream's `resource.images.pseudotv.logos` plus custom additions). Different addon ID so it coexists with upstream's official one.
 
 ### Cutting a new release (after making patches)
 
@@ -142,11 +143,14 @@ cd ~/_Claude_projects/PseudoTV_Live
 # 1. bump version in plugin.video.pseudotv.live/addon.xml
 #    (e.g. 0.6.1q+madteevee.1 -> 0.6.1q+madteevee.2). Use '+' separator
 #    so Kodi treats it as newer than upstream's 0.6.1q.
+#    Bump resource.images.pseudotv.logos.madteevee/addon.xml in lockstep:
+#    its version's last digit MUST match the plugin's madteevee.NN
+#    (plugin v0.6.1q+madteevee.14 → logos v0.0.14, etc.).
 #    (Optionally also bump repository.mmadalone.pseudotv/addon.xml when the
 #    repo addon itself changes — rare.)
 
 # 2. commit + push the version bump
-git add plugin.video.pseudotv.live/addon.xml
+git add plugin.video.pseudotv.live/addon.xml resource.images.pseudotv.logos.madteevee/addon.xml
 git commit -m "bump: pseudotv 0.6.1q+madteevee.2"
 git push fork madteevee-patches
 
