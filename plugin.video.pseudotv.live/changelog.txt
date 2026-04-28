@@ -1,5 +1,8 @@
 ### NOTICE: The madteevee fork rides on upstream/nightly; things may still break! ####
 
+v.0.7.3+madteevee.14
+- Settings → Smartplay editor / Node editor / PVR & Live TV settings buttons now actually open their target windows. The old XML used type="string" with a control-button+close=true wrapper, which fires <data> while the addon-settings dialog is still modal — Kodi rejected the ActivateWindow with "active modal dialogs" before close took effect. Confirmed via log ('Activate of window 10025/10001/10021 refused because there are active modal dialogs'). Converted all three to type="action" (the same style Launch_IPTVSimple uses successfully in the same panel), which defers the activation until after the dialog dismisses. Added the standard ',return' arg to the two ActivateWindow calls that take a path so back-button returns to home instead of looping.
+
 v.0.7.3+madteevee.13
 - Fixed Utility menu → Rebuild Library "something went wrong" dialog. The _runLibrary body added in v.12 mirrored upstream/master, but master's APIs (setPropertyBool, setEpochTimer, ForceLibrary) don't exist in nightly. AttributeError 'Properties' object has no attribute 'setPropertyBool' fired on click. Replaced with the nightly-correct path: clear the chkLibrary EXT property so the next service tick (which dispatches via _chkEpochTimer in tasks.py:137) sees nextrun=0 and queues the library walk immediately.
 
