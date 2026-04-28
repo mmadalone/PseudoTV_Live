@@ -24,8 +24,8 @@ import json as json_parser
 
 if sys.version_info[:2] < (3, 0):
     from cgi import escape as html_escape
-    text = unicode
-    text_types = (unicode, str)
+    text = unicode  # noqa: F821
+    text_types = (unicode, str)  # noqa: F821
 else:
     from html import escape as html_escape
     text = str
