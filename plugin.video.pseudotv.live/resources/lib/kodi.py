@@ -1191,9 +1191,13 @@ class Builtin(object):
         
         
     def executescript(self, path, condition=None):
+        # path may be 'foo.py' or 'foo.py, ARG1, ARG2'. xbmc.executescript() takes
+        # only a path (no args), so the comma+args become part of the filename and
+        # CFileUtils::Exists() fails. RunScript() builtin parses commas and feeds
+        # tokens as sys.argv to the script.
         self.log('executescript, path = %s'%(path))
         if not condition is None and not condition(): return False
-        xbmc.executescript('%s'%(path))
+        xbmc.executebuiltin('RunScript(%s)'%(path))
         return True
 
 
