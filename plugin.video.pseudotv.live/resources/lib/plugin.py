@@ -248,7 +248,11 @@ class Plugin(object):
             
         self.log('[%s] playPlaylist, name = %s'%(self.sysInfo.get('chid'), self.sysInfo.get('name')))
         with PROPERTIES.suspendActivity():
-            DIALOG.notificationDialog(f"{LANGUAGE(32185)%('Queue')}: [B]{self.sysInfo['name']}[/B]\n{self.sysInfo['fitem']['label']}")
+            # Defensive .get() — fitem.label can be missing depending on where the tune originates
+            # (PVR guide click vs. catchup vs. channel manager). Letting a KeyError raise here
+            # blocks the actual _play() call below, so the channel never starts. The notification
+            # is decorative and a missing label is not worth aborting playback.
+            DIALOG.notificationDialog(f"{LANGUAGE(32185)%('Queue')}: [B]{self.sysInfo.get('name','')}[/B]\n{self.sysInfo.get('fitem',{}).get('label','')}")
             nextitems = self._getPVRItems()
             listitems = poolit(__buildfItem)(nextitems)
             self._play(*(self._quePlaylist(listitems, pltype=xbmc.PLAYLIST_VIDEO, shuffle=False)))
