@@ -1,3 +1,21 @@
+### NOTICE: The madteevee fork rides on upstream/nightly; things may still break! ####
+
+v.0.7.3+madteevee.3
+- Hardened XMLTVS load path: _error() now logs the originating exception cleanly, load{Data,Channels,Programmes} survive missing-file conditions, and Globals._decodePlot honours its `-> dict` annotation. Fixes a startup chain where the service thread could die silently before the HTTP server came up.
+
+v.0.7.3+madteevee.2
+- Fixed an unquoted JSON key in remotes/rule.json that blocked kodi-addon-checker.
+
+v.0.7.3+madteevee.1
+- Rebased onto upstream/nightly. Five forward-ported patches from the previous master-based fork:
+  - kodi.executescript() now uses RunScript() so script-with-args invocations actually run.
+  - PSEUDOTV_SLUG constant decouples chid generation from ADDON_NAME — the fork rename no longer breaks lookup of existing channels.
+  - builder.py: B3 — don't clear M3U/XMLTV references on transient empty builds (BUILD_AT_MAX, paginate-stalled, suspend mid-cycle); only the channel manager's explicit reset clears them now.
+  - builder.py: B6 — re-paginate when the first page is entirely filtered (extras-only / 3D / sub-min-duration / strm), capped at MAX_BUILDFILELIST_REPARSE.
+  - default.py + services.py: per-tune _tune_ts timestamp threaded through to onAVStarted; stale events from aborted fast-zaps are dropped before mutating player state.
+- Plus: service.py imports restored, fileaccess.getJSON/setJSON survive missing files, ruff F821 cleaned.
+- Logos addon (resource.images.pseudotv.logos.madteevee) is published from the fork repo as a parallel set; coexists with upstream's resource.images.pseudotv.logos.
+
 ### NOTICE: The nightly branch is in alpha; things will break! ####
 v.0.7.3+nightly
 - Added Network hosted channel manger (W.I.P).
