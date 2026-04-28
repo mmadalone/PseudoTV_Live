@@ -1,5 +1,8 @@
 ### NOTICE: The madteevee fork rides on upstream/nightly; things may still break! ####
 
+v.0.7.3+madteevee.8
+- Channels._load called self._setSetting() before the loaded data was merged into self.channelDATA, so the Open_Manager status string ("[B]N[/B] Channels" shown next to the Channel Manager button on the addon's settings page) was always written with N=0 regardless of the file's actual count. Moved the _setSetting call to after the merge in __init__.
+
 v.0.7.3+madteevee.7
 - Fixed services._interrupt self-referential lock — same shape as the .5 _suspend fix. Was ORing against PROPERTIES.isPendingInterrupt() (the property this method writes), so any one-shot interrupt (e.g. Manager.saveChanges -> builder.interruptActivity) could leave pendingInterrupt stuck True and deadlock channel-save. Now ORs against PROPERTIES.isInterruptActivity() (the context-manager flag) per master fork.
 
