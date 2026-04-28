@@ -1,5 +1,8 @@
 ### NOTICE: The madteevee fork rides on upstream/nightly; things may still break! ####
 
+v.0.7.3+madteevee.16
+- Smartplay editor / Node editor / PVR & Live TV settings buttons now actually open their target windows. Earlier attempts via XML alone (v.13/v.14/v.15) failed because Kodi refuses ActivateWindow while the addon-settings modal is still on screen ("Activate of window 'NNNNN' refused because there are active modal dialogs"), and ActivateWindow — unlike Addon.OpenSettings used by Launch_IPTVSimple — has no built-in dialog-stacking handling. Routed the three buttons through the existing Utilities._run RunScript dispatcher (utilities.py) using a small _openAfterCloseSettings helper that issues Dialog.Close(addonsettings,true), waits 200ms via xbmc.Monitor().waitForAbort, then fires ActivateWindow. Settings.xml entries keep their v.15 schema (type="action" + <control type="button" format="action"><close>true</close></control>) so the v.14 "missing <control>" regression cannot recur.
+
 v.0.7.3+madteevee.15
 - Smartplay editor / Node editor / PVR & Live TV settings buttons disappeared from PseudoTV Settings entirely after v.14. v.14 converted them to type="action" but dropped the <control> block. Kodi's setting schema requires <control> on action settings too — without it, CSetting logged 'missing <control> tag of "Launch_SmartplaylistEditor"' (and the other two) and silently dropped them at load. Restored <control type="button" format="action"><close>true</close></control> while keeping <data> at the setting level — same shape Launch_IPTVSimple uses successfully in the same panel. The data-at-setting-level routes through Kodi's action subsystem (avoids the v.13 modal-refusal), and the schema is satisfied.
 

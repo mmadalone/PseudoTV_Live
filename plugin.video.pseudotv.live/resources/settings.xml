@@ -109,15 +109,15 @@
                 <!-- </setting> -->
             </group>
             <group id="3" label="30160">
-                <!-- madteevee: type="action" with <data> at setting level + <control format="action">
-                     containing only <close>true</close>. This is the same shape Launch_IPTVSimple uses
-                     successfully in this panel. The earlier type="string"+control-with-data pattern
-                     fired ActivateWindow while the addon-settings modal was still up and got refused
-                     ("active modal dialogs"). Moving <data> to the setting level routes it through the
-                     action subsystem so the dialog dismisses first and the activate then succeeds. -->
+                <!-- madteevee: <data> hands off to Utilities._run via RunScript. The handler
+                     (utilities.py:_openAfterCloseSettings) issues Dialog.Close(addonsettings,true),
+                     waits for the modal to dismiss, then fires ActivateWindow. Direct ActivateWindow
+                     in <data> is refused by Kodi while the addon-settings modal is still on screen
+                     ("active modal dialogs"); ActivateWindow has no built-in dialog-stacking handling
+                     (unlike Addon.OpenSettings, which is why Launch_IPTVSimple below works directly). -->
                 <setting id="Launch_SmartplaylistEditor" type="action" label="30138" help="33138" parent="33138">
                     <level>1</level>
-                    <data>ActivateWindow(10025,"library://video/playlists.xml/",return)</data>
+                    <data>RunScript(special://home/addons/plugin.video.pseudotv.live/resources/lib/utilities.py, Show_Smartplaylist_Editor)</data>
                     <constraints>
                         <allowempty>true</allowempty>
                     </constraints>
@@ -127,7 +127,7 @@
                 </setting>
                 <setting id="Launch_NodeEditor" type="action" label="30137" help="33137">
                     <level>1</level>
-                    <data>ActivateWindow(10001,plugin://plugin.library.node.editor,return)</data>
+                    <data>RunScript(special://home/addons/plugin.video.pseudotv.live/resources/lib/utilities.py, Show_Node_Editor)</data>
                     <constraints>
                         <allowempty>true</allowempty>
                     </constraints>
@@ -145,7 +145,7 @@
                 </setting>
                 <setting id="Launch_LiveSettings" type="action" label="30157" help="33157">
                     <level>1</level>
-                    <data>ActivateWindow(10021)</data>
+                    <data>RunScript(special://home/addons/plugin.video.pseudotv.live/resources/lib/utilities.py, Show_LiveTV_Settings)</data>
                     <constraints>
                         <allowempty>true</allowempty>
                     </constraints>

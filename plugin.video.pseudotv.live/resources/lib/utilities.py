@@ -192,6 +192,19 @@ class Utilities(object):
         DIALOG.notificationDialog('%s %s'%(LANGUAGE(30199),LANGUAGE(30200)))
 
     @staticmethod
+    def _openAfterCloseSettings(activate_args):
+        # madteevee: settings buttons whose <data> fires ActivateWindow get
+        # refused by Kodi while the addon-settings modal is still up
+        # ("Activate of window 'NNNNN' refused because there are active modal
+        # dialogs"). Close the modal explicitly, give Kodi's main thread a
+        # beat to actually dismiss it, then activate. Used by the Smartplay
+        # editor / Node editor / PVR & Live TV settings launchers via the
+        # _run dispatcher (see settings.xml RunScript wiring).
+        BUILTIN.executebuiltin('Dialog.Close(addonsettings,true)')
+        xbmc.Monitor().waitForAbort(0.2)
+        BUILTIN.executebuiltin('ActivateWindow(%s)'%(activate_args))
+
+    @staticmethod
     def _runUpdate(full=False):
         log('Utilities: _runUpdate, full = %s'%(full))
         PROPERTIES.setPropTimer('chkChanged')#refresh channel changed
@@ -263,7 +276,19 @@ class Utilities(object):
             elif param == 'Show_Changelog':
                 ctl = (6,8)
                 return Utilities().showChangelog()
-                
+            # madteevee: launcher buttons that need the addon-settings modal
+            # closed before ActivateWindow fires (Kodi refuses activate while
+            # any modal is up). _openAfterCloseSettings handles the sequence.
+            elif param == 'Show_Smartplaylist_Editor':
+                ctl = (6,1)
+                return Utilities._openAfterCloseSettings('10025,"library://video/playlists.xml/",return')
+            elif param == 'Show_Node_Editor':
+                ctl = (6,1)
+                return Utilities._openAfterCloseSettings('10001,plugin://plugin.library.node.editor,return')
+            elif param == 'Show_LiveTV_Settings':
+                ctl = (6,1)
+                return Utilities._openAfterCloseSettings('10021')
+
 
 
             #Globals
