@@ -1,5 +1,9 @@
 ### NOTICE: The madteevee fork rides on upstream/nightly; things may still break! ####
 
+v.0.7.3+madteevee.6
+- Channel Manager: enabled=missing now defaults to True (matches builder.py and the channel template). Master-era channels.json that never wrote the field are now treated as enabled instead of disabled.
+- Logos addon: added "Club Super 3.png" (with space) so name-auto-resolve finds it for the literal channel name. Existing "Club Super3.png" (no space) preserved for compat.
+
 v.0.7.3+madteevee.5
 - Fixed self-referential lock in services._suspend that left the background service stuck paused after closing the addon settings dialog. Was ORing against the same property the method writes; now ORs against isSuspendActivity (the suspendActivity context-manager flag) per master fork.
 
