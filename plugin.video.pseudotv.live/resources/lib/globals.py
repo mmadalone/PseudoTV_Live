@@ -45,13 +45,13 @@ def getChannelID(name, path, number, uuid=None):
     if uuid is None: uuid = SETTINGS.getMYUUID()
     if isinstance(path, list): path = '|'.join(path)
     tmpid = '%s.%s.%s.%s'%(number, name, hashlib.md5(path.encode(DEFAULT_ENCODING)),uuid)
-    return '%s@%s'%((binascii.hexlify(tmpid.encode(DEFAULT_ENCODING))[:32]).decode(DEFAULT_ENCODING),Globals._slugify(ADDON_NAME))
-    
+    return '%s@%s'%((binascii.hexlify(tmpid.encode(DEFAULT_ENCODING))[:32]).decode(DEFAULT_ENCODING),PSEUDOTV_SLUG)
+
 def getRecordID(name, path, number, uuid=None):
     if uuid is None: uuid = SETTINGS.getMYUUID()
     if isinstance(path, list): path = '|'.join(path)
     tmpid = '%s.%s.%s.%s'%(number, name, hashlib.md5(path.encode(DEFAULT_ENCODING)),uuid)
-    return '%s@%s'%((binascii.hexlify(tmpid.encode(DEFAULT_ENCODING))[:16]).decode(DEFAULT_ENCODING),Globals._slugify(ADDON_NAME))
+    return '%s@%s'%((binascii.hexlify(tmpid.encode(DEFAULT_ENCODING))[:16]).decode(DEFAULT_ENCODING),PSEUDOTV_SLUG)
 
 def splitYear(label):
     try:

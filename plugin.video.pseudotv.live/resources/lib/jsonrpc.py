@@ -672,7 +672,7 @@ class JSONRPC(object):
             callback = sysInfo.get('callback','')
         if not callback: callback = _matchJSON()
         self.log('getCallback: returning callback = %s'%(callback))
-        return callback# or (('%s%s'%(self.sysARG[0],self.sysARG[2])).split('%s&'%(Globals._slugify(ADDON_NAME))))[0])
+        return callback# or (('%s%s'%(self.sysARG[0],self.sysARG[2])).split('%s&'%(PSEUDOTV_SLUG)))[0])
         
         
     def matchChannel(self, chname: str, id: str, radio: bool=False, extend=True):
