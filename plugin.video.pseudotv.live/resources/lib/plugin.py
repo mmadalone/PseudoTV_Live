@@ -68,19 +68,24 @@ class Plugin(object):
         def __add(listitem):
             if listitem.getPath():
                 playlist.add(listitem.getPath(),listitem,listitems.index(listitem))
-                
+
         if listitems:
             self.sysInfo['isPlaylist'] = True
             if shuffle is None: shuffle = BUILTIN.isPlaylistRandom()
             self.log('[%s] _quePlaylist, listitems = %s, shuffle = %s'%(self.sysInfo.get('chid'), len(listitems), shuffle))
             playlist = xbmc.PlayList(pltype)
             playlist.clear()
-            xbmc.sleep(100) #give playlist.clear() enough time to clear queue.        
+            xbmc.sleep(100) #give playlist.clear() enough time to clear queue.
             poolit(__add)(listitems)
             self.log('[%s] _quePlaylist, Playlist size = %s, shuffle = %s'%(self.sysInfo.get('chid'), playlist.size(),shuffle))
             if shuffle: playlist.shuffle()
             else:       playlist.unshuffle()
             return playlist, listitems[0]
+        # listitems is empty (e.g. _getPVRItems returned [] because matchChannel found no
+        # current broadcast). Return (None, None) so callers can short-circuit cleanly
+        # instead of crashing on `*None` splat — the user already saw the "no items"
+        # notification from _getPVRItems.
+        return None, None
 
 
     def _getPVRItems(self):
@@ -254,8 +259,17 @@ class Plugin(object):
             # is decorative and a missing label is not worth aborting playback.
             DIALOG.notificationDialog(f"{LANGUAGE(32185)%('Queue')}: [B]{self.sysInfo.get('name','')}[/B]\n{self.sysInfo.get('fitem',{}).get('label','')}")
             nextitems = self._getPVRItems()
+            if not nextitems:
+                # _getPVRItems already showed a notification (LANGUAGE(32164) or 32000) — bail
+                # without crashing on the empty-playlist splat below.
+                self.log('[%s] playPlaylist, no PVR items, aborting'%(self.sysInfo.get('chid')))
+                return
             listitems = poolit(__buildfItem)(nextitems)
-            self._play(*(self._quePlaylist(listitems, pltype=xbmc.PLAYLIST_VIDEO, shuffle=False)))
+            playlist, first = self._quePlaylist(listitems, pltype=xbmc.PLAYLIST_VIDEO, shuffle=False)
+            if playlist is None:
+                self.log('[%s] playPlaylist, _quePlaylist returned no playable items'%(self.sysInfo.get('chid')))
+                return
+            self._play(playlist, first)
             
             
     def _playCheck(self, path, found, listitem=None):
