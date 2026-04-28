@@ -542,7 +542,15 @@ class Service(object):
          
         
     def _interrupt(self) -> bool: #tasks break
-        pendingInterrupt = any([self.pendingShutdown, self.pendingRestart, self.isScanning, self._isPlaying(), PROPERTIES.isPendingInterrupt()])
+        # Same self-referential bug class as _suspend below: ORing against PROPERTIES
+        # .isPendingInterrupt() — the property this method writes via setPendingInterrupt
+        # — meant any one-shot interrupt (Manager.saveChanges sets it, Builder honours it,
+        # finally clauses release it) could leave pendingInterrupt stuck True if anything
+        # in the path failed. Then the OR keeps reading True and never clears, deadlocking
+        # the saveChanges → builder.interruptActivity → setChannels chain. Master fork ORs
+        # against PROPERTIES.isInterruptActivity() — the flag set/cleared by the
+        # interruptActivity() context manager — which has its own finally to clear cleanly.
+        pendingInterrupt = any([self.pendingShutdown, self.pendingRestart, self.isScanning, self._isPlaying(), PROPERTIES.isInterruptActivity()])
         if pendingInterrupt != self.pendingInterrupt:
             self.pendingInterrupt = PROPERTIES.setPendingInterrupt(pendingInterrupt)
             self.log('_interrupt, pendingInterrupt = %s'%(self.pendingInterrupt))

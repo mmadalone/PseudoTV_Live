@@ -1,5 +1,8 @@
 ### NOTICE: The madteevee fork rides on upstream/nightly; things may still break! ####
 
+v.0.7.3+madteevee.7
+- Fixed services._interrupt self-referential lock — same shape as the .5 _suspend fix. Was ORing against PROPERTIES.isPendingInterrupt() (the property this method writes), so any one-shot interrupt (e.g. Manager.saveChanges -> builder.interruptActivity) could leave pendingInterrupt stuck True and deadlock channel-save. Now ORs against PROPERTIES.isInterruptActivity() (the context-manager flag) per master fork.
+
 v.0.7.3+madteevee.6
 - Channel Manager: enabled=missing now defaults to True (matches builder.py and the channel template). Master-era channels.json that never wrote the field are now treated as enabled instead of disabled.
 - Logos addon: added "Club Super 3.png" (with space) so name-auto-resolve finds it for the literal channel name. Existing "Club Super3.png" (no space) preserved for compat.
