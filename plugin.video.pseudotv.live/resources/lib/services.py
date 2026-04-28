@@ -550,7 +550,14 @@ class Service(object):
     
 
     def _suspend(self, wait=0) -> bool: #tasks continue
-        pendingSuspend = any([BUILTIN.isSettingsOpened(), PROPERTIES.isPendingSuspend(),])
+        # OR against isSuspendActivity (set by the suspendActivity() context manager around
+        # plugin invocations), NOT isPendingSuspend — that's the property this method writes
+        # via setPendingSuspend below, so ORing against it creates a self-referential lock:
+        # once any earlier event set pendingSuspend=True (settings opened, plugin invocation),
+        # subsequent _suspend calls see isPendingSuspend()=True, OR keeps it True, the property
+        # never clears, and the service stays paused forever even after the trigger is gone.
+        # Master fork uses isSuspendActivity() here.
+        pendingSuspend = any([BUILTIN.isSettingsOpened(), PROPERTIES.isSuspendActivity(),])
         if pendingSuspend != self.pendingSuspend:
             self.pendingSuspend = PROPERTIES.setPendingSuspend(pendingSuspend)
             self.log('_suspend, pendingSuspend = %s'%(self.pendingSuspend))
