@@ -1,0 +1,63 @@
+name: Release Kodi addon
+
+# Triggers:
+#   - Push of a tag matching v*-madteevee.* (e.g. v0.6.1q-madteevee.2): cut a release.
+#   - Manual workflow_dispatch from the Actions tab: rebuild gh-pages on demand
+#     without tagging (useful for fixing repo-pipeline issues without bumping the
+#     addon version).
+on:
+  push:
+    tags:
+      - 'v*-madteevee.*'
+  workflow_dispatch:
+
+# release.py builds _site/, then we push that to gh-pages. We need write access
+# to repo contents for that push. We do NOT use GitHub Pages (Pages is disabled
+# on this fork by parent-repo policy); we just write to the gh-pages branch and
+# clients fetch via raw.githubusercontent.com per FORK_NOTES.md.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          # Need full history so the gh-pages publish action can compute diffs
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build _site/ (zips + addons.xml + asset mirrors)
+        run: python3 release.py
+
+      - name: Publish _site/ to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./_site
+          publish_branch: gh-pages
+          # keep_files=false replaces gh-pages contents with _site/ exactly.
+          # Matches the local "rsync -a --delete _site/ ./" workflow in FORK_NOTES.md.
+          keep_files: false
+          commit_message: "release: ${{ github.ref_name || github.event_name }}"
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'
+
+      # Only on tag pushes: also create a GitHub Release object (the formal
+      # "Releases" tab on the repo). Attaches both addon zips for visibility.
+      # Skipped on workflow_dispatch since there's no tag to attach the release to.
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            _site/plugin.video.pseudotv.live/*.zip
+            _site/repository.mmadalone.pseudotv/*.zip
+          generate_release_notes: true
+          name: "PseudoTV Live (madteevee) ${{ github.ref_name }}"

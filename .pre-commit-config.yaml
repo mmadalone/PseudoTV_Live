@@ -1,0 +1,36 @@
+# Pre-commit hooks for PseudoTV_Live (madteevee fork).
+#
+# Design principle: catch REAL BUGS before they land (Python SyntaxErrors,
+# malformed YAML/TOML configs) without rewriting source. We deliberately
+# avoid file-modifying hooks (no whitespace fixers, no ruff --fix, no
+# format) because the fork pulls one-way from upstream — every cosmetic
+# rewrite makes future `git rebase upstream/nightly` harder. See
+# findings.md "Cleanup applied 2026-04-26" for full rationale.
+#
+# Install: `pre-commit install` (one-time, sets up .git/hooks/pre-commit).
+# Update tool versions: `pre-commit autoupdate`.
+# Run on all staged files: `git commit` (auto-fires).
+# Run on entire tree: `pre-commit run --all-files` (informational only —
+#   ruff prints all 4,385 baseline findings; will exit non-zero, expected).
+
+repos:
+  # Real-bug checks. Block the commit if these fail.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-ast      # Python parses (catches SyntaxError like data/station.py did)
+      - id: check-yaml     # workflows / pre-commit config validity
+      - id: check-toml     # pyproject.toml validity
+      - id: check-merge-conflict  # blocks accidentally-committed conflict markers
+
+  # Ruff: informational lint. Runs on staged Python files and prints findings,
+  # but does NOT block the commit (--exit-zero). Reads ./pyproject.toml.
+  # Rationale: the project has 4,385 baseline findings to address gradually;
+  # blocking on them would prevent any commit. The --exit-zero flag turns
+  # ruff into a "FYI" channel — the dev sees what's wrong, decides whether
+  # to address it, but isn't forced to fix unrelated code to land their work.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.0
+    hooks:
+      - id: ruff
+        args: [--no-fix, --exit-zero]
