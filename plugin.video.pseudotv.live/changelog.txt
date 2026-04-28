@@ -1,5 +1,11 @@
 ### NOTICE: The madteevee fork rides on upstream/nightly; things may still break! ####
 
+v.0.7.3+madteevee.4
+- Forward-ported the master-era HDD-quiet tunables (Decouple_Kodi_PVR, Streamdetails_Cache_Days, Library_Walk_Interval, Skip_PVR_Recordings, Skip_PVR_Searches, Skip_Music_Library, Skip_TV_Library, Skip_Movie_Library, Skip_Smartplaylists_Scan). Each setting is in the same UI panel as topical neighbours (PVR sync next to Min/Max Days/OSD Timer; Skip_* next to library-scope toggles; cache/cadence next to RPC settings).
+- "Channel information (OSD) display time" / Min Days / Max Days now ungrey when Decouple_Kodi_PVR is on.
+- RPC_Wait default raised from -1 to 300 seconds for HDD-backed libraries.
+- Fixed a state-management bug where the channel-bug overlay lingered on top of non-pseudotv playback after switching from a pseudotv channel.
+
 v.0.7.3+madteevee.3
 - Hardened XMLTVS load path: _error() now logs the originating exception cleanly, load{Data,Channels,Programmes} survive missing-file conditions, and Globals._decodePlot honours its `-> dict` annotation. Fixes a startup chain where the service thread could die silently before the HTTP server came up.
 

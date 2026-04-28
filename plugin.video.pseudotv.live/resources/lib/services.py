@@ -232,8 +232,16 @@ class Player(xbmc.Player):
                 self.toggleInfo(self.infoOnChange)
             self.jsonRPC.quePlaycount(oldInfo.get('fitem',{}),self.rollbackPlaycount)
             self.jsonRPC._setRuntime(playingItem.get('fitem',{}),playingItem.get('fitem',{}).get('runtime'),self.saveDuration)
+        else:
+            # Non-pseudotv tune (movistar, regular IPTV, addon-as-source, etc.). Clear stale
+            # pseudotv state so isPlayingPseudoTV() turns False and the next __chkOverlay tick
+            # leaves the channel-bug closed. Without this, self.playingItem retains the
+            # previous pseudotv item — isPseudoTV() keeps returning True — and the overlay
+            # re-opens on top of unrelated playback. Master fork did the equivalent via
+            # self.isPseudoTV=False reset in onAVStarted; nightly never wired it.
+            self.playingItem = playingItem
 
-            
+
     @threadit
     def _onChange(self, playingItem={}):
         self.log('_onChange, playingItem = %s'%(playingItem))

@@ -137,6 +137,9 @@ class Library(object):
 
     def getPlaylists(self):
         PlayList = []
+        if SETTINGS.getSettingBool('Skip_Smartplaylists_Scan'):
+            self.log('getPlaylists, skipped per Skip_Smartplaylists_Scan setting')
+            return PlayList
         types = ['video','music']#,'mixed'
         for i, type in enumerate(types):
             self.pCount  = int(i*100//len(types))
@@ -250,6 +253,9 @@ class Library(object):
  
     def getPVRRecordings(self):
         recordList    = []
+        if SETTINGS.getSettingBool('Skip_PVR_Recordings'):
+            self.log('getPVRRecordings, skipped per Skip_PVR_Recordings setting')
+            return recordList
         self.pDialog  = DIALOG._updateProgress(self.pDialog, self.pCount, '%s: %s'%(self.pMSG,LANGUAGE(32140)), header=self.pHeader)
         json_response = self.jsonRPC.getPVRRecordings()
         paths = [item.get('file') for idx, item in enumerate(json_response) if item.get('label','').endswith('(%s)'%(ADDON_NAME))]
@@ -260,6 +266,9 @@ class Library(object):
 
     def getPVRSearches(self):
         searchList = []
+        if SETTINGS.getSettingBool('Skip_PVR_Searches'):
+            self.log('getPVRSearches, skipped per Skip_PVR_Searches setting')
+            return searchList
         json_response = self.jsonRPC.getPVRSearches()
         self.pDialog  = DIALOG._updateProgress(self.pDialog, self.pCount, '%s: %s'%(self.pMSG,LANGUAGE(32140)), header=self.pHeader)
         for idx, item in enumerate(json_response):
@@ -277,6 +286,9 @@ class Library(object):
     @cacheit(expiration=datetime.timedelta(minutes=15))
     def getTVInfo(self, sortbycount=True, limit=AUTOTUNE_CHANNEL_LIMIT):
         self.log('getTVInfo')
+        if SETTINGS.getSettingBool('Skip_TV_Library'):
+            self.log('getTVInfo, skipped per Skip_TV_Library setting')
+            return {'studios':[],'genres':[],'shows':[]}
         NetworkList = ShowGenreList = TVShowList = []
         if BUILTIN.hasTV():
             TVShowList    = Counter()
@@ -346,8 +358,11 @@ class Library(object):
     @cacheit(expiration=datetime.timedelta(minutes=15))
     def getMovieInfo(self, sortbycount=True, limit=AUTOTUNE_CHANNEL_LIMIT):
         self.log('getMovieInfo')
+        if SETTINGS.getSettingBool('Skip_Movie_Library'):
+            self.log('getMovieInfo, skipped per Skip_Movie_Library setting')
+            return {'studios':[],'genres':[]}
         StudioList = MovieGenreList = []
-        if BUILTIN.hasMovie(): 
+        if BUILTIN.hasMovie():
             StudioList     = Counter()
             MovieGenreList = Counter()
             self.pDialog   = DIALOG._updateProgress(self.pDialog, self.pCount, '%s: %s'%(self.pMSG,LANGUAGE(32140)), header=self.pHeader)
@@ -399,8 +414,11 @@ class Library(object):
     @cacheit(expiration=datetime.timedelta(minutes=15))
     def getMusicInfo(self, sortbycount=True, limit=AUTOTUNE_CHANNEL_LIMIT):
         self.log('getMusicInfo')
+        if SETTINGS.getSettingBool('Skip_Music_Library'):
+            self.log('getMusicInfo, skipped per Skip_Music_Library setting')
+            return {'genres':[]}
         MusicGenreList = []
-        if BUILTIN.hasMusic(): 
+        if BUILTIN.hasMusic():
             MusicGenreList = Counter()
             self.pDialog   = DIALOG._updateProgress(self.pDialog, self.pCount, '%s: %s'%(self.pMSG,LANGUAGE(32140)), header=self.pHeader)
             json_response  = self.jsonRPC.getMusicGenres()
