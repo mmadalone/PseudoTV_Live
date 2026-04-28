@@ -6,3 +6,12 @@ plugin.video.pseudotv.live/.idea/inspectionProfiles/profiles_settings.xml
 plugin.video.pseudotv.live/.idea/misc.xml
 plugin.video.pseudotv.live/.idea/modules.xml
 plugin.video.pseudotv.live/.idea/plugin.video.pseudotv.live.iml
+_site/
+.pytest_cache/
+tests/__pycache__/
+tests/**/__pycache__/
+REBASE_PLAN.md
+CLAUDE.md
+_NOTES.md
+findings.md
+logs/
