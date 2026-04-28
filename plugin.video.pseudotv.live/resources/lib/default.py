@@ -49,7 +49,12 @@ if __name__ == '__main__':
                 except: fitem, nitem = Globals._decodePlot(Globals._getInfoLabel('Plot')), Globals._decodePlot(Globals._getInfoLabel('NextPlot'))
                 chid, vid   = (sysInfo.get("chid")  or fitem.get('citem',{}).get('id')), FileAccess._decodeString(sysInfo.get("vid",""))
                 name, title = (Globals._unquoteString(sysInfo.get("name",'')) or Globals._getInfoLabel('ChannelName')), (Globals._unquoteString(sysInfo.get('title','')) or Globals._getInfoLabel('label'))
-                sysInfo.update({'mode':sysInfo.get('mode'),'sysARG':sysARG,'fitem':fitem,'nitem':nitem,'chid':chid,'vid':vid,'name':name,'title':title,'radio':sysInfo.get('mode') == "radio"})
+                # _tune_ts (madteevee fork): per-invocation timestamp threaded through to onAVStarted.
+                # Carries through sysInfo -> ListItem property -> getplayingItem -> services.onAVStarted,
+                # where stale (older-tune-ts) events from aborted fast-zaps are dropped before mutating
+                # self.pendingItem. Without this, Kodi's load-finish-order onAVStarted re-firing
+                # anchors player state to the oldest tune in a CH+/CH- burst.
+                sysInfo.update({'mode':sysInfo.get('mode'),'sysARG':sysARG,'fitem':fitem,'nitem':nitem,'chid':chid,'vid':vid,'name':name,'title':title,'radio':sysInfo.get('mode') == "radio",'_tune_ts':time.time()})
                 _run(sysInfo.get('mode'), sysInfo)
     except Exception as e: 
         log(f'Default: __main__, failed! {e}', xbmc.LOGERROR)
