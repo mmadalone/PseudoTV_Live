@@ -119,24 +119,26 @@ class FileAccess(object):
     @staticmethod
     def getJSON(file):
         data = {}
-        try: 
+        fle = None
+        try:
             fle  = FileAccess.open(file,'r')
             data = FileAccess.loadJSON(fle.read())
         except Exception as e: log('FileAccess: getJSON failed! %s\nfile = %s'%(e,file), xbmc.LOGERROR)
-        finally: 
-            if hasattr(fle, 'close'): fle.close()
+        finally:
+            if fle is not None and hasattr(fle, 'close'): fle.close()
         return data
 
 
     @staticmethod
     def setJSON(file, data):
         with FileLock(file):
+            fle = None
             try:
                 fle = FileAccess.open(file, 'w')
                 fle.write(FileAccess.dumpJSON(data, idnt=4, sortkey=False))
             except Exception as e: log('FileAccess: setJSON failed! %s\nfile = %s'%(e,file), xbmc.LOGERROR)
             finally:
-                if hasattr(fle, 'close'): fle.close()
+                if fle is not None and hasattr(fle, 'close'): fle.close()
             return True
 
 

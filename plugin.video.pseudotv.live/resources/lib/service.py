@@ -17,7 +17,13 @@
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 #
 # -*- coding: utf-8 -*-
+import sys
+from kodi_six   import xbmc
+
 from services   import Service
+from logger     import log
+from constants  import CPU_CYCLE, LANGUAGE
+from globals    import DIALOG
 
 def _start():
     try:
