@@ -36,19 +36,17 @@ class Plugin(object):
         if not self.sysInfo.get('fitem'): 
             self._updateSysInfo() #Widgets don't include listitem meta, attempt to find matching meta with jsonrpc
             
-        self.sysInfo['isVOD']      = self.sysInfo.get('fitem').get('file','-1') != self.sysInfo.get('vid','-1')
+        # isVOD is a routing flag, not a structural truth — it answers "is this tune
+        # actually a VOD selection (catchup-id / specific programme picked from manager)?",
+        # not "is this content library-derived?". Nightly tied it to fitem.file != vid which
+        # is True for ALL library-derived channels (their fitem.file is the local media path
+        # while vid is the encoded plugin URL — they NEVER match by construction), making
+        # every PseudoTV channel zap look like a VOD selection. Tie to URL mode instead so
+        # 'live' tunes are not VOD, 'vod'/'dvr' tunes are.
+        self.sysInfo['isVOD']      = sysInfo.get('mode') in ('vod', 'dvr')
         self.sysInfo['isSTRM']     = self.sysInfo.get('fitem').get('file','').endswith('.strm')
         self.sysInfo['isPlaylist'] = bool(SETTINGS.getSettingInt('Playback_Method'))
-        # Don't coerce mode='live' tunes (PVR EPG / channel zap) into the playlist queue —
-        # PseudoTV channels are library-derived so isVOD is always True for them, which on
-        # vanilla nightly forced every tune through playPlaylist (queue dialog, frame-0
-        # restart, no channel-bug overlay, no live timebar). Mode-live stays live; the
-        # playlist coercion still applies to non-live origins (catchup, manager, widgets).
-        original_mode = sysInfo.get('mode')
-        if original_mode == 'live':
-            mode = 'live'
-        else:
-            mode = 'playlist' if any([self.sysInfo['isVOD'],self.sysInfo['isSTRM'],self.sysInfo['isPlaylist']]) else original_mode
+        mode = 'playlist' if any([self.sysInfo['isVOD'],self.sysInfo['isSTRM'],self.sysInfo['isPlaylist']]) else sysInfo.get('mode')
         self.log(f'__init__, mode = {mode}, sysInfo = {self.sysInfo}')
         
         if   mode == 'live':                    self.playLive()

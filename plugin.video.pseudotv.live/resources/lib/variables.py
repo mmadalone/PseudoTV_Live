@@ -152,20 +152,30 @@ class Globals:
             except Exception: xbmc.executebuiltin("ReplaceWindow(TVGuide)")
         else: Globals._openSettings()
           
-    @staticmethod  
+    @staticmethod
     def _getThumb(item={}, opt=0): #unify thumbnail artwork
-        art  = None
-        keys = {0:['landscape','fanart','thumb','thumbnail','poster','clearlogo','logo','logos','clearart','keyart,icon'],
+        # Two real nightly bugs:
+        #   (1) Last key in the opt=0 list was a single string 'keyart,icon' instead of two
+        #       separate entries — typo from upstream's tuple-flatten that reads as a literal
+        #       comma-containing key Kodi never sets.
+        #   (2) Loop overwrote `art` on every iteration with no early-return, so `art` after
+        #       the loop was whatever the LAST key resolved to (almost always None) instead of
+        #       whatever the FIRST matching key found. Result: every programme fell through to
+        #       the fallback landscape.png placeholder regardless of what art Kodi's library
+        #       actually had. Master fork's getThumb returns inside the loop on first match —
+        #       restored here.
+        keys = {0:['landscape','fanart','thumb','thumbnail','poster','clearlogo','logo','logos','clearart','keyart','icon'],
                 1:['poster','clearlogo','logo','logos','clearart','keyart','landscape','fanart','thumb','thumbnail','icon']}[opt]
         for key in keys:
-            art = (item.get('art',{}).get('album.%s'%(key))       or 
-                   item.get('art',{}).get('albumartist.%s'%(key)) or 
-                   item.get('art',{}).get('artist.%s'%(key))      or 
-                   item.get('art',{}).get('season.%s'%(key))      or 
-                   item.get('art',{}).get('tvshow.%s'%(key))      or 
+            art = (item.get('art',{}).get('album.%s'%(key))       or
+                   item.get('art',{}).get('albumartist.%s'%(key)) or
+                   item.get('art',{}).get('artist.%s'%(key))      or
+                   item.get('art',{}).get('season.%s'%(key))      or
+                   item.get('art',{}).get('tvshow.%s'%(key))      or
                    item.get('art',{}).get(key)                    or
                    item.get(key))
-        return Globals._buildWebImage(art, {0:LOGO_LANDSCAPE,1:LOGO_POSTER}[opt])
+            if art: return Globals._buildWebImage(art, {0:LOGO_LANDSCAPE,1:LOGO_POSTER}[opt])
+        return Globals._buildWebImage(None, {0:LOGO_LANDSCAPE,1:LOGO_POSTER}[opt])
 
     @staticmethod  
     def _buildWebImage(image=None, fallback=LOGO):
