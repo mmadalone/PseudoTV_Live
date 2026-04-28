@@ -39,7 +39,16 @@ class Plugin(object):
         self.sysInfo['isVOD']      = self.sysInfo.get('fitem').get('file','-1') != self.sysInfo.get('vid','-1')
         self.sysInfo['isSTRM']     = self.sysInfo.get('fitem').get('file','').endswith('.strm')
         self.sysInfo['isPlaylist'] = bool(SETTINGS.getSettingInt('Playback_Method'))
-        mode = 'playlist' if any([self.sysInfo['isVOD'],self.sysInfo['isSTRM'],self.sysInfo['isPlaylist']]) else sysInfo.get('mode')
+        # Don't coerce mode='live' tunes (PVR EPG / channel zap) into the playlist queue —
+        # PseudoTV channels are library-derived so isVOD is always True for them, which on
+        # vanilla nightly forced every tune through playPlaylist (queue dialog, frame-0
+        # restart, no channel-bug overlay, no live timebar). Mode-live stays live; the
+        # playlist coercion still applies to non-live origins (catchup, manager, widgets).
+        original_mode = sysInfo.get('mode')
+        if original_mode == 'live':
+            mode = 'live'
+        else:
+            mode = 'playlist' if any([self.sysInfo['isVOD'],self.sysInfo['isSTRM'],self.sysInfo['isPlaylist']]) else original_mode
         self.log(f'__init__, mode = {mode}, sysInfo = {self.sysInfo}')
         
         if   mode == 'live':                    self.playLive()
@@ -152,6 +161,30 @@ class Plugin(object):
     def playLive(self):
         self.log('[%s] playLive, name = %s'%(self.sysInfo.get('chid'), self.sysInfo.get('name')))
         with PROPERTIES.suspendActivity():
+            try:    start = int(self.sysInfo.get('start', -1) or -1)
+            except: start = -1
+            try:    stop  = int(self.sysInfo.get('stop',  -1) or -1)
+            except: stop  = -1
+            try:    now   = int(self.sysInfo.get('now',   -1) or -1)
+            except: now   = -1
+            # EPG now-cell tune (forward-ported from master fork) — when iptvsimple's PVR EPG
+            # fires a live URL for a programme that is currently on-air (start <= now <= stop),
+            # join that programme at the in-programme offset rather than restarting from frame
+            # 0. Without this, library-derived channels (which are always isVOD=True because
+            # fitem.file is local while vid is the encoded plugin URL) fall into the VOD branch
+            # below, get mode flipped to 'vod', seek reset to -1, the "Now playing VOD" toast
+            # raised, and lose channel-bug / live-timebar UX. seek is computed from now-start;
+            # _setResume honours Seek_Tolerance (≈60s) so an at-the-cusp tune still plays from 0.
+            if self.sysInfo.get('fitem') and start > 0 and stop > 0 and start <= now <= stop:
+                seek = max(0, now - start)
+                duration_seconds = max(1, stop - start)
+                self.sysInfo['seek']               = seek
+                self.sysInfo['progresspercentage'] = int(seek * 100 / duration_seconds)
+                self.log('[%s] playLive, joining now-cell at seek=%s/%ss (%s%%)'%(self.sysInfo.get('chid'), seek, duration_seconds, self.sysInfo['progresspercentage']))
+                listitem = self._setResume(LISTITEMS.buildItemListItem(self.sysInfo.get('fitem')))
+                listitem.setProperty('sysInfo', FileAccess._encodeString(self.sysInfo))
+                self._resolveURL(True, listitem)
+                return
             #VOD called from Guide not live! / break PVR bind for correct meta.
             if self.sysInfo['isVOD'] or self.sysInfo['isSTRM']:
                 if self.sysInfo['isVOD']:
