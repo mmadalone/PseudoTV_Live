@@ -100,20 +100,24 @@ class XMLTVS(object):
         self.__init__()
     
     
-    def _error(self, name, e):
-        #hacky; try to log malformed xml's by printing error position..
+    def _error(self, name, file, e):
+        # Signature is (name, file, e) — all 3 callers (loadData/loadChannels/loadProgrammes)
+        # pass 3 positional args. Nightly upstream stripped the 'file' parameter, turning every
+        # xmltv parse failure into a misleading TypeError that masked the real error and crashed
+        # the service. Restored from the master-era fork.
         if not 'no element found: line 1, column 0' in str(e):
             try:
                 match = re.compile(r'line\ (.*?),\ column\ (.*)', re.IGNORECASE).search(str(e))
                 if match:
-                    try: 
-                        fle   = FileAccess.open(self.XMLTVFile,'r')
-                        return fle.readlines()
-                    except Exception: 
+                    fle = None
+                    try:
+                        fle  = FileAccess.open(file,'r')
+                        lines = fle.readlines()
                         self.log('%s, failed! parser error %s\nLine: %s\n Error: %s'%(name,e,lines[int(match.group(1))],lines[int(match.group(1))][int(match.group(2))-5:]), xbmc.LOGERROR)
-                        return
+                    except Exception:
+                        self.log('%s, failed! parser error %s'%(name,e), xbmc.LOGERROR)
                     finally:
-                        if hasattr(fle, 'close'): 
+                        if fle is not None and hasattr(fle, 'close'):
                             fle.close()
                 else: raise Exception('no parser match %s'%(str(e)))
             except Exception as en: self.log('%s, failed! %s\n%s'%(name,e,en), xbmc.LOGERROR)
@@ -130,48 +134,45 @@ class XMLTVS(object):
 
     def loadData(self) -> dict:
         self.log('loadData, file = %s'%self.XMLTVFile)
+        data = self.resetData()
+        fle = None
         try:
-            data = self.resetData()
-            try: 
-                fle  = FileAccess.open(self.XMLTVFile, 'r')
-                return (xmltv.read_data(fle) or data)
-            except: pass
-            finally:
-                if hasattr(fle, 'close'): 
-                    fle.close()
+            fle  = FileAccess.open(self.XMLTVFile, 'r')
+            return (xmltv.read_data(fle) or data)
         except Exception as e:
             self._error('loadData',self.XMLTVFile,e)
             return data
+        finally:
+            if fle is not None and hasattr(fle, 'close'):
+                fle.close()
 
 
     def loadChannels(self) -> list:
         self.log('loadChannels, file = %s'%self.XMLTVFile)
+        fle = None
         try:
-            try: 
-                fle  = FileAccess.open(self.XMLTVFile, 'r')
-                return (xmltv.read_channels(fle) or [])
-            except Exception: pass
-            finally:
-                if hasattr(fle, 'close'): 
-                    fle.close()
+            fle  = FileAccess.open(self.XMLTVFile, 'r')
+            return (xmltv.read_channels(fle) or [])
         except Exception as e:
             self._error('loadChannels',self.XMLTVFile,e)
             return []
-        
-        
+        finally:
+            if fle is not None and hasattr(fle, 'close'):
+                fle.close()
+
+
     def loadProgrammes(self) -> list:
         self.log('loadProgrammes, file = %s'%self.XMLTVFile)
-        try: 
-            try: 
-                fle = FileAccess.open(self.XMLTVFile, 'r')
-                return (xmltv.read_programmes(fle) or [])
-            except Exception: pass
-            finally:
-                if hasattr(fle, 'close'): 
-                    fle.close()
-        except Exception as e: 
+        fle = None
+        try:
+            fle = FileAccess.open(self.XMLTVFile, 'r')
+            return (xmltv.read_programmes(fle) or [])
+        except Exception as e:
             self._error('loadProgrammes',self.XMLTVFile,e)
             return []
+        finally:
+            if fle is not None and hasattr(fle, 'close'):
+                fle.close()
 
             
     def loadStopTimes(self, channels: list=[], programmes: list=[], fallback=None):
