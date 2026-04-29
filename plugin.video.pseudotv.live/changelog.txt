@@ -1,5 +1,8 @@
 ### NOTICE: The madteevee fork rides on upstream/nightly; things may still break! ####
 
+v.0.7.3+madteevee.27
+- Fixed v.26's resource:// → HTTP conversion: the /logos/<name> URL form was wrong because resources.getCache(name) falls back to the LOGO constant (generic pseudotv logo) on miss, and the local logos cache (~/.kodi/.../cache/logos/) is empty by default in nightly. Every logo URL ended up redirecting to the generic logo PNG. Replaced with a direct mapping: resource://<addon>/<file> → http://<host>:50001/images/<URL-encoded-special://-path>, where the special:// path points to the resource addon's resources/ directory. Pseudotv's HTTP server serves the actual file via __sendFile + FileAccess (which handles special:// translation). Verified MD5-identical to the source PNG end-to-end.
+
 v.0.7.3+madteevee.26
 - Two bugs fixed.
   Bug A (stuck wrong logo on fast zaps): rapid CH+/CH- could leave the channel-bug logo locked to the wrong channel until the next channel change. Cause: the Overlay constructor at overlay.py:180 snapshots self.player.playingItem.get('citem') once at __init__. _onPlay (decorated @threadit) closes the existing overlay, then later updates self.playingItem; if __chkOverlay's poll lands between those two steps during a fast zap, the new Overlay snapshots the PREVIOUS channel's citem. Subsequent toggleOverlay(True) calls saw overlay != None and no-op'd, so the wrong logo stayed stuck. Fix: track Player._overlay_chid; if it mismatches the current playingItem.citem.id, close and rebuild the overlay with fresh state. Restores master fork commit 9be4969 lost during the rebase to upstream/nightly. Idempotent when chid hasn't changed (preserves the existing no-flicker behavior on programme transitions).

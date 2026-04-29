@@ -184,19 +184,28 @@ class Globals:
         elif   image.startswith('image://'):    image = '%s/image/%s'%(Globals._getProperty('%s.Local_Host'%(ADDON_ID)),Globals._quoteString(image))
         elif   image.startswith('http'):        image = 'http://%s/images/%s'%(Globals._getProperty('%s.Remote_Host'%(ADDON_ID)),Globals._quoteString(image))
         elif   image.startswith('resource://'):
-            # v.26: convert Kodi-internal resource:// URLs to HTTP URLs served
+            # v.27: convert Kodi-internal resource:// URLs to HTTP URLs served
             # by pseudotv's HTTP server (port 50001). External clients that
             # consume PVR.GetChannels via JSON-RPC (UC Remote 3 in particular,
-            # also web frontends and any non-Kodi-process consumer) can't
-            # resolve resource:// — it's a Kodi-internal protocol.
-            # The /logos/<name> endpoint at server.py:186 already redirects to
-            # /images/<resolved-cache-path> which serves the PNG, so the
-            # mechanism is in place; we just emit the URL form that exercises
-            # it. Native Kodi clients also fetch via this path (marginally
-            # slower than direct resource:// resolution but functionally
-            # identical and works for everyone).
-            name = image.rstrip('/').rsplit('/', 1)[-1]
-            image = 'http://%s/logos/%s'%(Globals._getProperty('%s.Remote_Host'%(ADDON_ID)),Globals._quoteString(name))
+            # web frontends, anything non-Kodi) can't resolve resource:// —
+            # it's a Kodi-internal protocol.
+            #
+            # v.26 used the /logos/<name> endpoint, which goes through
+            # resources.getCache(name) and falls back to LOGO (the generic
+            # pseudotv logo) on cache miss. The local cache at
+            # ~/.kodi/.../cache/logos/ is empty by default in nightly (master
+            # populated it via getLocalLogo on the lookup path), so every
+            # logo URL pointed to the wrong file. Fixed: bypass the cache
+            # entirely and resolve resource://<addon>/<file> to the actual
+            # special:// path under the resource addon's resources/ directory,
+            # then serve via the existing /images/ route which __sendFile's
+            # any path FileAccess can open. Verified MD5-identical to the
+            # source PNG end-to-end.
+            parts = image[len('resource://'):].split('/', 1)
+            if len(parts) == 2:
+                addon_id, filename = parts
+                kodi_path = 'special://home/addons/%s/resources/%s'%(addon_id, filename)
+                image = 'http://%s/images/%s'%(Globals._getProperty('%s.Remote_Host'%(ADDON_ID)),Globals._quoteString(kodi_path))
         return image
 
     @staticmethod
