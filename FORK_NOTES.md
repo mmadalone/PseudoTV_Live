@@ -236,7 +236,23 @@ This was the dominant problem area — UC Remote 3 channel logos broke after the
 
 ## Pending items / future forward-ports
 
-These are real issues observed during the v.12-v.41 work that landed as workarounds, deferred fixes, or remain in upstream/nightly to watch:
+These are real issues observed during the v.12-v.41 work that landed as workarounds, deferred fixes, or remain in upstream/nightly to watch.
+
+### Priority order for next session
+
+When picking up work in a new session, this is the recommended order. ROI = effort × likelihood of hitting the bug × severity when hit.
+
+| Priority | Item | Effort | Why this order |
+|---|---|---|---|
+| **1 (do first)** | `buildFileList` cpu-cycle sleep in `_suspend` branch | one-line addition (`MONITOR().waitForAbort(CPU_CYCLE)` in the suspend branch of `builder.py:494-501`) | Real deadlock we hit twice this session. Fix is trivial. Eliminates the "don't open Kodi UI during a build" operator footgun |
+| 2 | `channels.json` writeback on shutdown clobbers `changed:true` | medium | Operator gotcha but workaround (don't restart between flip and build) is fine. Real fix needs a "skip channels.json save during shutdown" guard or a separate force-rebuild signal |
+| 3 | `chkChanged` debounce | small | Performance, not correctness. Multiple builds queue when channel manager save fires the property repeatedly |
+| 4 | Per-instance vs class-level `M3UDATA`/`XMLTVDATA` | large refactor | v.24 snapshot/restore is the workaround. Cleaner fix is per-Builder-instance state. Defer until/unless the workaround starts breaking |
+| 5 | Periodic rebase against `upstream/nightly` | varies | Pull upstream improvements. Each fork commit is one fix per file so conflicts localize. Do roughly every 2-4 weeks of upstream activity |
+
+The 5 upstream/nightly bugs in "Things upstream/nightly should fix" below stay fork-local per `project_fork_only_no_upstream` — only revisit if the no-PR rule changes.
+
+
 
 ### Build-flow `_suspend` self-deadlock (workaround in place, not fixed)
 
