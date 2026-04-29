@@ -29,6 +29,11 @@ class Player(xbmc.Player):
     playingItem       = {}
     background        = None
     overlay           = None
+    # v.26: chid the current overlay was opened for. Used by toggleOverlay
+    # for idempotency (no-op when overlay already shows the right channel)
+    # and to force-rebuild on chid mismatch (recovers from the chkOverlay-vs-
+    # _onPlay race during fast zaps that captured a stale citem snapshot).
+    _overlay_chid     = None
     replay            = None
     runActions        = None
     lastSubState      = False
@@ -381,13 +386,32 @@ class Player(xbmc.Player):
 
 
     def toggleOverlay(self, state: bool=SETTINGS.getSettingBool('Overlay_Enable')):
-        if state and self.isPlayingPseudoTV() and self.overlay is None:
+        # v.26: chid-aware idempotency. The Overlay constructor at overlay.py:180
+        # snapshots self.player.playingItem.get('citem') at __init__ — once. If
+        # __chkOverlay's poll lands between _onPlay's toggleOverlay(False) and
+        # _onPlay's self.playingItem update during a fast zap, the new Overlay
+        # captures the PREVIOUS channel's citem (and logo). Without this guard,
+        # subsequent toggleOverlay(True) calls see overlay != None and no-op,
+        # leaving the wrong logo stuck on screen indefinitely. Track the chid
+        # the overlay was opened for; if it mismatches the current playingItem's
+        # chid, close and rebuild with fresh state. The fix is described in
+        # CLAUDE.md memory and was originally master-fork commit 9be4969 — lost
+        # during the rebase to upstream/nightly.
+        if state and self.isPlayingPseudoTV():
+            current_chid = self.playingItem.get('citem',{}).get('id')
+            if self.overlay is not None:
+                if self._overlay_chid == current_chid:
+                    return
+                self.overlay = self.overlay.close()
             self.overlay = Overlay(player=self)
             self.overlay.open()
+            self._overlay_chid = current_chid
         elif not state and hasattr(self.overlay,'close'):
             self.overlay = self.overlay.close()
-        else: return
-        self.log("toggleOverlay, state = %s, overlay = %s"%(state, self.overlay))
+            self._overlay_chid = None
+        else:
+            return
+        self.log("toggleOverlay, state = %s, overlay = %s, _overlay_chid = %s"%(state, self.overlay, self._overlay_chid))
 
 
     @debounceit(OSD_TIMER)

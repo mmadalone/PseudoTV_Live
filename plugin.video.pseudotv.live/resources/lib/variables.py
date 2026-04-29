@@ -177,12 +177,26 @@ class Globals:
             if art: return Globals._buildWebImage(art, {0:LOGO_LANDSCAPE,1:LOGO_POSTER}[opt])
         return Globals._buildWebImage(None, {0:LOGO_LANDSCAPE,1:LOGO_POSTER}[opt])
 
-    @staticmethod  
+    @staticmethod
     def _buildWebImage(image=None, fallback=LOGO):
         image = Globals._cleanImage(image)
         if not image: return fallback
-        elif   image.startswith('image://'): image = '%s/image/%s'%(Globals._getProperty('%s.Local_Host'%(ADDON_ID)),Globals._quoteString(image))
-        elif   image.startswith('http'):     image = 'http://%s/images/%s'%(Globals._getProperty('%s.Remote_Host'%(ADDON_ID)),Globals._quoteString(image))
+        elif   image.startswith('image://'):    image = '%s/image/%s'%(Globals._getProperty('%s.Local_Host'%(ADDON_ID)),Globals._quoteString(image))
+        elif   image.startswith('http'):        image = 'http://%s/images/%s'%(Globals._getProperty('%s.Remote_Host'%(ADDON_ID)),Globals._quoteString(image))
+        elif   image.startswith('resource://'):
+            # v.26: convert Kodi-internal resource:// URLs to HTTP URLs served
+            # by pseudotv's HTTP server (port 50001). External clients that
+            # consume PVR.GetChannels via JSON-RPC (UC Remote 3 in particular,
+            # also web frontends and any non-Kodi-process consumer) can't
+            # resolve resource:// — it's a Kodi-internal protocol.
+            # The /logos/<name> endpoint at server.py:186 already redirects to
+            # /images/<resolved-cache-path> which serves the PNG, so the
+            # mechanism is in place; we just emit the URL form that exercises
+            # it. Native Kodi clients also fetch via this path (marginally
+            # slower than direct resource:// resolution but functionally
+            # identical and works for everyone).
+            name = image.rstrip('/').rsplit('/', 1)[-1]
+            image = 'http://%s/logos/%s'%(Globals._getProperty('%s.Remote_Host'%(ADDON_ID)),Globals._quoteString(name))
         return image
 
     @staticmethod
