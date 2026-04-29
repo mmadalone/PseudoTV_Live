@@ -244,8 +244,8 @@ When picking up work in a new session, this is the recommended order. ROI = effo
 
 | Priority | Item | Effort | Why this order |
 |---|---|---|---|
-| **1 (do first)** | `buildFileList` cpu-cycle sleep in `_suspend` branch | one-line addition (`MONITOR().waitForAbort(CPU_CYCLE)` in the suspend branch of `builder.py:494-501`) | Real deadlock we hit twice this session. Fix is trivial. Eliminates the "don't open Kodi UI during a build" operator footgun |
-| 2 | `channels.json` writeback on shutdown clobbers `changed:true` | medium | Operator gotcha but workaround (don't restart between flip and build) is fine. Real fix needs a "skip channels.json save during shutdown" guard or a separate force-rebuild signal |
+| ~~**1**~~ ✓ v.42 | ~~`buildFileList` cpu-cycle sleep in `_suspend` branch~~ — **done**. Extended to `buildChannels:326` and `buildVideo:433` since `services.py:593`'s `_suspend(self, wait=0)` doesn't act on the wait parameter, so those sibling `_suspend(CPU_CYCLE)` calls had the same effective bug | 3 × one-line addition | ✓ Resolved in v.42 |
+| **2 (do next)** | `channels.json` writeback on shutdown clobbers `changed:true` | medium | Operator gotcha but workaround (don't restart between flip and build) is fine. Real fix needs a "skip channels.json save during shutdown" guard or a separate force-rebuild signal |
 | 3 | `chkChanged` debounce | small | Performance, not correctness. Multiple builds queue when channel manager save fires the property repeatedly |
 | 4 | Per-instance vs class-level `M3UDATA`/`XMLTVDATA` | large refactor | v.24 snapshot/restore is the workaround. Cleaner fix is per-Builder-instance state. Defer until/unless the workaround starts breaking |
 | 5 | Periodic rebase against `upstream/nightly` | varies | Pull upstream improvements. Each fork commit is one fix per file so conflicts localize. Do roughly every 2-4 weeks of upstream activity |
@@ -254,13 +254,13 @@ The 5 upstream/nightly bugs in "Things upstream/nightly should fix" below stay f
 
 
 
-### Build-flow `_suspend` self-deadlock (workaround in place, not fixed)
+### Build-flow `_suspend` self-deadlock (fixed in v.42)
 
 **Symptom:** Builder.buildFiles can enter a tight `_suspend` loop (`while not abortRequested: ... elif self.service._suspend(): continue`). With no sleep in the polling loop, `pendingSuspend=True` from any concurrent activity (Kodi addonsettings dialog open, busy_dialog from a chkOverlay tick, etc.) traps the builder. We hit this twice during v.39/v.41 testing — once because the user had pseudotv's addon settings dialog open during a chkChanged-triggered build, once with a transient ~150ms suspend cycle from another thread that the builder happened to sample at the wrong instant.
 
-**Workaround:** trigger rebuilds with no Kodi UI dialogs open. Restart Kodi if a build appears stuck (`buildFiles, _suspend` repeating in the log without progress). The build is queued into `tasks.chkChanged` which fires periodically; flipping `channels.json` `changed:false → changed:true` forces it to pick the channel up next cycle.
+**Workaround (no longer needed post-v.42):** trigger rebuilds with no Kodi UI dialogs open. Restart Kodi if a build appears stuck (`buildFiles, _suspend` repeating in the log without progress). The build is queued into `tasks.chkChanged` which fires periodically; flipping `channels.json` `changed:false → changed:true` forces it to pick the channel up next cycle.
 
-**Real fix (not done):** add a sleep in the `_suspend` poll branch (master fork's `buildFileList` had `MONITOR().waitForAbort(CPU_CYCLE)` here; nightly drops it). Or change `_suspend()` to return False after N consecutive checks against the same `pendingSuspend=True`. Either localizes to `builder.py` and is one of those fork-only changes that won't conflict with upstream merges.
+**Resolution (v.42):** added `self.monitor.waitForAbort(CPU_CYCLE)` immediately before `continue` in the `_suspend` poll branches of `buildFileList:498`, `buildChannels:326`, and `buildVideo:433`. The latter two pass `CPU_CYCLE` to `_suspend(...)` but `services.py:593`'s `_suspend(self, wait=0)` doesn't act on the wait parameter, so those call sites had no throttle either. Three one-line additions, no signature changes. The unused `wait` parameter in `services.py:593._suspend` is left as-is — separate cleanup, would change nothing at runtime.
 
 ### `channels.json` writeback on shutdown clobbers `changed:true`
 
@@ -278,7 +278,7 @@ If a future iptvsimple release accepts image:// directly (or upstream pseudotv e
 
 These were master-era fork patches that nightly may or may not have merged differently. Worth a re-check on the next `git rebase upstream/nightly`:
 
-- **`buildFileList` cpu-cycle sleep in suspend branch** — see "self-deadlock" above. Master had `MONITOR().waitForAbort(CPU_CYCLE)`. Nightly removed it.
+- ~~**`buildFileList` cpu-cycle sleep in suspend branch**~~ — ✓ Done in v.42. Extended to `buildChannels:326` and `buildVideo:433`. See "Build-flow `_suspend` self-deadlock" above.
 - **chkChanged debounce** — currently chkChanged fires on every property poll cycle when the property is set; if the property gets set rapidly during channel-manager save it can queue multiple builds. Master fork had a debounce.
 - **Class-level vs instance-level M3UDATA / XMLTVDATA** — the v.24 snapshot/restore mechanism is a workaround for the underlying issue that Builder shares mutable M3U/XMLTV state across instances at the class level. Cleaner fix is per-instance state. Larger change, deferred.
 

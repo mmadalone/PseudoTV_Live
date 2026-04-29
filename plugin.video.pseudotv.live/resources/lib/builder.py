@@ -328,6 +328,7 @@ class Builder(object):
                                 # v.24: restore so the next iteration's __setStation doesn't save
                                 # this channel's cleared state from the failed mid-build interrupt.
                                 self._restoreChannel(citem)
+                                self.monitor.waitForAbort(CPU_CYCLE)
                                 continue
                             elif _update or _changed:                       
                                 if    preview:           self.pMSG = LANGUAGE(32236)                           #Preview
@@ -432,6 +433,7 @@ class Builder(object):
                     return []
                 elif self.service._suspend(CPU_CYCLE):
                     self.log("[%s] buildVideo, _suspend"%(citem['id']))
+                    self.monitor.waitForAbort(CPU_CYCLE)
                     continue
                 else:
                     if   self.xsp.isXSP(paths):           paths = self.xsp.parseXSP(citem['id'], paths)# smartplaylist - convert tvshows types to multi-path, apply sort methods
@@ -498,6 +500,7 @@ class Builder(object):
             elif self.service._suspend():
                 self.log("[%s] buildFileList, _suspend"%(citem['id']))
                 self.pDialog = DIALOG._updateProgress(self.pDialog, self.pCount, message='%s: %s'%(LANGUAGE(32144),LANGUAGE(32145)), header=self.pHeader)
+                self.monitor.waitForAbort(CPU_CYCLE)
                 continue
             elif len(dirList) == 0 or dirCount >= self.recursiveLimit:
                 # B6 forward-port (madteevee): if dirList drained but pagination shows more
