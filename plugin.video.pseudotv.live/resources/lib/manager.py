@@ -503,15 +503,23 @@ class Manager(xbmcgui.WindowXMLDialog):
                             try:    lastXID = int(lizLST[select].getProperty('idx'))
                             except Exception: lastXID = -1
                             nrule, citem = self.getRule(citem, arules[lastXID])
-                            if not nrule is None: ruleLST.update({str(nrule.myId):nrule})
+                            # madteevee: ruleLST has int keys (loadRules normalises after v.22),
+                            # so the new entry needs an int key too — was str(nrule.myId) which
+                            # produced a hybrid dict that the edit/delete branch below couldn't
+                            # find by int lookup.
+                            if not nrule is None: ruleLST.update({nrule.myId:nrule})
                     elif key == 'save':
                         rules = ruleLST
                         break
-                    elif ruleLST.get(str(myId)):
+                    elif ruleLST.get(myId):
+                        # madteevee: was ruleLST.get(str(myId)) / ruleLST.pop(str(myId)) — but
+                        # ruleLST keys are int (rule.myId is int, normalised by loadRules in
+                        # v.22). The str lookup always missed and the elif fell through, so
+                        # users couldn't edit or delete an applied rule. Use the int myId.
                         with self.toggleSpinner(condition=PROPERTIES.isRunning('Manager.toggleSpinner')==False):
                             retval = DIALOG.yesnoDialog(LANGUAGE(32175), customlabel=LANGUAGE(32176))
-                            if retval in [1,2]: ruleLST.pop(str(myId))
-                            if retval == 2: 
+                            if retval in [1,2]: ruleLST.pop(myId)
+                            if retval == 2:
                                 nrule, citem = self.getRule(citem, crules.get(myId,{}))
                                 if not nrule is None: ruleLST.update({nrule.myId:nrule})
                     # elif not ruleLST.get(str(myId)):

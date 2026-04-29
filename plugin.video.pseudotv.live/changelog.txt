@@ -1,5 +1,8 @@
 ### NOTICE: The madteevee fork rides on upstream/nightly; things may still break! ####
 
+v.0.7.3+madteevee.23
+- Channel Manager → channel → Rules editor: applied rules can now be edited and deleted again. Pre-existing nightly bug: ruleLST keys were normalized to int by loadRules (post-v.22), but the click handler did ruleLST.get(str(myId)) / ruleLST.pop(str(myId)) — the str-vs-int mismatch made the elif branch fall through silently. Same str-vs-int slip on the new-rule update path. Both call sites now use the int myId consistently.
+
 v.0.7.3+madteevee.22
 - Persisted channel rules now actually load and fire during builds. Two pre-existing nightly bugs converged to make every persisted rule (not just our new PadScheduling) silently no-op:
   1. JSON-roundtrip key-type mismatch in RulesList.loadRules. dumpRules writes int keys ({2999: ...}) into channels.json but JSON forces dict keys to strings ({"2999": ...}). On read-back, the lookup `citem.get('rules',{}).get(rule.myId)` did dict.get(int) against {str: ...} keys → always None → no rule ever loaded from disk. Only rules injected in-memory by _injectRules (which uses int keys directly) ever fired — masking the bug for years.
