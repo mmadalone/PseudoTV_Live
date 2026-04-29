@@ -1,5 +1,8 @@
 ### NOTICE: The madteevee fork rides on upstream/nightly; things may still break! ####
 
+v.0.7.3+madteevee.29
+- Restored master fork's /images/ HTTP server semantics: clean basename URLs (http://<host>:50001/images/Club%20Super%203.png) now work because the server prepends LOGO_LOC for paths that aren't absolute or Kodi VFS schemes. Nightly's _sendFile passed the unquoted path as-is, which broke clean URLs and forced v.27's resource:// branch to emit URLs containing special://-with-URL-encoded-%3A-%2F that UC Remote 3 wouldn't accept (verified: pre-rebase master worked fine for UC3, post-rebase nightly URLs displayed as missing logos despite curl successfully fetching them). _buildWebImage's resource:// branch now emits the clean basename form. Operational note: LOGO_LOC (~/.kodi/.../cache/logos/) must be populated with the channel logo PNGs — populate by copying from the resource addon's resources/ directory.
+
 v.0.7.3+madteevee.28
 - Fixed _buildWebImage double-wrap: the http:// branch unconditionally rewrote http:// URLs as 'http://<remote_host>/images/<encoded-original>' — including URLs that already pointed to our own server. After v.27 emitted 'http://<host>:50001/images/<special-path>' URLs and they got persisted into channels.json, the next build's _verify → _buildWebImage call hit the http:// branch and re-wrapped them, double-encoding the path. Worse, when called early in boot before the service published Remote_Host, the wrap produced 'http:///images/...' with an empty host (specifically observed for Club Super 3). Added a short-circuit at the top: if image already starts with 'http://<remote_host>/', return it unchanged. _buildWebImage is now idempotent on its own output.
 
