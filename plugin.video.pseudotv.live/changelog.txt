@@ -1,5 +1,8 @@
 ### NOTICE: The madteevee fork rides on upstream/nightly; things may still break! ####
 
+v.0.7.3+madteevee.31
+- Idempotency guard for _buildWebImage's image:// branch. User found via UC Remote 3's albaintor/integration-kodi debug log that pseudotv was emitting triple-nested image://image://image://-encoded URLs in PVR EPG entries (visible as art.thumb on the integration side). UC3's integration tried to fetch via Kodi's /image/ proxy which 404'd because the URLs had been wrapped by Kodi's image cache layer ON TOP of pseudotv's already-double-wrapped output. Cause: _buildWebImage's image:// branch unconditionally wrapped image:// URLs into <local_host>/image/<URL-encoded image://...>; if the URL flowed back through _buildWebImage on a subsequent build cycle, it nested. Master fork had a guard ('not http in image') that nightly dropped during the rebase. Restored as: skip wrapping if the URL contains 'http' or '/image/' (markers that we previously wrapped it). Matches v.28's analogous idempotency guard for the http:// branch.
+
 v.0.7.3+madteevee.30
 - Switched pseudotv's HTTP server from HTTP/1.0 to HTTP/1.1 (set protocol_version on the handler class). UC Remote 3's PVR image fetcher silently dropped pseudotv channel logos despite a valid PNG response — symptom: post-rebase, pseudotv channels showed no logos in UC3 even though the JSON-RPC PVR.GetChannels icon field had a correct HTTP URL and curl could fetch the PNG. Other PVR clients exposing HTTPS URLs worked fine. Default Python BaseHTTPRequestHandler emits HTTP/1.0 responses, which UC3's image consumer rejects for rendering. Content-Length is already set on every response so HTTP/1.1's framing requirements are met without code changes.
 

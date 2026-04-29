@@ -191,7 +191,19 @@ class Globals:
         # output now no-ops.
         remote_host = Globals._getProperty('%s.Remote_Host'%(ADDON_ID))
         if remote_host and image.startswith('http://%s/'%(remote_host)): return image
-        if image.startswith('image://'):    image = '%s/image/%s'%(Globals._getProperty('%s.Local_Host'%(ADDON_ID)),Globals._quoteString(image))
+        # v.31: idempotency guard for the image:// branch. Without this, an
+        # image:// URL that's already been processed (output is shaped like
+        # <local_host>/image/<URL-encoded image://...>) would be re-wrapped on
+        # subsequent calls, producing image://<encoded local_host/image/<encoded
+        # image://...>>/. Kodi's PVR layer ingests the wrapped form into the
+        # programme art and, depending on round-trips, can end up with triple-
+        # nested image://image:// URLs by the time external clients (UC Remote
+        # 3) consume them — at which point Kodi's image proxy 404s and the
+        # client falls back to placeholder logos. Matches master fork's
+        # `not 'http' in image` guard which nightly dropped.
+        if image.startswith('image://'):
+            if 'http' in image or '/image/' in image: return image
+            image = '%s/image/%s'%(Globals._getProperty('%s.Local_Host'%(ADDON_ID)),Globals._quoteString(image))
         elif   image.startswith('http'):        image = 'http://%s/images/%s'%(Globals._getProperty('%s.Remote_Host'%(ADDON_ID)),Globals._quoteString(image))
         elif   image.startswith('resource://'):
             # v.29: emit clean basename URL — http://<host>:50001/images/<file>.
