@@ -1,17 +1,20 @@
 name: Release Kodi addon
 
 # Triggers:
-#   - Push of a tag matching v*-madteevee.* (legacy dash separator, e.g.
-#     v0.6.1q-madteevee.2) OR v*+madteevee.* (PEP-440 plus separator, e.g.
-#     v0.7.3+madteevee.25): cut a release.
+#   - Push of a tag matching v*madteevee.* — covers both the legacy dash separator
+#     (v0.6.1q-madteevee.2) and PEP-440 plus separator (v0.7.3+madteevee.25). The `*`
+#     matches any character that isn't `/`, so it absorbs the - or + before "madteevee".
+#     The previous v*+madteevee.* pattern was rejected by GitHub's workflow parser
+#     ("HTTP 422: invalid tags patterns: v*+madteevee.*") because `+` is not a valid
+#     literal in Actions filter glob syntax — every push since v.25 was aborted with
+#     0-second runs. Single broader pattern fixes both forks of the version naming.
 #   - Manual workflow_dispatch from the Actions tab: rebuild gh-pages on demand
 #     without tagging (useful for fixing repo-pipeline issues without bumping the
 #     addon version).
 on:
   push:
     tags:
-      - 'v*-madteevee.*'
-      - 'v*+madteevee.*'
+      - 'v*madteevee.*'
   workflow_dispatch:
 
 # release.py builds _site/, then we push that to gh-pages. We need write access
