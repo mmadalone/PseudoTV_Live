@@ -336,8 +336,19 @@ class XMLTVS(object):
         item['type']          = fItem.get('type','video')
         item['new']           = int(fItem.get('playcount','1')) == 0
         
-        item['thumb']                = Globals._getThumb(fItem,EPG_ARTWORK) #unify thumbnail by user preference 
+        item['thumb']                = Globals._getThumb(fItem,EPG_ARTWORK) #unify thumbnail by user preference
         fItem.get('art',{})['thumb'] = Globals._getThumb(fItem,{0:1,1:0}[EPG_ARTWORK]) #unify thumbnail artwork, opposite of EPG_Artwork
+        # v.37: stash channel logo on the programme item so addProgram can write it as
+        # programme <icon>. iptvsimple uses programme.icon for broadcastnow.thumbnail,
+        # which is what JSON-RPC PVR.GetChannels exposes as channel.thumbnail. UC Remote 3
+        # (and the albaintor integration generally) prefers channel.thumbnail over
+        # channel.icon for display, and only resolves URLs whose scheme matches a small
+        # accept-list — programme art landing in channel.thumbnail meant UC3 showed the
+        # now-airing episode/movie art instead of a recognizable channel logo. Forcing
+        # channel.thumbnail = channel logo brand restores recognition. Tradeoff: Kodi's
+        # native PVR EPG also shows the channel logo for every programme entry; if the
+        # user wants per-programme art back, swap this back to item['thumb'].
+        item['logo']                 = citem.get('logo','')
          
         if item['type'] == 'movie': item['date'] = (fItem.get('premiered')  or fItem.get('releasedate') or fItem.get('firstaired'))
         else:                       item['date'] = (fItem.get('firstaired') or fItem.get('releasedate') or fItem.get('premiered'))
@@ -401,7 +412,7 @@ class XMLTVS(object):
                  'desc'        : [(Globals._encodePlot(self.cleanString(item['desc']),item['fitem']), LANG) if encodeDESC else (self.cleanString(item['desc']), LANG)],
                  'stop'        : (epochTime(float(item['stop']),tz=False).strftime(DTFORMAT)),
                  'start'       : (epochTime(float(item['start']),tz=False).strftime(DTFORMAT)),
-                 'icon'        : [{'src': item['thumb']}],
+                 'icon'        : [{'src': (item.get('logo') or item['thumb'])}], # v.37: channel logo (UC3 channel.thumbnail) — see getProgramItem
                  'length'      : {'units': 'seconds', 'length': str(item['length'])}}
                         
         if item.get('sub-title'):
