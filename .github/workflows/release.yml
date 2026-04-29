@@ -1,7 +1,9 @@
 name: Release Kodi addon
 
 # Triggers:
-#   - Push of a tag matching v*-madteevee.* (e.g. v0.6.1q-madteevee.2): cut a release.
+#   - Push of a tag matching v*-madteevee.* (legacy dash separator, e.g.
+#     v0.6.1q-madteevee.2) OR v*+madteevee.* (PEP-440 plus separator, e.g.
+#     v0.7.3+madteevee.25): cut a release.
 #   - Manual workflow_dispatch from the Actions tab: rebuild gh-pages on demand
 #     without tagging (useful for fixing repo-pipeline issues without bumping the
 #     addon version).
@@ -9,6 +11,7 @@ on:
   push:
     tags:
       - 'v*-madteevee.*'
+      - 'v*+madteevee.*'
   workflow_dispatch:
 
 # release.py builds _site/, then we push that to gh-pages. We need write access
