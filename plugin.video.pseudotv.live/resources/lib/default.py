@@ -46,10 +46,24 @@ if __name__ == '__main__':
                 xbmcplugin.setResolvedUrl(int(sys.argv[1]), False, xbmcgui.ListItem())
                 if Globals._getProperty('has.Channels') == "true": Globals._openGuide()
                 else:                                              Globals._openSettings()
-            elif any(item in sysARG[2] for item in ['{catchup-id}', '{utc}', '{duration}', '{utcend}']):
-                Globals._setProperty('chkPVRRefresh',"true")
-                xbmcplugin.setResolvedUrl(int(sysARG[1]), False, xbmcgui.ListItem())
             else:
+                # v.33: live tunes from iptvsimple arrive with the main M3U URL
+                # form: vid={catchup-id}&start={utc}&duration={duration}&stop=
+                # {utcend}. iptvsimple substitutes {lutc} → now but leaves the
+                # catchup tokens as literals for live (they only get filled for
+                # actual catchup playback). Pre-rebase nightly aborted with
+                # setResolvedUrl(False) on this case — broke ALL live PVR tunes
+                # silently (Kodi just dropped the play attempt with no UI).
+                # Plugin.__init__ also explodes on int('{utc}') at plugin.py:33
+                # if templates reach it, so normalize them here. Master fork
+                # pattern: keep the chkPVRRefresh flag, zero the templates,
+                # proceed to the normal play path.
+                _TEMPLATES = {'start':'{utc}', 'stop':'{utcend}', 'duration':'{duration}', 'vid':'{catchup-id}'}
+                if any(sysInfo.get(k) == v for k, v in _TEMPLATES.items()):
+                    Globals._setProperty('chkPVRRefresh', 'true')
+                    for k, tmpl in _TEMPLATES.items():
+                        if sysInfo.get(k) == tmpl:
+                            sysInfo[k] = '' if k == 'vid' else '0'
                 try:    fitem, nitem = LISTITEMS.buildDictListItem(sys.listitem), {}
                 except: fitem, nitem = Globals._decodePlot(Globals._getInfoLabel('Plot')), Globals._decodePlot(Globals._getInfoLabel('NextPlot'))
                 chid, vid   = (sysInfo.get("chid")  or fitem.get('citem',{}).get('id')), FileAccess._decodeString(sysInfo.get("vid",""))
