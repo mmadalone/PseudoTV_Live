@@ -18,6 +18,8 @@
 
 # -*- coding: utf-8 -*-
 
+import copy
+
 from globals    import *
 from channels   import Channels
 from xmltvs     import XMLTVS
@@ -89,6 +91,12 @@ class Builder(object):
         self.padScheduling    = False #todo Adv. Channel Rule, No Global: Default False
         self.padTarget        = MIN_EPG_DURATION # PadScheduling rule overrides per-channel via inherited.padTarget (rules.py:2999)
         self.padFilelist      = False #todo Adv. Channel Rule, No Global: Default False
+        # madteevee v.24: per-Builder-instance snapshot store for in-flight
+        # channel rebuilds. Keyed by chid. Populated by _snapshotChannel
+        # before __hasChanged.__clrStation; popped on success
+        # (_discardSnapshot) or replayed on failure (_restoreChannel).
+        # Lives on instance — concurrent Builder instances don't share keys.
+        self._build_snapshots = {}
         self.enableEven       = bool(SETTINGS.getSettingInt('Enable_Even'))
         self.evenEpisode      = SETTINGS.getSettingBool('Enable_Even_Force_Episode')
         self.evenShuffle      = SETTINGS.getSettingBool('Enable_Even_Force_Random')
@@ -125,7 +133,54 @@ class Builder(object):
 
     def log(self, msg, level=xbmc.LOGDEBUG):
         return log('%s: %s'%(self.__class__.__name__,msg),level)
-        
+
+
+    def _snapshotChannel(self, citem):
+        """v.24: Capture this channel's M3U + XMLTV state for potential restore.
+        Stored under self._build_snapshots[citem['id']] until popped (success
+        path) or replayed (failure path). Uses deepcopy because the underlying
+        dicts/lists are mutable shared state on class-level M3U/XMLTVS instances.
+        """
+        chid = citem.get('id')
+        if not chid: return
+        self._build_snapshots[chid] = {
+            'station'   : copy.deepcopy(self.m3u.findStation(citem)[1] or {}),
+            'channel'   : copy.deepcopy(self.xmltv.findChannel(citem)[1] or {}),
+            'programmes': copy.deepcopy([p for p in self.xmltv.XMLTVDATA.get('programmes', [])
+                                         if p.get('channel') == chid]),
+        }
+        s = self._build_snapshots[chid]
+        self.log('[%s] _snapshotChannel, M3U=%s, XMLTV ch=%s, progs=%s'
+                 %(chid, bool(s['station']), bool(s['channel']), len(s['programmes'])))
+
+
+    def _restoreChannel(self, citem):
+        """v.24: Restore a previously-snapshotted channel into in-memory M3U + XMLTV.
+        No-op if no snapshot exists (e.g. __hasChanged didn't fire __clrStation
+        for this channel, or this channel was already restored). Direct list
+        appends because addStation/addChannel are upsert (delete-then-append) and
+        not safe for replay; we bypass them entirely.
+        """
+        chid = citem.get('id')
+        snap = self._build_snapshots.pop(chid, None) if chid else None
+        if not snap: return
+        if snap['station']:
+            self.m3u.M3UDATA.setdefault('stations', []).append(snap['station'])
+        if snap['channel']:
+            self.xmltv.XMLTVDATA.setdefault('channels', []).append(snap['channel'])
+        if snap['programmes']:
+            self.xmltv.XMLTVDATA.setdefault('programmes', []).extend(snap['programmes'])
+        self.log('[%s] _restoreChannel after failed build, M3U+%s, XMLTV ch+%s, progs+%s'
+                 %(chid, 1 if snap['station'] else 0,
+                   1 if snap['channel'] else 0, len(snap['programmes'])))
+
+
+    def _discardSnapshot(self, citem):
+        """v.24: Drop the snapshot for this channel — called on successful build
+        paths so self._build_snapshots doesn't accumulate stale entries within
+        a single Builder lifetime."""
+        self._build_snapshots.pop(citem.get('id'), None)
+
 
     def getVerifiedChannels(self, channels=None):
         if channels is None: channels = self.channels.getChannels()
@@ -185,7 +240,15 @@ class Builder(object):
                 state = any([SETTINGS.getFileCRC(file) for file in citem.get('path',[]) if file.endswith(tuple(KODI_PLAYLISTS + BASIC_PLAYLISTS))])
             else: state = citem.get('changed',False)
             self.log('[%s] buildChannels, __hasChanged = %s'%(citem['id'],state))
-            if state: #clear channel m3u/xmltv 
+            if state: #clear channel m3u/xmltv
+                # v.24: snapshot BEFORE __clrStation so a subsequent buildVideo
+                # failure (Enable_Extras=false skipping all-Specials sources,
+                # _suspend interrupt, smartplaylist returning nothing, plugin
+                # source timeout) can be recovered by _restoreChannel rather
+                # than letting __setStation persist the cleared state to disk.
+                # Without this, multiple sequential per-channel builds compound
+                # the wipe across the class-level shared M3U/XMLTV state.
+                self._snapshotChannel(citem)
                 if __clrStation(citem):
                     self.log('[%s] buildChannels, __hasChanged cleared channel meta'%(citem['id']))
                     citem['changed'] = False
@@ -253,10 +316,18 @@ class Builder(object):
                             if self.service._interrupt():
                                 self.log("[%s] buildChannels, _interrupt"%(citem['id']))
                                 self.pErrors = [LANGUAGE(32160)]
+                                # v.24: restore the pre-clear snapshot before bailing — without
+                                # this the in-memory M3U/XMLTV stays wiped and a later __setStation
+                                # (this Builder lifetime or class-shared mutation across instances)
+                                # would persist the wipe to disk.
+                                self._restoreChannel(citem)
                                 if hasattr(self.service,'_que'): self.service._que(self.service.tasks.chkChannels,3,*(channels[idx:],silent))
                                 break
                             elif self.service._suspend(CPU_CYCLE):
                                 self.log("[%s] buildChannels, _suspend"%(citem['id']))
+                                # v.24: restore so the next iteration's __setStation doesn't save
+                                # this channel's cleared state from the failed mid-build interrupt.
+                                self._restoreChannel(citem)
                                 continue
                             elif _update or _changed:                       
                                 if    preview:           self.pMSG = LANGUAGE(32236)                           #Preview
@@ -290,6 +361,9 @@ class Builder(object):
                             if any(updated):
                                 completed.add(__addStation(citem)) #add m3u station if lineup available.
                                 PROPERTIES.setPropTimer('chkPVRRefresh')#refresh pvr guide
+                                # v.24: build succeeded with new content — discard the snapshot
+                                # so it doesn't accumulate in self._build_snapshots.
+                                self._discardSnapshot(citem)
                             else:
                                 # B3 forward-port (madteevee): don't __clrStation on transient/empty build.
                                 # buildVideo can return True (Valid Channel w/o programmes — BUILD_AT_MAX),
@@ -297,9 +371,20 @@ class Builder(object):
                                 # mean the channel is gone. Keep prior M3U/XMLTV state so the next
                                 # chkLibrary cycle can retry. M3U/XMLTV are removed via channel manager
                                 # only — never from the build path. Mirrors master B3's behavior.
-                                self.log('[%s] buildChannels, preserving M3U/XMLTV across transient empty (no __clrStation)'%(citem['id']), xbmc.LOGWARNING)
+                                # v.24: B3 covered the case where __clrStation hadn't run. When
+                                # __hasChanged DID fire __clrStation earlier this iteration, the
+                                # snapshot taken before the clear is now restored so the cleared
+                                # state never reaches __setStation below. Without this the
+                                # class-level shared M3U/XMLTV would persist the wipe.
+                                self._restoreChannel(citem)
+                                self.log('[%s] buildChannels, preserving M3U/XMLTV across transient empty (snapshot restored if __clrStation ran)'%(citem['id']), xbmc.LOGWARNING)
                             __setStation()
-                        except Exception as e: self.log("buildChannels, failed! %s"%(e), xbmc.LOGERROR)
+                        except Exception as e:
+                            self.log("buildChannels, failed! %s"%(e), xbmc.LOGERROR)
+                            # v.24: best-effort restore on unexpected exception — same rationale
+                            # as the _interrupt/_suspend/B3-else branches.
+                            try: self._restoreChannel(citem)
+                            except Exception: pass
                     if any(changes): self.channels.setChannels()
                     self.log('[%s] buildChannels, completed = %s, updated = %s, changes = %s'%(citem['id'],any(completed),any(updated),any(changes)))
 
