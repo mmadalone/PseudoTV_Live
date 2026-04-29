@@ -155,6 +155,16 @@ class Tasks(object):
      #_chkPropTimer trigger - True == Run
     def _chkPropTimer(self, key, func, priority=-1, *args, **kwargs):
         if PROPERTIES.getPropTimer(key):
+            # v.44 chkChanged debounce: defer queueing chkChanged if a Builder.buildChannels
+            # task is currently running. Otherwise multiple chkChanged ticks (separated by
+            # SERVICE_INTERVAL) can each queue fresh Builder()-bound buildChannels tasks per
+            # channel — and since the bound method on each fresh Builder instance is a distinct
+            # Python object, cqueue._exists package-equality dedup (cqueue.py:126) doesn't
+            # recognize them as duplicates. Property stays True so the next tick after the
+            # build completes will retry. FORK_NOTES priority #3.
+            if key == 'chkChanged' and PROPERTIES.isRunning('Builder.buildChannels'):
+                self.log('_chkPropTimer, %s deferred (Builder.buildChannels running)'%(key))
+                return
             self.log('_chkPropTimer, key = %s'%(key))
             PROPERTIES.clrEXTProperty(key)
             self.service._que(func, priority, *args, **kwargs)
