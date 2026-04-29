@@ -194,28 +194,16 @@ class Globals:
         if image.startswith('image://'):    image = '%s/image/%s'%(Globals._getProperty('%s.Local_Host'%(ADDON_ID)),Globals._quoteString(image))
         elif   image.startswith('http'):        image = 'http://%s/images/%s'%(Globals._getProperty('%s.Remote_Host'%(ADDON_ID)),Globals._quoteString(image))
         elif   image.startswith('resource://'):
-            # v.27: convert Kodi-internal resource:// URLs to HTTP URLs served
-            # by pseudotv's HTTP server (port 50001). External clients that
-            # consume PVR.GetChannels via JSON-RPC (UC Remote 3 in particular,
-            # web frontends, anything non-Kodi) can't resolve resource:// —
-            # it's a Kodi-internal protocol.
-            #
-            # v.26 used the /logos/<name> endpoint, which goes through
-            # resources.getCache(name) and falls back to LOGO (the generic
-            # pseudotv logo) on cache miss. The local cache at
-            # ~/.kodi/.../cache/logos/ is empty by default in nightly (master
-            # populated it via getLocalLogo on the lookup path), so every
-            # logo URL pointed to the wrong file. Fixed: bypass the cache
-            # entirely and resolve resource://<addon>/<file> to the actual
-            # special:// path under the resource addon's resources/ directory,
-            # then serve via the existing /images/ route which __sendFile's
-            # any path FileAccess can open. Verified MD5-identical to the
-            # source PNG end-to-end.
+            # v.29: emit clean basename URL — http://<host>:50001/images/<file>.
+            # Server's /images/ handler now prepends LOGO_LOC (matches master),
+            # so clean URLs work AND avoid the URL-encoded special chars
+            # (%3A, %2F) in v.27's URL form that UC Remote 3 didn't accept.
+            # Requires LOGO_LOC to be populated with the PNG; if missing,
+            # the URL 404s (degrade to LOGO fallback in clients).
             parts = image[len('resource://'):].split('/', 1)
             if len(parts) == 2:
-                addon_id, filename = parts
-                kodi_path = 'special://home/addons/%s/resources/%s'%(addon_id, filename)
-                image = 'http://%s/images/%s'%(Globals._getProperty('%s.Remote_Host'%(ADDON_ID)),Globals._quoteString(kodi_path))
+                filename = parts[1]
+                image = 'http://%s/images/%s'%(Globals._getProperty('%s.Remote_Host'%(ADDON_ID)),Globals._quoteString(filename))
         return image
 
     @staticmethod

@@ -194,7 +194,19 @@ class MyHandler(BaseHTTPRequestHandler):
                 elif self.path.lower() == f'/{M3UFLE.lower()}':     __sendFile(M3UFLEPATH, use_compression)
                 elif self.path.lower() == f'/{GENREFLE.lower()}':   __sendFile(GENREFLEPATH, use_compression)
                 elif self.path.lower() == f'/{XMLTVFLE.lower()}':   __sendFile(XMLTVFLEPATH, use_compression)
-                elif self.path.startswith('/images/'):              __sendFile(Globals._unquoteString(self.path.split('/images/')[1]), False)
+                elif self.path.startswith('/images/'):
+                    # v.29: master fork prefixed LOGO_LOC for /images/<basename> requests so a
+                    # clean URL like /images/Club%20Super%203.png served the PNG from the local
+                    # logos cache. Nightly dropped the prefix and treated the path as absolute,
+                    # which broke clean basenames AND forced v.27 to emit URLs containing
+                    # special:// (URL-encoded with %3A and %2F) — UC Remote 3 didn't accept
+                    # those. Restored: if the unquoted path lacks a leading '/' and isn't a
+                    # Kodi VFS scheme (special://, image://, http(s)://, etc.), prepend
+                    # LOGO_LOC. Absolute paths and VFS schemes still pass through.
+                    img_path = Globals._unquoteString(self.path.split('/images/')[1])
+                    if not (img_path.startswith('/') or '://' in img_path):
+                        img_path = os.path.join(LOGO_LOC, img_path)
+                    __sendFile(img_path, False)
                 else:
                     use_compression = False if self.path.endswith('.html') else use_compression
                     if self.path.lower().endswith('.json'):
