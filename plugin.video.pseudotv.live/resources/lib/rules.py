@@ -310,8 +310,15 @@ class BaseRule(object):
         else:                                                   values, options = self.selectBoxOptions[optionindex], self.optionValues[optionindex]
         items  = [str(v).title() for v in self.selectBoxOptions[optionindex]]
         select = self.dialog.selectDialog(items, header, Globals._findItemsInLST(values, options), useDetails, autoclose, multi)
-        if not select is None: 
-            if   isinstance(self.selectBoxOptions[optionindex],dict): self.optionValues[optionindex] = self.selectBoxOptions[optionindex].get(self.selectBoxOptions[optionindex][select])
+        if not select is None:
+            # madteevee fix: when selectBoxOptions[optionindex] is a dict, the
+            # dialog returns the integer index of the chosen item, not a dict
+            # key. The previous form `self.selectBoxOptions[optionindex][select]`
+            # indexed the dict with that int and KeyError'd. The local `options`
+            # variable (set at line ~309) is already list(dict.keys()) for the
+            # dict case — index it instead, then look up the value via .get().
+            # Mirrors upstream/master's working pattern.
+            if   isinstance(self.selectBoxOptions[optionindex],dict): self.optionValues[optionindex] = self.selectBoxOptions[optionindex].get(options[select])
             elif isinstance(select,list):                             self.optionValues[optionindex] = [self.selectBoxOptions[optionindex][idx] for idx in select]
             elif select < len(self.selectBoxOptions[optionindex]):    self.optionValues[optionindex] = self.selectBoxOptions[optionindex][select]
             elif select:                                              self.optionValues[optionindex] = select
