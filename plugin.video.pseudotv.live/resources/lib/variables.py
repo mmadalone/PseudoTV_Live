@@ -216,6 +216,19 @@ class Globals:
             if len(parts) == 2:
                 filename = parts[1]
                 image = 'http://%s/images/%s'%(Globals._getProperty('%s.Remote_Host'%(ADDON_ID)),Globals._quoteString(filename))
+        elif   image.startswith('special://') and '/logos/' in image:
+            # v.32: special:// VFS scheme is Kodi-internal — external clients
+            # (UC Remote 3, web UIs consuming PVR.GetChannels JSON-RPC) can't
+            # resolve it. When the path lives under LOGO_LOC (e.g.
+            # special://profile/addon_data/.../cache/logos/<name>.png), emit
+            # a basename-only HTTP URL the same way the resource:// branch
+            # does. Server's /images/ handler prepends LOGO_LOC for non-
+            # absolute paths so the redirect target resolves to the on-disk
+            # PNG. Other special:// paths (skin assets, addon resources) pass
+            # through unchanged — Kodi's native renderers handle those.
+            filename = image.rsplit('/', 1)[-1]
+            if filename:
+                image = 'http://%s/images/%s'%(Globals._getProperty('%s.Remote_Host'%(ADDON_ID)),Globals._quoteString(filename))
         return image
 
     @staticmethod
