@@ -154,16 +154,25 @@ class Globals:
           
     @staticmethod
     def _getThumb(item={}, opt=0): #unify thumbnail artwork
-        # Two real nightly bugs:
-        #   (1) Last key in the opt=0 list was a single string 'keyart,icon' instead of two
-        #       separate entries — typo from upstream's tuple-flatten that reads as a literal
-        #       comma-containing key Kodi never sets.
-        #   (2) Loop overwrote `art` on every iteration with no early-return, so `art` after
-        #       the loop was whatever the LAST key resolved to (almost always None) instead of
-        #       whatever the FIRST matching key found. Result: every programme fell through to
-        #       the fallback landscape.png placeholder regardless of what art Kodi's library
-        #       actually had. Master fork's getThumb returns inside the loop on first match —
-        #       restored here.
+        # v.36: return raw art, do NOT wrap through _buildWebImage. Master fork's getThumb
+        #       (kodi.py in 0.6.1q) returns the art string directly. Nightly's _getThumb
+        #       wrapped it through _buildWebImage, which for image:// URLs produces
+        #       '<local_host>/image/<encoded image://>' — and at XMLTV write time
+        #       local_host is empty (not yet published by service), so the result is the
+        #       host-less '/image/image%3A//...' form. iptvsimple ingests that into PVR
+        #       EPG cache; Kodi treats it as a plain URL string (no recognized scheme),
+        #       and JSON-RPC PVR.GetChannels exposes a thumbnail field that UC Remote 3
+        #       and other external clients can't resolve. Master's raw image://
+        #       URLs flow through Kodi's PVR cache, get exposed as
+        #       '/image/image%3A//<encoded>' (Kodi's native proxy form), and UC3 fetches
+        #       them via Kodi's /image/ proxy successfully.
+        #       Empirically verified: installing 0.6.1q+madteevee.14 (master fork) over
+        #       any post-rebase nightly version immediately restores UC3 logos. The only
+        #       structural difference in art handling between the two is this wrap.
+        # Earlier nightly bugs (already fixed in this version chain): (1) typo
+        # 'keyart,icon' in opt=0 keys was a single comma-containing key Kodi never sets;
+        # (2) no early-return inside loop meant `art` got overwritten to the LAST key's
+        # value instead of the FIRST match. Both kept here.
         keys = {0:['landscape','fanart','thumb','thumbnail','poster','clearlogo','logo','logos','clearart','keyart','icon'],
                 1:['poster','clearlogo','logo','logos','clearart','keyart','landscape','fanart','thumb','thumbnail','icon']}[opt]
         for key in keys:
@@ -174,64 +183,47 @@ class Globals:
                    item.get('art',{}).get('tvshow.%s'%(key))      or
                    item.get('art',{}).get(key)                    or
                    item.get(key))
-            if art: return Globals._buildWebImage(art, {0:LOGO_LANDSCAPE,1:LOGO_POSTER}[opt])
-        return Globals._buildWebImage(None, {0:LOGO_LANDSCAPE,1:LOGO_POSTER}[opt])
+            if art: return art
+        return {0:LOGO_LANDSCAPE,1:LOGO_POSTER}[opt]
 
     @staticmethod
     def _buildWebImage(image=None, fallback=LOGO):
+        # v.35: restored master fork's narrow scope. Empirically verified:
+        # installing 0.6.1q+madteevee.14 over the broken state immediately
+        # restored UC Remote 3 channel logos. v.14's buildWebImage wraps
+        # exactly two cases — absolute filesystem paths under LOGO_LOC and
+        # bare image:// VFS URLs — and lets everything else pass through.
+        # v.26-v.34 piled on resource://, special://, and an aggressive
+        # http:// branch that re-wrapped any http URL (including external
+        # programme art) into 'http://<our-host>/images/<encoded full URL>',
+        # which UC3 (and our own server) couldn't resolve. The empty-host
+        # symptom v.34 chased was real but secondary; the structural bug
+        # was the over-reaching branches themselves. v.34's host-empty
+        # guards retained as defense in depth.
         image = Globals._cleanImage(image)
         if not image: return fallback
-        # v.34: hard guard against host-less wrapping. The Remote_Host /
-        # Local_Host window properties get published by service.py once the
-        # HTTP server is up; until then they read empty. Pre-v.34 the http://
-        # and image:// branches still wrapped using ''-host, producing URLs
-        # like 'http:///images/<file>' (three slashes, empty authority) and
-        # '/image/image%3A//<encoded>' (host-less proxy path). These got
-        # baked into the M3U/XMLTV at build time and survived for the lifetime
-        # of the cache. Kodi's native renderers tolerated them locally; UC
-        # Remote 3 (and any other external consumer) ended up issuing 404
-        # fetches against a URL with no authority. Symptom: post-rebase UC3
-        # showed no pseudotv channel logos and triple-nested fetch attempts
-        # in its debug log. If hosts aren't published yet, return the input
-        # unchanged so the cache holds raw VFS / http URLs that subsequent
-        # build cycles (when the server is up) can re-wrap correctly.
         remote_host = Globals._getProperty('%s.Remote_Host'%(ADDON_ID))
         local_host  = Globals._getProperty('%s.Local_Host'%(ADDON_ID))
-        # v.28: short-circuit if URL already points to our own server.
-        # Idempotency: applying _buildWebImage to its own output no-ops.
+        # Idempotency: URL already points to our own server, leave it alone.
         if remote_host and image.startswith('http://%s/'%(remote_host)): return image
-        # v.31: idempotency guard for the image:// branch. Without this, an
-        # image:// URL that's already been processed (output is shaped like
-        # <local_host>/image/<URL-encoded image://...>) would be re-wrapped on
-        # subsequent calls, producing image://<encoded local_host/image/<encoded
-        # image://...>>/. Kodi's PVR layer ingests the wrapped form into the
-        # programme art and, depending on round-trips, can end up with triple-
-        # nested image://image:// URLs by the time external clients (UC Remote
-        # 3) consume them.
-        if image.startswith('image://'):
-            if 'http' in image or '/image/' in image: return image
-            if not local_host: return image  # v.34: don't host-less-wrap
+        if image.startswith(LOGO_LOC):
+            # Absolute filesystem path under cache/logos/ — wrap to a clean
+            # http://<host>:50001/images/<basename>.png URL the addon HTTP
+            # server resolves via /images/ → __sendFile(LOGO_LOC + basename).
+            # This is the URL form UC3 fetches successfully.
+            if not remote_host: return image
+            image = 'http://%s/images/%s'%(remote_host,Globals._quoteString(os.path.split(image)[1]))
+        elif image.startswith(('image://','image%3A')) and not ('smb' in image or 'nfs' in image or 'http' in image):
+            # v.31: idempotency — '/image/' already in URL means we wrapped it
+            # before, don't re-wrap (otherwise produces nested image:// URLs).
+            if '/image/' in image: return image
+            if not local_host: return image
             image = '%s/image/%s'%(local_host,Globals._quoteString(image))
-        elif   image.startswith('http'):
-            if not remote_host: return image  # v.34: don't host-less-wrap
-            image = 'http://%s/images/%s'%(remote_host,Globals._quoteString(image))
-        elif   image.startswith('resource://'):
-            # v.29: emit clean basename URL — http://<host>:50001/images/<file>.
-            # Server's /images/ handler prepends LOGO_LOC (matches master),
-            # so clean URLs work AND avoid the URL-encoded special chars in
-            # v.27's URL form that UC Remote 3 didn't accept.
-            if not remote_host: return image  # v.34
-            parts = image[len('resource://'):].split('/', 1)
-            if len(parts) == 2:
-                image = 'http://%s/images/%s'%(remote_host,Globals._quoteString(parts[1]))
-        elif   image.startswith('special://') and '/logos/' in image:
-            # v.32: convert special:// logo paths to direct HTTP. Other
-            # special:// paths (skin assets, addon resources) pass through
-            # unchanged — Kodi's native renderers handle those.
-            if not remote_host: return image  # v.34
-            filename = image.rsplit('/', 1)[-1]
-            if filename:
-                image = 'http://%s/images/%s'%(remote_host,Globals._quoteString(filename))
+        # Everything else (http://, https://, resource://, special://, smb://,
+        # nfs://, raw paths outside LOGO_LOC) passes through unchanged. Kodi's
+        # native art layer wraps VFS schemes (resource://, special://) into
+        # image://<scheme>/<encoded>/ when caching, which Kodi's /image/ proxy
+        # can resolve. External http(s) URLs get fetched directly by clients.
         return image
 
     @staticmethod
