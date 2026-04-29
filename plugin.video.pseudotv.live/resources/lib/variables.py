@@ -153,6 +153,22 @@ class Globals:
         else: Globals._openSettings()
           
     @staticmethod
+    def _toEpgProxyForm(image=''):
+        # v.38: convert raw image:// URLs to host-less Kodi /image/<url-encoded> proxy form for
+        # XMLTV programme <icon>. Kodi's PVR EPG renderer treats unschemed paths as relative to
+        # its own webserver, prepends host, fetches via /image/ proxy, decodes the inner image://
+        # URL, and serves the file — programme art renders normally in Kodi's EPG view. UC Remote
+        # 3's albaintor integration calls urllib.parse.urlparse().scheme on the URL; '/image/...'
+        # has empty scheme, so its thumbnail_url returns None and the integration falls back to
+        # channel.icon (channel logo). Net: Kodi EPG shows per-show art; UC3 shows channel logo.
+        # Pass-through for non-image:// inputs (channel logo URLs, http/https) — those are already
+        # in a form Kodi can render and UC3 will reject (non-image scheme → fallback to icon).
+        if not image: return image
+        if image.startswith('image://'):
+            return '/image/' + Globals._quoteString(image)
+        return image
+
+    @staticmethod
     def _getThumb(item={}, opt=0): #unify thumbnail artwork
         # v.36: return raw art, do NOT wrap through _buildWebImage. Master fork's getThumb
         #       (kodi.py in 0.6.1q) returns the art string directly. Nightly's _getThumb
