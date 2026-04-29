@@ -181,15 +181,24 @@ class Globals:
     def _buildWebImage(image=None, fallback=LOGO):
         image = Globals._cleanImage(image)
         if not image: return fallback
-        # v.28: short-circuit if the URL already points to our own server.
-        # Prevents the http:// branch from double-wrapping (re-encoding) URLs
-        # that we previously produced (e.g., via the resource:// branch
-        # below). Also catches the boot-time race where Remote_Host is
-        # empty during early builds — without this, _buildWebImage on a
-        # known-good HTTP URL would wrap to 'http:///images/...' with an
-        # empty host. Idempotency: applying _buildWebImage to its own
-        # output now no-ops.
+        # v.34: hard guard against host-less wrapping. The Remote_Host /
+        # Local_Host window properties get published by service.py once the
+        # HTTP server is up; until then they read empty. Pre-v.34 the http://
+        # and image:// branches still wrapped using ''-host, producing URLs
+        # like 'http:///images/<file>' (three slashes, empty authority) and
+        # '/image/image%3A//<encoded>' (host-less proxy path). These got
+        # baked into the M3U/XMLTV at build time and survived for the lifetime
+        # of the cache. Kodi's native renderers tolerated them locally; UC
+        # Remote 3 (and any other external consumer) ended up issuing 404
+        # fetches against a URL with no authority. Symptom: post-rebase UC3
+        # showed no pseudotv channel logos and triple-nested fetch attempts
+        # in its debug log. If hosts aren't published yet, return the input
+        # unchanged so the cache holds raw VFS / http URLs that subsequent
+        # build cycles (when the server is up) can re-wrap correctly.
         remote_host = Globals._getProperty('%s.Remote_Host'%(ADDON_ID))
+        local_host  = Globals._getProperty('%s.Local_Host'%(ADDON_ID))
+        # v.28: short-circuit if URL already points to our own server.
+        # Idempotency: applying _buildWebImage to its own output no-ops.
         if remote_host and image.startswith('http://%s/'%(remote_host)): return image
         # v.31: idempotency guard for the image:// branch. Without this, an
         # image:// URL that's already been processed (output is shaped like
@@ -198,37 +207,31 @@ class Globals:
         # image://...>>/. Kodi's PVR layer ingests the wrapped form into the
         # programme art and, depending on round-trips, can end up with triple-
         # nested image://image:// URLs by the time external clients (UC Remote
-        # 3) consume them — at which point Kodi's image proxy 404s and the
-        # client falls back to placeholder logos. Matches master fork's
-        # `not 'http' in image` guard which nightly dropped.
+        # 3) consume them.
         if image.startswith('image://'):
             if 'http' in image or '/image/' in image: return image
-            image = '%s/image/%s'%(Globals._getProperty('%s.Local_Host'%(ADDON_ID)),Globals._quoteString(image))
-        elif   image.startswith('http'):        image = 'http://%s/images/%s'%(Globals._getProperty('%s.Remote_Host'%(ADDON_ID)),Globals._quoteString(image))
+            if not local_host: return image  # v.34: don't host-less-wrap
+            image = '%s/image/%s'%(local_host,Globals._quoteString(image))
+        elif   image.startswith('http'):
+            if not remote_host: return image  # v.34: don't host-less-wrap
+            image = 'http://%s/images/%s'%(remote_host,Globals._quoteString(image))
         elif   image.startswith('resource://'):
             # v.29: emit clean basename URL — http://<host>:50001/images/<file>.
-            # Server's /images/ handler now prepends LOGO_LOC (matches master),
-            # so clean URLs work AND avoid the URL-encoded special chars
-            # (%3A, %2F) in v.27's URL form that UC Remote 3 didn't accept.
-            # Requires LOGO_LOC to be populated with the PNG; if missing,
-            # the URL 404s (degrade to LOGO fallback in clients).
+            # Server's /images/ handler prepends LOGO_LOC (matches master),
+            # so clean URLs work AND avoid the URL-encoded special chars in
+            # v.27's URL form that UC Remote 3 didn't accept.
+            if not remote_host: return image  # v.34
             parts = image[len('resource://'):].split('/', 1)
             if len(parts) == 2:
-                filename = parts[1]
-                image = 'http://%s/images/%s'%(Globals._getProperty('%s.Remote_Host'%(ADDON_ID)),Globals._quoteString(filename))
+                image = 'http://%s/images/%s'%(remote_host,Globals._quoteString(parts[1]))
         elif   image.startswith('special://') and '/logos/' in image:
-            # v.32: special:// VFS scheme is Kodi-internal — external clients
-            # (UC Remote 3, web UIs consuming PVR.GetChannels JSON-RPC) can't
-            # resolve it. When the path lives under LOGO_LOC (e.g.
-            # special://profile/addon_data/.../cache/logos/<name>.png), emit
-            # a basename-only HTTP URL the same way the resource:// branch
-            # does. Server's /images/ handler prepends LOGO_LOC for non-
-            # absolute paths so the redirect target resolves to the on-disk
-            # PNG. Other special:// paths (skin assets, addon resources) pass
-            # through unchanged — Kodi's native renderers handle those.
+            # v.32: convert special:// logo paths to direct HTTP. Other
+            # special:// paths (skin assets, addon resources) pass through
+            # unchanged — Kodi's native renderers handle those.
+            if not remote_host: return image  # v.34
             filename = image.rsplit('/', 1)[-1]
             if filename:
-                image = 'http://%s/images/%s'%(Globals._getProperty('%s.Remote_Host'%(ADDON_ID)),Globals._quoteString(filename))
+                image = 'http://%s/images/%s'%(remote_host,Globals._quoteString(filename))
         return image
 
     @staticmethod
