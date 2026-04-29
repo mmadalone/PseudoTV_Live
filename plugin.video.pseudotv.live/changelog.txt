@@ -1,5 +1,8 @@
 ### NOTICE: The madteevee fork rides on upstream/nightly; things may still break! ####
 
+v.0.7.3+madteevee.28
+- Fixed _buildWebImage double-wrap: the http:// branch unconditionally rewrote http:// URLs as 'http://<remote_host>/images/<encoded-original>' — including URLs that already pointed to our own server. After v.27 emitted 'http://<host>:50001/images/<special-path>' URLs and they got persisted into channels.json, the next build's _verify → _buildWebImage call hit the http:// branch and re-wrapped them, double-encoding the path. Worse, when called early in boot before the service published Remote_Host, the wrap produced 'http:///images/...' with an empty host (specifically observed for Club Super 3). Added a short-circuit at the top: if image already starts with 'http://<remote_host>/', return it unchanged. _buildWebImage is now idempotent on its own output.
+
 v.0.7.3+madteevee.27
 - Fixed v.26's resource:// → HTTP conversion: the /logos/<name> URL form was wrong because resources.getCache(name) falls back to the LOGO constant (generic pseudotv logo) on miss, and the local logos cache (~/.kodi/.../cache/logos/) is empty by default in nightly. Every logo URL ended up redirecting to the generic logo PNG. Replaced with a direct mapping: resource://<addon>/<file> → http://<host>:50001/images/<URL-encoded-special://-path>, where the special:// path points to the resource addon's resources/ directory. Pseudotv's HTTP server serves the actual file via __sendFile + FileAccess (which handles special:// translation). Verified MD5-identical to the source PNG end-to-end.
 

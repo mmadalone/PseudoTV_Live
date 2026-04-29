@@ -181,7 +181,17 @@ class Globals:
     def _buildWebImage(image=None, fallback=LOGO):
         image = Globals._cleanImage(image)
         if not image: return fallback
-        elif   image.startswith('image://'):    image = '%s/image/%s'%(Globals._getProperty('%s.Local_Host'%(ADDON_ID)),Globals._quoteString(image))
+        # v.28: short-circuit if the URL already points to our own server.
+        # Prevents the http:// branch from double-wrapping (re-encoding) URLs
+        # that we previously produced (e.g., via the resource:// branch
+        # below). Also catches the boot-time race where Remote_Host is
+        # empty during early builds — without this, _buildWebImage on a
+        # known-good HTTP URL would wrap to 'http:///images/...' with an
+        # empty host. Idempotency: applying _buildWebImage to its own
+        # output now no-ops.
+        remote_host = Globals._getProperty('%s.Remote_Host'%(ADDON_ID))
+        if remote_host and image.startswith('http://%s/'%(remote_host)): return image
+        if image.startswith('image://'):    image = '%s/image/%s'%(Globals._getProperty('%s.Local_Host'%(ADDON_ID)),Globals._quoteString(image))
         elif   image.startswith('http'):        image = 'http://%s/images/%s'%(Globals._getProperty('%s.Remote_Host'%(ADDON_ID)),Globals._quoteString(image))
         elif   image.startswith('resource://'):
             # v.27: convert Kodi-internal resource:// URLs to HTTP URLs served
