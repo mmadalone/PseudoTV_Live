@@ -110,7 +110,9 @@ GitHub denies enabling Pages on repos forked from `PseudoTV/PseudoTV_Live` ("Pag
 
 ### Cutting a new release (after making patches)
 
-The release pipeline is automated via `.github/workflows/release.yml`. Pushing a tag matching `v*-madteevee.*` triggers a workflow that runs `release.py`, publishes `_site/` to the `gh-pages` branch, and creates a GitHub Release object. Workflow can also be triggered manually from the Actions tab (`workflow_dispatch`) for republishing without a tag.
+The release pipeline is automated via `.github/workflows/release.yml`. Pushing a tag matching `v*madteevee.*` triggers a workflow that runs `release.py`, publishes `_site/` to the `gh-pages` branch, and creates a GitHub Release object. Workflow can also be triggered manually from the Actions tab (`workflow_dispatch`) for republishing without a tag.
+
+> **NOTE (2026-04-29):** The trigger pattern was previously `v*-madteevee.*` plus `v*+madteevee.*`. GitHub Actions' workflow parser rejects `+` as a literal in tag glob patterns (HTTP 422 "invalid tags patterns") — every push since v.25 produced 0-second "workflow file issue" failures. Replaced with the single pattern `v*madteevee.*` which absorbs both `-` and `+` separators (`*` matches any non-`/` char). Tag with whichever separator is convenient.
 
 #### Automated release (preferred)
 
@@ -170,3 +172,116 @@ git push fork madteevee-patches v0.7.3-madteevee.2
 - `repository.mmadalone.pseudotv` (the repo addon itself, so future repo updates also flow through GH Pages)
 
 Resource packs (`resource.images.pseudotv.logos`, bumpers, ratings, etc.) keep coming from upstream's `repository.pseudotv` since they don't need fork-specific patches. If you ever want the fork to be fully self-contained, copy those addon dirs into this repo, add to `release.py`'s `ADDONS` list, rerun.
+
+---
+
+## Post-rebase fix series — v.12 → v.41 (2026-04-28 → 2026-04-29)
+
+The initial rebase (`b6409b5` `bump: pseudotv 0.7.3+madteevee.1`) shipped with regressions in roughly five orthogonal areas: utility-menu wiring, channel-build resilience, rules system load/edit/dispatch, fast-zap player state, and the entire programme-thumbnail / channel-logo art pipeline. The series below resolved them; commits are intentionally one-fix-per-version so a future `git rebase upstream/nightly` localizes conflicts to the file that changed.
+
+### Utility menu / launcher wiring
+
+| ver | What broke | Fix |
+|---|---|---|
+| `madteevee.12` | `Utilities.buildMenu` referenced `_runCleanup`, `_runReload`, `_runRestart`, `_runFillers`, `_runLibrary` as bare names but they're `@staticmethod` on `Utilities` — the closure can't resolve them; menu NameErrors before opening | Refer through the class (`Utilities._runCleanup`); add missing `_runLibrary` body matching nightly's chkLibrary epoch-property contract |
+| `madteevee.13` | `setPropertyBool` is a master-fork API not in nightly; was used to clear `chkLibrary` | Use `clrEXTProperty('chkLibrary')` |
+| `madteevee.14` / `.15` / `.16` | Smartplay/Node/LiveTV launcher buttons in addon settings were missing `<control>` tag; clicks were no-ops | Restored buttons + close-all-modals before activate |
+| `madteevee.17` | `Dialog.Close(addonsettings,true)` left modal stack non-empty; `ActivateWindow` got "refused because there are active modal dialogs" | `Dialog.Close(all,true)` + 300ms wait before activate |
+
+### Channel-build resilience
+
+| ver | What broke | Fix |
+|---|---|---|
+| `madteevee.18` | `chkChannels` queued `Builder.buildChannels` for every channel on every boot iteration even when nothing was stale; cycle-cost scaled with channel count | Pre-filter via `_filterChannelsNeedingBuild` reading XMLTV last_stop, skip queue when no channel needs build (CRC check deferred to inside builder for correctness) |
+| `madteevee.24` | `__hasChanged` fires `__clrStation` BEFORE `buildVideo` runs — wipes the channel from in-memory M3U+XMLTV. If buildVideo returns False / [] / True (Enable_Extras=false skipping all-Specials sources, `_suspend` interrupt mid-build, smartplaylist returning nothing, plugin source timeout, etc.), the unconditional `__setStation` persists the cleared state to disk. Class-level shared M3U/XMLTV across Builder instances compounded it | `_snapshotChannel` captures pre-clear M3U+XMLTV; `_restoreChannel` re-appends if buildVideo doesn't produce new programmes; `_discardSnapshot` drops on success. Restore fires from every failure path |
+| `madteevee.33` | Live PVR playback silently failed: `iptvsimple → plugin://...?vid={catchup-id}&start={utc}&...&stop={utcend}.pvr` reached `default.py` with literal catchup tokens (iptvsimple substitutes `{lutc}` for live but leaves `{catchup-id}/{utc}/{duration}/{utcend}` as-is). Nightly aborted with `setResolvedUrl(False)`; even if it hadn't, `plugin.py:33` does `int(sysInfo.get('start'))` and crashes on `'{utc}'` | Master fork pattern: detect templates, normalize to `0`/`''`, set `chkPVRRefresh`, proceed to play path |
+
+### Rules system
+
+| ver | What broke | Fix |
+|---|---|---|
+| `madteevee.19` | `PadScheduling` rule had no operator-configurable target; always padded to `MIN_EPG_DURATION` whether or not that was wanted | Added a target-hours selector option |
+| `madteevee.20` | `Channel Manager → channel → Rules → Add` raised TypeError because `buildMenuListItem` signature changed in nightly (positional vs keyword) | Pass keyword args |
+| `madteevee.21` | Rule selector with dict-options threw `KeyError` — code did `dict[int_index]` but options is a dict not a list | Use local list of keys (`options[select]`) |
+| `madteevee.22` | Persisted rules silently no-op'd: rule keys in channels.json are JSON strings (`"1000"`), but `rule.myId` is int. `loadRules` / `runActions` used the str key against the int dict-key, the elif branch fell through. **Symptom: rules saved fine but never fired** | Normalize keys to int in `loadRules`; runActions prefers fresh citem keys over stale snapshot |
+| `madteevee.23` | Channel Manager → Rules editor: applied rules couldn't be edited or deleted again — same str-vs-int mismatch on the click handler's `ruleLST.get(str(myId))` after v.22 normalized to int | Use int `myId` consistently on edit/delete |
+
+### Fast-zap player state
+
+| ver | What broke | Fix |
+|---|---|---|
+| `madteevee.26` | Stuck wrong-channel logo after rapid CH+/CH-: `_onPlay` (decorated `@threadit`) closes overlay then later updates `self.playingItem`; `__chkOverlay` poll between those steps captures stale citem; subsequent toggleOverlay calls saw `overlay != None` and no-op'd → wrong logo persisted indefinitely | Added `Player._overlay_chid` tracking; toggleOverlay closes+rebuilds when chid mismatches current playingItem.citem.id (idempotent when chid unchanged so programme transitions don't flicker) |
+
+### Channel logo / programme thumbnail art (the long arc)
+
+This was the dominant problem area — UC Remote 3 channel logos broke after the rebase, then Kodi's native PVR EPG view also showed channel logo where per-show thumbnail belongs. The path through v.26-v.40 was a sequence of partial diagnoses; the canonical fix is **v.41 only**, but the intermediate versions stay in the commit log for context.
+
+| ver | What it tried | Status |
+|---|---|---|
+| `madteevee.26-v.32` | Series of `_buildWebImage` reshapings: `resource://` → http, `special://` → http, image:// idempotency, HTTP/1.1 server, host-empty guards | Each fixed a real edge case but none addressed the actual UC3-display root cause. Idempotency guard (v.31, `if 'http' in image or '/image/' in image: return image`) is independently correct, retained |
+| `madteevee.33` | (above — playback fix, unrelated to art) | Independent, retained |
+| `madteevee.34` | Empty-host write guards (`if not remote_host: return image`) so build cycles before service publishes Local_Host/Remote_Host don't bake `http:///images/...` URLs | Independently correct, retained |
+| `madteevee.35` | Restored master fork's narrow `_buildWebImage` scope (drop resource:// and special:// branches that v.26+ piled on) | Retained |
+| `madteevee.36` | `_getThumb` early-return on first matching art key + drop the `_buildWebImage` wrap; nightly's `for: art = ... ; return _buildWebImage(art)` always returned the LAST iteration's value (typically None → fallback) instead of FIRST match | Real bug fix, retained |
+| `madteevee.37 / .38 / .39` | UC3 channel-logo display experiments: force channel logo as programme `<icon>`; emit `/image/<encoded image://>` host-less proxy form to make UC3's `thumbnail_url` reject and fall back to icon | All reverted in `madteevee.39`; operator handled UC3 channel-logo display in the albaintor integration layer instead |
+| `madteevee.40` | Wrap `image://` programme icons via Kodi's `/image/` proxy URL using `Local_Host` (`http://<kodi-user>:<kodi-pass>@<host>:8080/image/<encoded>`) | Hit a Window-property race: `Local_Host` reads back empty during build calls (T:builder-thread) despite being set briefly seconds earlier (T:service-thread). Verified via `_getProperty` log lines |
+| **`madteevee.41`** | **Canonical fix.** Wrap `image://` programme icons via pseudotv's own HTTP server (`Remote_Host`, port 50001, no auth, `/images/<abspath>` handler served by `FileAccess`). Decode the encoded path inside `image://<urlencoded>/`, re-encode per URL segment, emit `http://<remote_host>/images<abspath>`. iptvsimple stores the URL verbatim; Kodi's EPG renderer fetches via the addon's own server, which round-trips to the file. | Verified end-to-end: `Globals._toEpgIconURL` in `variables.py`, called from `xmltvs.addProgram`. After v.41 build + iptvsimple re-import, `Epg16.db.epgtags.sIconPath` holds the http URL form. Kodi EPG renders landscape art same as for any other PVR client. |
+
+### CI / release pipeline
+
+| ver | What broke | Fix |
+|---|---|---|
+| `madteevee.25` | `release.yml` only matched `v*-madteevee.*` (legacy dash); plus-form tags didn't trigger | Added `v*+madteevee.*` to triggers — but GitHub's workflow parser rejected `+` as a literal in glob patterns (HTTP 422), which created a separate breakage in v.25 itself |
+| (post-v.41 ci-only commit) | Every push since v.25 produced 0-second "workflow file issue" failures because of the rejected pattern | Replaced the two-pattern union with single broader `v*madteevee.*` (the `*` matches `/` exclusion only, so it absorbs both `-` and `+` separators). Verified: `gh workflow run --ref madteevee-on-nightly` runs cleanly in 41s, publishes `_site/` to `gh-pages`. |
+
+## Pending items / future forward-ports
+
+These are real issues observed during the v.12-v.41 work that landed as workarounds, deferred fixes, or remain in upstream/nightly to watch:
+
+### Build-flow `_suspend` self-deadlock (workaround in place, not fixed)
+
+**Symptom:** Builder.buildFiles can enter a tight `_suspend` loop (`while not abortRequested: ... elif self.service._suspend(): continue`). With no sleep in the polling loop, `pendingSuspend=True` from any concurrent activity (Kodi addonsettings dialog open, busy_dialog from a chkOverlay tick, etc.) traps the builder. We hit this twice during v.39/v.41 testing — once because the user had pseudotv's addon settings dialog open during a chkChanged-triggered build, once with a transient ~150ms suspend cycle from another thread that the builder happened to sample at the wrong instant.
+
+**Workaround:** trigger rebuilds with no Kodi UI dialogs open. Restart Kodi if a build appears stuck (`buildFiles, _suspend` repeating in the log without progress). The build is queued into `tasks.chkChanged` which fires periodically; flipping `channels.json` `changed:false → changed:true` forces it to pick the channel up next cycle.
+
+**Real fix (not done):** add a sleep in the `_suspend` poll branch (master fork's `buildFileList` had `MONITOR().waitForAbort(CPU_CYCLE)` here; nightly drops it). Or change `_suspend()` to return False after N consecutive checks against the same `pendingSuspend=True`. Either localizes to `builder.py` and is one of those fork-only changes that won't conflict with upstream merges.
+
+### `channels.json` writeback on shutdown clobbers `changed:true`
+
+**Symptom:** flipping `channels.json` to `changed:true` and immediately restarting Kodi loses the flag — pseudotv writes channels.json on shutdown, overwriting the manual edit.
+
+**Workaround:** flip the flag AFTER Kodi finishes booting (when the chkChanged poll cycle is running), not before. Or trigger rebuild via Utility menu → Rebuild M3U/XMLTV (which deletes the M3U/XMLTV files, forcing a rebuild without the changed flag).
+
+### Iptvsimple's `<programme><icon>` URL acceptance
+
+**Confirmed empirically:** iptvsimple accepts http/https URLs verbatim in programme `<icon>` and stores them in EPG DB. It rejects (or transforms to channel logo path as fallback) certain other schemes — at minimum it choked on raw `image://%2fmnt%2f...%2flandscape.jpg/` in some build cycles during this session, which is why v.41 wraps to http://. Whether it consistently rejects `image://` or only under specific conditions wasn't fully nailed down. The v.41 http-wrap is a defensive form that always works.
+
+If a future iptvsimple release accepts image:// directly (or upstream pseudotv emits something different), revisit `_toEpgIconURL` — the wrap is a no-op penalty for art that didn't need wrapping anyway, but if the round-trip via the addon HTTP server becomes a perf concern at high programme counts, switching back to raw image:// would skip the network hop.
+
+### Forward-ports not done
+
+These were master-era fork patches that nightly may or may not have merged differently. Worth a re-check on the next `git rebase upstream/nightly`:
+
+- **`buildFileList` cpu-cycle sleep in suspend branch** — see "self-deadlock" above. Master had `MONITOR().waitForAbort(CPU_CYCLE)`. Nightly removed it.
+- **chkChanged debounce** — currently chkChanged fires on every property poll cycle when the property is set; if the property gets set rapidly during channel-manager save it can queue multiple builds. Master fork had a debounce.
+- **Class-level vs instance-level M3UDATA / XMLTVDATA** — the v.24 snapshot/restore mechanism is a workaround for the underlying issue that Builder shares mutable M3U/XMLTV state across instances at the class level. Cleaner fix is per-instance state. Larger change, deferred.
+
+### Things upstream/nightly should fix (we work around but they're not fork-specific)
+
+These are upstream bugs we currently mask. Worth filing as upstream issues if pseudotv accepts contributions in the future (currently this fork is one-way pulls only per `feedback_public_facing_thank_upstream`, but a careful PR with no fork-language could be welcome).
+
+- `_getThumb` returning the LAST iteration's match instead of FIRST (v.36)
+- `default.py` aborting on catchup-token URLs in mode=live (v.33)
+- `_buildWebImage` wrapping http URLs that already point to our own server (v.28 idempotency guard)
+- `_suspend` poll loop without sleep (deadlock potential — see above)
+- `Loadrules` str-vs-int key mismatch (v.22)
+
+## Operational gotchas (carry-overs)
+
+These were already in CLAUDE.md but worth restating in fork-notes for future maintainers:
+
+- **Editing `~/.kodi/userdata/addon_data/plugin.video.pseudotv.live/settings.xml` while the addon is enabled** gets clobbered. Right order: disable → wait 5s+ → edit → enable. UI is more reliable for one-off changes.
+- **`Addons.SetAddonEnabled` on `plugin.video.pseudotv.live` right after a Kodi auto-update** races and leaves the addon stuck `enabled=false`. Symptom: log fills with `Unable to find plugin plugin.video.pseudotv.live`. Fix: a single `SetAddonEnabled enabled:true` call. Going forward, prefer to bounce a different addon (e.g., `pvr.iptvsimple`) when forcing a settings/repo refresh.
+- **Don't edit `~/.kodi/userdata/Database/Epg*.db` as part of any fix.** Inspect-only via sqlite3. Real fixes have to work on a clean install where the operator doesn't hand-edit Kodi's databases. Captured as memory: `feedback_no_epg_db_edits.md`.
+- **Always ask before `sudo systemctl restart kodi`.** Plan-level approval doesn't extend to specific restart timing. Memory: `feedback_kodi_restart.md`.
+- **The brief wrong-channel-logo flash on the first-loaded channel of a fast zap is unavoidable.** That channel really did start playing for a moment — its `onAVStarted` is genuine, not stale, so it passes the `_tune_ts` filter and the overlay opens with its logo. The latest user-intended channel's overlay only rebuilds once *its* `onAVStarted` fires. Documented in commit `9be4969`'s message.
