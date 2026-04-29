@@ -98,7 +98,17 @@ class RulesList(object):
         #load channel rules and their instances. append = full rule list.
         def __load(ruleList, citem={}):
             tmpruleList = {}
-            if not append and len(citem.get('rules',{})) == 0: return None
+            # madteevee fix: channels.json stores rule IDs as JSON object keys —
+            # which JSON forces to strings ("2999"). dumpRules writes them as
+            # ints, but the round-trip through json.dump → json.load returns
+            # strings. rule.myId is int, so citem.get('rules',{}).get(rule.myId)
+            # silently returned None for every persisted rule. Persisted rules
+            # never loaded — the only rules that actually fired were the ones
+            # injected in-memory by _injectRules (which uses int keys directly).
+            # Normalize the citem rules dict to int keys before lookup.
+            citem_rules = {int(k) if isinstance(k, str) and k.lstrip('-').isdigit() else k: v
+                           for k, v in citem.get('rules', {}).items()}
+            if not append and len(citem_rules) == 0: return None
             for rule in ruleList:
                 ruleInstance = rule.copy()
                 tmpritem = {"values":{}}
@@ -106,15 +116,15 @@ class RulesList(object):
                     if isinstance(idx, str): idx = int(idx) #temp correct format change
                     tmpritem["values"][idx] = value
 
-                if citem.get('rules',{}).get(rule.myId):
-                    for key, value in list(citem['rules'][rule.myId].get('values',{}).items()): #load channel rule
+                if citem_rules.get(rule.myId):
+                    for key, value in list(citem_rules[rule.myId].get('values',{}).items()): #load channel rule
                         try:
                             if isinstance(key, str): key = int(key) #temp correct format change
                             tmpritem["values"].update({key:value}) #update default rule value with channel value.
                             ruleInstance.optionValues[key] = tmpritem["values"][key] #load values to rule instance
-                        except Exception as e: log('[%s] loadRules, failed! %s\nrule = %s'%(citem['id'],e,citem['rules'][rule.myId]), xbmc.LOGERROR)
+                        except Exception as e: log('[%s] loadRules, failed! %s\nrule = %s'%(citem['id'],e,citem_rules[rule.myId]), xbmc.LOGERROR)
                     tmpruleList[rule.myId] = ruleInstance
-                    
+
                 elif append: #append missing default rule values
                     tmpruleList[rule.myId] = ruleInstance
 
@@ -137,8 +147,17 @@ class RulesList(object):
         
     def runActions(self, action, citem={}, parameter=None, inherited=None):
         if inherited is None: inherited = self
-        rules = self.ruleItems.get(citem.get('id',''))
-        if not rules: rules = (self.loadRules([citem]).get(citem.get('id','')) or {})
+        # madteevee: prefer freshly-loaded rules from the passed-in citem when
+        # available, so user edits via Channel Manager take effect on the next
+        # build even though self.ruleItems (built at RulesList init from the
+        # class-level Channels instance) doesn't refresh after disk writes.
+        # The citem flowing in from chkChanged → buildChannels was just read
+        # from disk, so its 'rules' is authoritative. Falls back to ruleItems
+        # only when the citem itself carries no rules dict (rare).
+        if citem.get('rules'):
+            rules = self.loadRules([citem]).get(citem.get('id','')) or {}
+        else:
+            rules = self.ruleItems.get(citem.get('id','')) or {}
         for myId, rule in list(sorted(rules.items())):
             if action in rule.actions:
                 self.log("[%s] runActions, %s performing channel rule: %s"%(citem.get('id'),inherited.__class__.__name__,rule.name))

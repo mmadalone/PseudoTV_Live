@@ -1,5 +1,11 @@
 ### NOTICE: The madteevee fork rides on upstream/nightly; things may still break! ####
 
+v.0.7.3+madteevee.22
+- Persisted channel rules now actually load and fire during builds. Two pre-existing nightly bugs converged to make every persisted rule (not just our new PadScheduling) silently no-op:
+  1. JSON-roundtrip key-type mismatch in RulesList.loadRules. dumpRules writes int keys ({2999: ...}) into channels.json but JSON forces dict keys to strings ({"2999": ...}). On read-back, the lookup `citem.get('rules',{}).get(rule.myId)` did dict.get(int) against {str: ...} keys → always None → no rule ever loaded from disk. Only rules injected in-memory by _injectRules (which uses int keys directly) ever fired — masking the bug for years.
+  2. RulesList.runActions read self.ruleItems (built once at init from a class-level Channels cache) before falling back to the passed-in citem's rules. The class-level cache doesn't refresh after Manager writes to disk, so user edits in Channel Manager never reached the build.
+  Fixes: loadRules now normalizes citem['rules'] keys to int before lookup. runActions prefers loadRules of the passed-in (always-fresh) citem when it has a 'rules' dict, falling back to ruleItems only when citem has none. Both changes apply to ALL channel rules — not just PadScheduling — so historical "rule applied but does nothing" cases should now actually run.
+
 v.0.7.3+madteevee.21
 - Selector dialog for rules with dict-typed selectBoxOptions (e.g. PadScheduling's "Target Duration", DurationOptions' first option) now returns the picked value instead of throwing KeyError. Pre-existing nightly upstream bug at rules.py:314 — the dict-branch indexed `self.selectBoxOptions[optionindex][select]` where `select` is the integer position from the dialog, blowing up because dict keys are strings ("KeyError: 2"). Replaced with `options[select]` to use the local list(dict.keys()) already prepared at line 309. Mirrors upstream/master's working logic. Required for v.19's Pad Scheduling target option to be picked from the UI.
 
