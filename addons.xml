@@ -1,17 +1,18 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <addons>
-    <addon id="plugin.video.pseudotv.live" version="0.6.1q+madteevee.1" name="PseudoTV Live (madteevee)" provider-name="Lunatixz, mmadalone">
+    <addon id="plugin.video.pseudotv.live" version="0.7.3+madteevee.42" name="PseudoTV Live (madteevee)" provider-name="Lunatixz, mmadalone">
         <requires>
             <import addon="xbmc.python" version="3.0.1" />
             <import addon="script.module.six" version="1.0.0" />
             <import addon="script.module.kodi-six" version="0.1.3.1" />
             <import addon="script.module.infotagger" version="0.0.5" />
-            <import addon="script.module.simplecache" version="1.0.0" />
             <import addon="script.module.requests" version="0.0.1" />
             <import addon="script.module.pyqrcode" version="1.2.1+matrix.1" />
             <import addon="plugin.library.node.editor" version="0.0.1" />
             <import addon="resource.images.studios.white" version="0.0.1" />
+            <import addon="resource.images.studios.coloured" version="0.0.1" />
             <import addon="resource.images.musicgenreicons.text" version="0.0.1" />
+            <import addon="resource.images.moviegenreicons.white" version="0.0.1" />
             <import addon="resource.images.moviegenreicons.transparent" version="0.0.1" />
             <import addon="resource.images.pseudotv.logos" optional="true" version="0.0.1" />
             <import addon="resource.images.overlays.crttv" optional="true" version="0.0.2" />
@@ -24,7 +25,7 @@
         <extension point="xbmc.python.pluginsource" library="resources/lib/default.py">
             <provides>video</provides>
         </extension>
-        <extension point="xbmc.service" library="resources/lib/services.py" />
+        <extension point="xbmc.service" library="resources/lib/service.py" />
         <extension point="kodi.context.item">
             <menu id="kodi.core.main">
                 <menu>
@@ -37,7 +38,7 @@
                         <label>30117</label>
                         <visible>[String.StartsWith(ListItem.PVRInstanceName, PseudoTV Live) + Window.IsVisible(tvrecordings)]</visible>
                     </item>
-                    <item library="resources/lib/context_play.py" args="playlist">
+                    <item library="resources/lib/default.py" args="?mode=playlist">
                         <label>30076</label>
                         <visible>[String.Contains(ListItem.Plot,"item=") + ListItem.HasEpg] + [Window.IsVisible(tvguide)|Window.IsVisible(tvsearch)|Window.IsVisible(tvchannels)]</visible>
                     </item>
@@ -53,13 +54,17 @@
                         <label>30087</label>
                         <visible>[String.Contains(ListItem.Plot,"item=") + ListItem.HasEpg] + [Window.IsVisible(tvguide)|Window.IsVisible(tvsearch)|Window.IsVisible(tvchannels)]</visible>
                     </item>
-                    <item library="resources/lib/context_create.py">
+                    <item library="resources/lib/context_create.py" args="add">
                         <label>30114</label>
                         <visible>[!ListItem.IsPlayable + ListItem.IsFolder] + [!String.IsEmpty(ListItem.Label)]</visible>
                     </item>
-                    <item library="resources/lib/context_create.py" args="manage">
+                    <item library="resources/lib/context_create.py" args="open_manager">
+                        <label>32261</label>
+                        <visible>[String.Contains(ListItem.Plot,"item=")]</visible>
+                    </item>
+                    <item library="resources/lib/context_create.py" args="open_manager">
                         <label>30107</label>
-                        <visible>[String.Contains(ListItem.Plot,"item=")] + [Window.IsVisible(tvchannels)]</visible>
+                        <visible>[!String.Contains(ListItem.Plot,"item=")]</visible>
                     </item>
                 </menu>
             </menu>
@@ -100,6 +105,19 @@
             <assets>
                 <icon>icon.png</icon>
                 <fanart>fanart.jpg</fanart>
+            </assets>
+        </extension>
+    </addon>
+    <addon id="resource.images.pseudotv.logos.madteevee" name="PseudoTV Live Logos (madteevee)" version="0.1.11" provider-name="Lunatixz, mmadalone">
+        <extension point="kodi.resource.images" compile="false" type="logos" />
+        <requires>
+            <import addon="kodi.resource" version="1.0.0" />
+        </requires>
+        <extension point="xbmc.addon.metadata">
+            <description lang="en">Custom channel logos for PseudoTV Live (madteevee fork). Includes the upstream Lunatixz logo set plus additional custom logos. Coexists with resource.images.pseudotv.logos.</description>
+            <platform>all</platform>
+            <assets>
+                <icon>icon.png</icon>
             </assets>
         </extension>
     </addon>
