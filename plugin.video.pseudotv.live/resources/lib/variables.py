@@ -153,20 +153,37 @@ class Globals:
         else: Globals._openSettings()
           
     @staticmethod
-    def _toEpgProxyForm(image=''):
-        # v.38: convert raw image:// URLs to host-less Kodi /image/<url-encoded> proxy form for
-        # XMLTV programme <icon>. Kodi's PVR EPG renderer treats unschemed paths as relative to
-        # its own webserver, prepends host, fetches via /image/ proxy, decodes the inner image://
-        # URL, and serves the file — programme art renders normally in Kodi's EPG view. UC Remote
-        # 3's albaintor integration calls urllib.parse.urlparse().scheme on the URL; '/image/...'
-        # has empty scheme, so its thumbnail_url returns None and the integration falls back to
-        # channel.icon (channel logo). Net: Kodi EPG shows per-show art; UC3 shows channel logo.
-        # Pass-through for non-image:// inputs (channel logo URLs, http/https) — those are already
-        # in a form Kodi can render and UC3 will reject (non-image scheme → fallback to icon).
+    def _toEpgIconURL(image=''):
+        # v.41: convert raw image:// URLs in <programme><icon src="..."> to URLs iptvsimple
+        # accepts. iptvsimple's XMLTV parser silently drops scheme-unknown URLs (image://,
+        # special://, smb://, etc.) in programme <icon> and falls back to channel logo —
+        # verified empirically: 137 unique image:// URLs in pseudotv.xml resulted in 0 entries
+        # with image:// in Epg16.db.epgtags.sIconPath while 424 rows got channel logo path.
+        # Comparison: epg.best/movistarplus channels work because they use http(s):// URLs.
+        #
+        # v.40 attempted Kodi's /image/ proxy via Local_Host but hit a property-race: pseudotv's
+        # service publishes Local_Host briefly but the property reads back empty during
+        # subsequent build calls (Window 10000 property timing/persistence issue). Switched to
+        # using the addon's own HTTP server: Remote_Host is reliably set early (lazy-init via
+        # kodi.py:getRemoteHost), no auth needed, and server.py's /images/ handler already
+        # serves absolute file paths via FileAccess. We just decode the encoded path inside
+        # image://<urlencoded>/, prepend /images/, and emit as
+        # http://<remote_host>/images<absolute path>. Verified end-to-end: addon server returns
+        # HTTP 200 + 129685 bytes of fanart for /images//mnt/DEEPEE/TV/.../fanart.jpg.
+        # Pass-through for non-image:// inputs (existing http/https URLs from upstream sources
+        # and special:// fallbacks pseudotv keeps as channel-logo last-resort).
         if not image: return image
-        if image.startswith('image://'):
-            return '/image/' + Globals._quoteString(image)
-        return image
+        if not image.startswith('image://'): return image
+        remote_host = Globals._getProperty('%s.Remote_Host'%(ADDON_ID))
+        if not remote_host: return image  # service hasn't published yet; next build cycle will wrap
+        # image://<urlencoded path>/ → decode the inner path, re-encode for HTTP URL
+        inner = image[len('image://'):].rstrip('/')
+        path  = Globals._unquoteString(inner)
+        if not path.startswith('/'): path = '/' + path
+        # Re-encode each path segment so the URL is valid (preserve / separators)
+        segments = path.split('/')
+        encoded  = '/'.join([Globals._quoteString(s) if s else s for s in segments])
+        return 'http://%s/images%s'%(remote_host, encoded)
 
     @staticmethod
     def _getThumb(item={}, opt=0): #unify thumbnail artwork
