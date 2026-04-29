@@ -1,5 +1,8 @@
 ### NOTICE: The madteevee fork rides on upstream/nightly; things may still break! ####
 
+v.0.7.3+madteevee.30
+- Switched pseudotv's HTTP server from HTTP/1.0 to HTTP/1.1 (set protocol_version on the handler class). UC Remote 3's PVR image fetcher silently dropped pseudotv channel logos despite a valid PNG response — symptom: post-rebase, pseudotv channels showed no logos in UC3 even though the JSON-RPC PVR.GetChannels icon field had a correct HTTP URL and curl could fetch the PNG. Other PVR clients exposing HTTPS URLs worked fine. Default Python BaseHTTPRequestHandler emits HTTP/1.0 responses, which UC3's image consumer rejects for rendering. Content-Length is already set on every response so HTTP/1.1's framing requirements are met without code changes.
+
 v.0.7.3+madteevee.29
 - Restored master fork's /images/ HTTP server semantics: clean basename URLs (http://<host>:50001/images/Club%20Super%203.png) now work because the server prepends LOGO_LOC for paths that aren't absolute or Kodi VFS schemes. Nightly's _sendFile passed the unquoted path as-is, which broke clean URLs and forced v.27's resource:// branch to emit URLs containing special://-with-URL-encoded-%3A-%2F that UC Remote 3 wouldn't accept (verified: pre-rebase master worked fine for UC3, post-rebase nightly URLs displayed as missing logos despite curl successfully fetching them). _buildWebImage's resource:// branch now emits the clean basename form. Operational note: LOGO_LOC (~/.kodi/.../cache/logos/) must be populated with the channel logo PNGs — populate by copying from the resource addon's resources/ directory.
 

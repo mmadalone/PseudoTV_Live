@@ -91,11 +91,21 @@ class Discovery(Thread):
 
 
 class MyHandler(BaseHTTPRequestHandler):
+    # v.30: switch from default HTTP/1.0 to HTTP/1.1 — required by some external
+    # clients. UC Remote 3's image fetcher specifically: it consumes pseudotv's
+    # /images/<basename> URLs from PVR.GetChannels icon field, but UC3 silently
+    # drops HTTP/1.0 responses for image rendering even though the response body
+    # is a valid PNG with correct Content-Type. HTTP/1.1 also enables keep-alive
+    # connection reuse for clients that batch-fetch multiple logos. __sendChunk
+    # already sets Content-Length on every response, so HTTP/1.1's required
+    # message-framing constraint is satisfied without code changes.
+    protocol_version = "HTTP/1.1"
+
     def __init__(self, request, client_address, server, service):
         self.service   = service
         self.monitor   = service.monitor
         self.resources = Resources(service)
-        
+
         try: BaseHTTPRequestHandler.__init__(self, request, client_address, server)
         except Exception: pass
 
