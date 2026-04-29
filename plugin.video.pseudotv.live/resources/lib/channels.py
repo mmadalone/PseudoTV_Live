@@ -100,8 +100,31 @@ class Channels(object):
         except Exception: return channels
 
     
-    def setChannels(self, channels=None) -> bool:
+    def setChannels(self, channels=None, modified_ids=None) -> bool:
         if channels is None: channels = self.channelDATA['channels']
+        if modified_ids is not None and self.writable:
+            # v.43 merge-on-write: Builder.channels is a class-level shared instance loaded
+            # once at class-definition time. addChannel() refreshes only the channels the
+            # current build batch touched; all other channels carry stale init-time state.
+            # A bare _save() would clobber any disk edits to those untouched channels
+            # (notably operator-flipped `changed:true` used to force a rebuild). Re-read
+            # disk and preserve untouched channels here.
+            try:
+                disk_channels = {c.get('id'): c for c in (self._load().get('channels',[]) or [])}
+                in_memory_ids = {c.get('id') for c in channels}
+                merged = []
+                for c in channels:
+                    cid = c.get('id')
+                    if cid in modified_ids or cid not in disk_channels:
+                        merged.append(c)              # in-memory authoritative (touched, or new)
+                    else:
+                        merged.append(disk_channels[cid])  # disk authoritative (untouched)
+                for cid, c in disk_channels.items():
+                    if cid not in in_memory_ids:
+                        merged.append(c)              # disk-only (preserve; Builder doesn't delete)
+                channels = merged
+            except Exception as e:
+                self.log('setChannels, modified_ids merge failed, falling back to direct write: %s'%(e), xbmc.LOGWARNING)
         self.channelDATA['uuid']     = SETTINGS.getMYUUID()
         self.channelDATA['channels'] = self.sortChannels(channels)
         PROPERTIES.setHasChannels(len(channels)>0)

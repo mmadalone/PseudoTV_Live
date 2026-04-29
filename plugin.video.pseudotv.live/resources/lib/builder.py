@@ -253,6 +253,7 @@ class Builder(object):
                     self.log('[%s] buildChannels, __hasChanged cleared channel meta'%(citem['id']))
                     citem['changed'] = False
                 changes.add(self.channels.addChannel(citem))
+                modified_ids.add(citem['id']) # v.43: track touched IDs for merge-on-write at setChannels
             return state
                     
         def __hasProgrammes(citem: dict) -> bool:
@@ -291,9 +292,10 @@ class Builder(object):
             with PROPERTIES.legacy(), PROPERTIES.chkRunning('Builder.buildChannels'):
                 channels = self.getVerifiedChannels(channels)
                 if len(channels) > 0:
-                    completed = set()
-                    changes   = set()
-                    now       = getUTCstamp()
+                    completed    = set()
+                    changes      = set()
+                    modified_ids = set() # v.43: per-citem IDs that __hasChanged actually mutated; passed to setChannels for merge-on-write
+                    now          = getUTCstamp()
                     nstart    = roundTimeDown(now,offset=60)#offset time to start bottom of the hour
                     fallback  = epochTime(nstart,tz=False).strftime(DTFORMAT)
 
@@ -386,7 +388,7 @@ class Builder(object):
                             # as the _interrupt/_suspend/B3-else branches.
                             try: self._restoreChannel(citem)
                             except Exception: pass
-                    if any(changes): self.channels.setChannels()
+                    if any(changes): self.channels.setChannels(modified_ids=modified_ids)
                     self.log('[%s] buildChannels, completed = %s, updated = %s, changes = %s'%(citem['id'],any(completed),any(updated),any(changes)))
 
 
