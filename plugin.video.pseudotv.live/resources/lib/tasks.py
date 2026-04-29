@@ -22,6 +22,7 @@ from globals    import *
 from library    import Library
 from builder    import Builder
 from channels   import Channels
+from xmltvs     import XMLTVS
 from backup     import Backup
 from multiroom  import Multiroom
 from wizard     import Wizard
@@ -271,16 +272,56 @@ class Tasks(object):
             self.service._que(Builder(service=self.service).buildChannels,3,*([channel],False,silent))
         
         
+    def _filterChannelsNeedingBuild(self, channels):
+        # madteevee: read-only pre-filter for chkChannels. Returns subset of
+        # channels whose cached EPG warrants a build. Mirrors the gating
+        # logic of Builder.buildChannels' __needsUpdate / __hasChanged
+        # closures, with two deliberate omissions:
+        #   - SETTINGS.getFileCRC() is NOT called here. It has side effects
+        #     (updates the cached CRC via setCacheSetting at kodi.py:559),
+        #     so calling it from a read-only filter would mask real changes
+        #     from the subsequent buildChannels run.
+        #   - When Enable_Changed is on, channels are conservatively included
+        #     (no CRC detection here; defer to buildChannels' __hasChanged).
+        if not channels: return []
+        now       = getUTCstamp()
+        nstart    = roundTimeDown(now, offset=60)
+        fallback  = epochTime(nstart, tz=False).strftime(DTFORMAT)
+        threshold = now + ((MAX_GUIDEDAYS * 86400) - 43200)
+        detect    = SETTINGS.getSettingBool('Enable_Changed')
+
+        xmltv  = XMLTVS()
+        stops  = dict(xmltv.loadStopTimes(channels, fallback=fallback))
+        needed = []
+        for citem in channels:
+            if citem.get('changed', False):
+                needed.append(citem); continue
+            if stops.get(citem['id'], 0) <= threshold:
+                needed.append(citem); continue
+            if detect:
+                needed.append(citem); continue
+        self.log('_filterChannelsNeedingBuild, total = %s, needed = %s'%(len(channels), len(needed)))
+        return needed
+
+
     def chkChannels(self, channels=None, silent=None):
         if silent is None: silent = BUILTIN.isPlaying()
         if channels is None: channels = self.getChannels()
         if len(channels) > 0:
             self.log('chkChannels, channels = %s'%(len(channels)))
+            # madteevee: hoist the freshness check from Builder.buildChannels'
+            # inner __needsUpdate so we don't even queue a job for fresh
+            # channels. The per-channel guard still runs inside buildChannels
+            # for any channel that passes the filter.
+            needed = self._filterChannelsNeedingBuild(channels)
+            if not needed:
+                self.log('chkChannels, all %s channels fresh - skipping buildChannels'%(len(channels)))
+                return
             if not PROPERTIES.hasChannels():
-                self.service._que(Builder(service=self.service).buildChannels,3,*(channels,False,silent))
+                self.service._que(Builder(service=self.service).buildChannels,3,*(needed,False,silent))
             else:
-                [self.service._que(Builder(service=self.service).buildChannels,3,*([channel],False,silent)) for channel in channels]
-            if SETTINGS.getSettingBool('Build_Filler_Folders'): self._que(self.chkFillers,4,*(channels,silent))
+                [self.service._que(Builder(service=self.service).buildChannels,3,*([channel],False,silent)) for channel in needed]
+            if SETTINGS.getSettingBool('Build_Filler_Folders'): self._que(self.chkFillers,4,*(needed,silent))
         else:
             self.log('chkChannels, No Channels Configured!')
             if not SETTINGS.hasAutotuned():

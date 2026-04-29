@@ -1,5 +1,8 @@
 ### NOTICE: The madteevee fork rides on upstream/nightly; things may still break! ####
 
+v.0.7.3+madteevee.18
+- Boot-time builder iteration is now gated. Restart used to fire one buildChannels job per channel (4 channels = 4 progress dialogs 0%->100%) because chkLibrary's nextrun lives in Window(10000) properties and is wiped on every Kodi restart. The per-channel __needsUpdate skip inside Builder.buildChannels was correct but ran too late — the queue + dialog overhead happened first. Hoisted the freshness check into Tasks.chkChannels via a new read-only helper _filterChannelsNeedingBuild (uses XMLTVS.loadStopTimes + the same MAX_GUIDEDAYS-12h threshold as __needsUpdate). When all channels are fresh, no buildChannels jobs queue at all. The per-channel guard inside Builder.buildChannels is unchanged and still runs as the authoritative check. Aggregate-forward append behavior (extending EPG to maintain MAX_GUIDEDAYS forward as days slip past) is preserved exactly. Conservative under Enable_Changed=true (always includes channels — defers CRC detection to buildChannels, since SETTINGS.getFileCRC has cache-update side effects).
+
 v.0.7.3+madteevee.17
 - _openAfterCloseSettings now uses Dialog.Close(all,true) instead of Dialog.Close(addonsettings,true). v.16 traces confirmed the named-form Dialog.Close fired and the 200ms wait elapsed, but ActivateWindow was still refused with "active modal dialogs" — the named close didn't actually dismiss the modal under Kodi 21 (either name mismatch or a stacked dialog above the addon-settings one). Dialog.Close(all,true) is reliable: closes every active modal regardless of name. Wait bumped 200ms→300ms for safety.
 
