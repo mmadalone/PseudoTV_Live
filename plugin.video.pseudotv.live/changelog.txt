@@ -1,5 +1,8 @@
 ### NOTICE: The madteevee fork rides on upstream/nightly; things may still break! ####
 
+v.0.7.3+madteevee.21
+- Selector dialog for rules with dict-typed selectBoxOptions (e.g. PadScheduling's "Target Duration", DurationOptions' first option) now returns the picked value instead of throwing KeyError. Pre-existing nightly upstream bug at rules.py:314 — the dict-branch indexed `self.selectBoxOptions[optionindex][select]` where `select` is the integer position from the dialog, blowing up because dict keys are strings ("KeyError: 2"). Replaced with `options[select]` to use the local list(dict.keys()) already prepared at line 309. Mirrors upstream/master's working logic. Required for v.19's Pad Scheduling target option to be picked from the UI.
+
 v.0.7.3+madteevee.20
 - Channel Manager rule options dialog now actually renders. Pre-existing nightly upstream bug at manager.py:529 (same in upstream/nightly and our fork): the call to LISTITEMS.buildMenuListItem passed positional args that didn't match the signature — the 4th positional was [rule.myId] (a list) which landed in the `url` slot, got forwarded to xbmcgui.ListItem as `path`, and Kodi rejected with TypeError 'argument "path" for method "ListItem" must be unicode or str'. The exception aborted getRule before the dialog could render, so clicking a rule in Channel Manager → Rules → Add → <rule> silently did nothing and the rule never made it into the saved rules list. Converted to keyword args (matches the working pattern at manager.py:445). Required for the v.19 PadScheduling target option to be configurable in the UI.
 
