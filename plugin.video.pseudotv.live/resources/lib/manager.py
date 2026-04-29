@@ -526,7 +526,15 @@ class Manager(xbmcgui.WindowXMLDialog):
         select = -1
         while not self.monitor.abortRequested() and not select is None:
             with self.toggleSpinner(condition=PROPERTIES.isRunning('Manager.toggleSpinner')==False):
-                lizLST = [LISTITEMS.buildMenuListItem('%s = %s'%(rule.optionLabels[idx],rule.optionValues[idx]),rule.optionDescriptions[idx],Globals._getDummyIcon(idx+1),[rule.myId],{'value':optionValue,'idx':idx,'myId':rule.myId,'citem':citem}) for idx, optionValue in enumerate(rule.optionValues)]
+                # madteevee fix: positional args here mismatched buildMenuListItem's
+                # signature (icon=, url=, info=, props=). The 4th positional was
+                # [rule.myId] — a list — landing in `url`, forwarded to
+                # xbmcgui.ListItem(...,path,...) which rejects non-strings with
+                # 'argument "path" for method "ListItem" must be unicode or str'.
+                # That blew up before the rule-options dialog could render, so the
+                # rule never made it into ruleLST and the channel saved with no
+                # rules. Mirroring the keyword-arg pattern from manager.py:445.
+                lizLST = [LISTITEMS.buildMenuListItem('%s = %s'%(rule.optionLabels[idx],rule.optionValues[idx]),rule.optionDescriptions[idx],icon=Globals._getDummyIcon(idx+1),props={'value':optionValue,'idx':idx,'myId':rule.myId,'citem':citem}) for idx, optionValue in enumerate(rule.optionValues)]
             select = DIALOG.selectDialog(lizLST, header='%s %s - %s'%(LANGUAGE(32176),rule.myId,rule.name), multi=False)
             if not select is None:
                 try: rule.onAction(int(lizLST[select].getProperty('idx') or "0"))
