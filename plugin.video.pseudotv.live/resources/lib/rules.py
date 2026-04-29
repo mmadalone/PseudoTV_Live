@@ -1555,48 +1555,70 @@ class PadScheduling(BaseRule):
     def __init__(self):
         self.myId               = 2999
         self.name               = "Pad Scheduling"
-        self.description        = f"Pad EPG with duplicates to met minimum EPG requirement [{MIN_EPG_DURATION//60//60} Hrs.]"
-        self.optionLabels       = ["Pad Scheduling"]
-        self.optionValues       = [True]
-        self.optionDescriptions = [""]
+        self.description        = "Pad EPG with duplicates by cycling the fileList until the configured target duration is reached. Useful for channels whose source pool is smaller than MAX_GUIDEDAYS."
+        self.optionLabels       = ["Pad Scheduling", "Target Duration"]
+        # madteevee: option 1 added in v.19. Default keeps prior behaviour
+        # (MIN_EPG_DURATION = 3h) so existing channels with this rule saved
+        # via the old single-bool schema upgrade transparently — loadRules
+        # fills the second slot from this default template.
+        self.optionValues       = [True, MIN_EPG_DURATION]
+        self.optionDescriptions = ["Enable cycling-pad of small fileLists",
+                                   "How far forward to pad the EPG (seconds)"]
         self.actions            = [RULES_ACTION_CHANNEL_START, RULES_ACTION_CHANNEL_BUILD_TIME_POST,RULES_ACTION_CHANNEL_STOP]
-        self.storedValues       = [[],[]]
-        
+        self.selectBoxOptions   = [
+            [],
+            {f"Min EPG ({MIN_EPG_DURATION // 3600}h)" : MIN_EPG_DURATION,
+             "1 Day (24h)"                            : 86400,
+             f"Max Days ({MAX_GUIDEDAYS}d)"           : MAX_GUIDEDAYS * 86400}
+        ]
+        self.storedValues       = [None, None]   # [prev padScheduling, prev padTarget]
+
 
     def log(self, msg, level=xbmc.LOGDEBUG):
         log('%s: %s'%(self.__class__.__name__,msg),level)
-                  
 
-    def copy(self): 
+
+    def copy(self):
         return PadScheduling()
-        
-        
-    def getTitle(self): 
+
+
+    def getTitle(self):
         return '%s (%s)'%(self.name,{True:LANGUAGE(30184),False:LANGUAGE(30021)}[self.optionValues[0]])
-            
-            
+
+
     def onAction(self, optionindex):
+        if optionindex == 0:
+            self.onActionToggleBool(optionindex)
+        elif optionindex == 1:
+            self.onActionSelect(optionindex, self.optionLabels[optionindex])
         return self.optionValues[optionindex]
-        
+
 
     def runAction(self, actionid, citem, parameter, inherited):
         self.log('[%s] runAction, actionid = %s,'%(citem.get('id'),actionid))
         if actionid == RULES_ACTION_CHANNEL_START:
             self.storedValues[0]    = inherited.padScheduling
+            self.storedValues[1]    = getattr(inherited, 'padTarget', MIN_EPG_DURATION)
             inherited.padScheduling = self.optionValues[0]
-            self.log("runAction, setting padScheduling to %s"%(inherited.padScheduling))
-            
+            inherited.padTarget     = self.optionValues[1]
+            self.log("runAction, setting padScheduling=%s, padTarget=%s"%(inherited.padScheduling, inherited.padTarget))
+
         elif actionid == RULES_ACTION_CHANNEL_BUILD_TIME_POST:
-            # pad scheduling with duplicates to met minimum guide requirements (MIN_EPG_DURATION).
-            if self.padScheduling and len(parameter) > 0:
+            # madteevee bug fix (v.19): was 'if self.padScheduling' which AttributeError'd
+            # on the rule instance and got swallowed by the rules dispatcher — the pad
+            # block has effectively never run since the regression. The flag lives on
+            # `inherited` (the Builder), set at RULES_ACTION_CHANNEL_START above and
+            # defaulted at builder.py:89.
+            if inherited.padScheduling and len(parameter) > 0:
+                target = inherited.padTarget
                 iters  = cycle(parameter)
                 totDur = 0
                 start  = parameter[-1]['stop']
                 idx    = len(parameter)
                 now    = getUTCstamp()
-                while not inherited.monitor.abortRequested() and start <= (now + MIN_EPG_DURATION):
-                    if start >= (now + MIN_EPG_DURATION): break
-                    else: 
+                while not inherited.monitor.abortRequested() and start <= (now + target):
+                    if start >= (now + target): break
+                    else:
                         idx += 1
                         item = next(iters).copy()
                         item["idx"]   = idx
@@ -1605,13 +1627,14 @@ class PadScheduling(BaseRule):
                         start = item['stop']
                         totDur += item['duration']
                         parameter.append(item)
-                        inherited.pDialog = DIALOG._updateProgress(inherited.pDialog, inherited.pCount, message=f"{inherited.pName}: {LANGUAGE(33085)} {totDur}/{MIN_EPG_DURATION}",header=inherited.pHeader)
-                        self.log("[%s] addScheduling, ADD fileList = %s, totDur = %s/%s, stop = %s"%(citem['id'],len(parameter),totDur,MIN_EPG_DURATION,parameter[-1].get('stop')))
-        
+                        inherited.pDialog = DIALOG._updateProgress(inherited.pDialog, inherited.pCount, message=f"{inherited.pName}: {LANGUAGE(33085)} {totDur}/{target}",header=inherited.pHeader)
+                        self.log("[%s] addScheduling, ADD fileList = %s, totDur = %s/%s, stop = %s"%(citem['id'],len(parameter),totDur,target,parameter[-1].get('stop')))
+
         elif actionid == RULES_ACTION_CHANNEL_STOP:
             inherited.padScheduling = self.storedValues[0]
-            self.log("runAction, restoring padScheduling to %s"%(inherited.padScheduling))
-            
+            inherited.padTarget     = self.storedValues[1]
+            self.log("runAction, restoring padScheduling=%s, padTarget=%s"%(inherited.padScheduling, inherited.padTarget))
+
         return parameter
         
         

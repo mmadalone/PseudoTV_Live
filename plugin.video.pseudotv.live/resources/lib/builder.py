@@ -87,6 +87,7 @@ class Builder(object):
         self.limit            = SETTINGS.getSettingInt('Page_Limit')
         self.recursiveLimit   = SETTINGS.getSettingInt('Recursive_Depth') #todo adv. channel rule. set recursive depth.
         self.padScheduling    = False #todo Adv. Channel Rule, No Global: Default False
+        self.padTarget        = MIN_EPG_DURATION # PadScheduling rule overrides per-channel via inherited.padTarget (rules.py:2999)
         self.padFilelist      = False #todo Adv. Channel Rule, No Global: Default False
         self.enableEven       = bool(SETTINGS.getSettingInt('Enable_Even'))
         self.evenEpisode      = SETTINGS.getSettingBool('Enable_Even_Force_Episode')
