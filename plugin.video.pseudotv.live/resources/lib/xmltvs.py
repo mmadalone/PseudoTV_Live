@@ -412,7 +412,7 @@ class XMLTVS(object):
                  'desc'        : [(Globals._encodePlot(self.cleanString(item['desc']),item['fitem']), LANG) if encodeDESC else (self.cleanString(item['desc']), LANG)],
                  'stop'        : (epochTime(float(item['stop']),tz=False).strftime(DTFORMAT)),
                  'start'       : (epochTime(float(item['start']),tz=False).strftime(DTFORMAT)),
-                 'icon'        : [{'src': (item.get('logo') or item['thumb'])}], # v.37: channel logo (UC3 channel.thumbnail) — see getProgramItem
+                 'icon'        : [{'src': Globals._toEpgProxyForm(item.get('thumb') or item.get('logo',''))}], # v.38: proxy form — Kodi EPG renders, UC3 falls back to icon
                  'length'      : {'units': 'seconds', 'length': str(item['length'])}}
                         
         if item.get('sub-title'):
