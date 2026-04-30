@@ -50,8 +50,16 @@ class Service(object):
 
 class Builder(object):
     xsp      = XSP()
-    m3u      = M3U(writable=True)
-    xmltv    = XMLTVS(writable=True, m3u=m3u)
+    # v.45: read-only fallbacks. buildChannels constructs fresh writable
+    # M3U/XMLTVS instances per-build (~line 320) and assigns them as instance
+    # attrs, shadowing these class-level objects. writable=False makes
+    # __del__'s _save() a no-op (m3u.py:75-79, xmltvs.py:40-44), so process
+    # exit / module teardown / addon disable can't persist this frozen-at-
+    # import-time state to disk and clobber post-import builds. Verified
+    # zero external accessors of Builder.m3u / Builder.xmltv across the
+    # codebase; these stay declared as defensive fallbacks only.
+    m3u      = M3U(writable=False)
+    xmltv    = XMLTVS(writable=False, m3u=m3u)
     channels = Channels(writable=True)
     seasonal = Seasonal()
     loopback = None
@@ -290,6 +298,28 @@ class Builder(object):
             
         if not PROPERTIES.isRunning('Builder.buildChannels'):
             with PROPERTIES.legacy(), PROPERTIES.chkRunning('Builder.buildChannels'):
+                # v.45: per-build fresh M3U/XMLTVS for non-preview builds.
+                # Each fresh _load() picks up disk modifications by other
+                # writers (context_record.py:51,69 add/remove recordings;
+                # operator hand-edits to pseudotv.m3u / pseudotv.xml) at build
+                # start instead of letting this build's _save() clobber them
+                # with stale class-level state. Builds are serial (cqueue's
+                # single-threaded popThread; _exe at cqueue.py:120 runs func
+                # synchronously even with useExecutor=True), so each fresh
+                # load reflects the prior build's _save. Preview path skips
+                # this — preview is a non-persistent dry run; constructing
+                # fresh writable=True instances would let M3U.__del__ persist
+                # any mid-preview mutations (e.g. __clrStation matching by
+                # url at m3u.py:387-390) to disk on Builder GC. Class-level
+                # fallbacks at lines 53-62 are now writable=False so they
+                # don't compete with these instances at shutdown. Closures
+                # defined below capture `self` and resolve self.m3u/self.xmltv
+                # at call time, so they see these fresh instances automatically.
+                # Same applies to v.24 snapshot/restore at builder.py:138-182.
+                # FORK_NOTES priority #4 (small-fix scope).
+                if not preview:
+                    self.m3u   = M3U(writable=True)
+                    self.xmltv = XMLTVS(writable=True, m3u=self.m3u)
                 channels = self.getVerifiedChannels(channels)
                 if len(channels) > 0:
                     completed    = set()

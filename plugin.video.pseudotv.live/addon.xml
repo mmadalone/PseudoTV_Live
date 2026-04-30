@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<addon id="plugin.video.pseudotv.live" version="0.7.3+madteevee.44" name="PseudoTV Live (madteevee)" provider-name="Lunatixz, mmadalone">
+<addon id="plugin.video.pseudotv.live" version="0.7.3+madteevee.45" name="PseudoTV Live (madteevee)" provider-name="Lunatixz, mmadalone">
     <requires>
         <import addon="xbmc.python" version="3.0.1"/>
         <import addon="script.module.six" version="1.0.0"/>
