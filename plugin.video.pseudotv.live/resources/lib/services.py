@@ -263,8 +263,26 @@ class Player(xbmc.Player):
         if playingItem:
             if not playingItem.get('isPlaylist',False):
                 self.toggleBackground(self.enableOverlay)
-                BUILTIN.executebuiltin('PlayMedia(%s)'%(playingItem.get('callback')))
-                self.log('_onChange, [%s], isPlaylist = %s, callback = %s'%(playingItem.get('citem',{}).get('id'),playingItem.get('isPlaylist',False),playingItem.get('callback')))
+                # v.46: guard against PlayMedia(None) after a stream-stall onPlayBackEnded.
+                # When a VOD stream stalls mid-playback, Kodi fires onPlayBackEnded with the
+                # listitem still in playingItem but `callback` never populated — _onIdle's
+                # __chkCallback recovery (services.py:323) only runs in periodic ticks, not
+                # on the synchronous EOF path. The bare `PlayMedia(%s)%None` formatting
+                # produced the literal string "None" as the URL; Kodi logged
+                # `VideoPlayer::OpenFile: None` → `OpenInputStream - error opening [None]`
+                # → DialogConfirm "Playback failed. One or more items failed to play".
+                # Fix: try the same getCallback recovery __chkCallback uses, and skip
+                # PlayMedia entirely if it still resolves to falsy. The channel goes to
+                # the background overlay instead of popping a user-facing error dialog.
+                callback = playingItem.get('callback')
+                if not callback:
+                    callback = self.jsonRPC.getCallback(playingItem)
+                    if callback: playingItem['callback'] = callback
+                if callback:
+                    BUILTIN.executebuiltin('PlayMedia(%s)'%(callback))
+                    self.log('_onChange, [%s], isPlaylist = %s, callback = %s'%(playingItem.get('citem',{}).get('id'),playingItem.get('isPlaylist',False),callback))
+                else:
+                    self.log('_onChange, [%s], skipping PlayMedia: callback unresolved (would have been PlayMedia(None))'%(playingItem.get('citem',{}).get('id')), xbmc.LOGWARNING)
             self._runActions(RULES_ACTION_PLAYER_CHANGE, playingItem.get('citem',{}), playingItem, inherited=self)
         else:
             self.toggleBackground(False)

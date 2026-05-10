@@ -331,7 +331,7 @@ class Tasks(object):
                 self.service._que(Builder(service=self.service).buildChannels,3,*(needed,False,silent))
             else:
                 [self.service._que(Builder(service=self.service).buildChannels,3,*([channel],False,silent)) for channel in needed]
-            if SETTINGS.getSettingBool('Build_Filler_Folders'): self._que(self.chkFillers,4,*(needed,silent))
+            if SETTINGS.getSettingBool('Build_Filler_Folders'): self.service._que(self.chkFillers,4,*(needed,silent))
         else:
             self.log('chkChannels, No Channels Configured!')
             if not SETTINGS.hasAutotuned():
@@ -343,22 +343,48 @@ class Tasks(object):
 
 
     @debounceit(M3U_REFRESH)
-    def chkPVRRefresh(self, brute=SETTINGS.getSettingBool('Enable_PVR_RELOAD')):
-        self.log('chkPVRRefresh')
+    def chkPVRRefresh(self, brute=None):
+        # v.46: re-evaluate Enable_PVR_RELOAD per call. Previous default-arg form
+        # `brute=SETTINGS.getSettingBool('Enable_PVR_RELOAD')` evaluated once at
+        # class-definition time, so toggling the setting at runtime never reached
+        # subsequent calls. Sentinel `None` lets explicit callers still pass an
+        # override; everything else picks up the current setting value.
+        if brute is None: brute = SETTINGS.getSettingBool('Enable_PVR_RELOAD')
+        self.log('chkPVRRefresh, brute = %s'%(brute))
         def __toggle(state=True):
             with BUILTIN.busy_dialog(lock=True):
                 self.log('chkPVRRefresh, __toggle = %s'%(state))
                 self.service.jsonRPC.sendJSON({"method":"Addons.SetAddonEnabled","params":{"addonid":PVR_CLIENT_ID,"enabled":state}})
-            
+
         if not PROPERTIES.isRunning('Tasks.chkPVRRefresh') and self.service.monitor.isIdle and not PROPERTIES.isRunning('Builder.buildChannels'):
             with PROPERTIES.chkRunning('Tasks.chkPVRRefresh'):
+                # v.46: drop the unconditional re-arm in the brute-deferred branch. The
+                # previous `else: timerit(PROPERTIES.setPropTimer('chkPVRRefresh'))(M3U_REFRESH)`
+                # rescheduled chkPVRRefresh after M3U_REFRESH whenever the brute toggle
+                # couldn't run (player playing OR PVR client disabled) — and never gave up.
+                # While anything was playing in fullscreen, the loop fired every M3U_REFRESH
+                # (15 s); each iteration also set HTTP.pendingRestart=True, which flapped the
+                # plugin HTTP server every ~45 s (15 s setEXTProperty delay + 15 s _shutdown
+                # wait at server.py:326 + 15 s chkHTTP delay at server.py:333 + 0.1 s spawn
+                # at tasks.py:67) for the entire playback session. Net effect in kodi.log:
+                # thousands of `HTTP: run, _shutdown/pendingRestart` errors plus matching
+                # `StartChannelScan: Provided client id '2' could not be found` warnings,
+                # one of each per ~15 s for the duration of any active stream. Fix: drop
+                # the re-arm. Genuine refresh triggers (builder.py:396 after a build,
+                # context_record.py:58/76 after a recording, manager.py:1030 after channel
+                # edits, etc.) still re-fire chkPVRRefresh as needed; if the player has
+                # stopped by then, the brute branch runs normally. The HTTP server restart
+                # signal still fires once per successful chkPVRRefresh call (timerit
+                # setEXTProperty below) but no longer in a self-perpetuating loop.
                 timerit(PROPERTIES.setEXTProperty)(M3U_REFRESH,*('%s.HTTP.pendingRestart'%(ADDON_ID),True))
                 if brute:
                     if not self.service.player.isPlaying() and BUILTIN.getInfoBool('AddonIsEnabled(%s)'%(PVR_CLIENT_ID),'System'):
                         DIALOG.notificationWait('%s: %s'%(PVR_CLIENT_NAME,LANGUAGE(32125)),wait=M3U_REFRESH, usethread=True)
                         BUILTIN.executewindow('ActivateWindow(home)')
                         __toggle(False), timerit(__toggle)(M3U_REFRESH)
-                    else:  timerit(PROPERTIES.setPropTimer('chkPVRRefresh'))(M3U_REFRESH)#refresh pvr guide
+                    # else: brute toggle deferred (player is playing or PVR client disabled).
+                    # Previously re-armed via setPropTimer; now relies on the next genuine
+                    # refresh trigger to retry.
                 self.jsonRPC.PVRScan(self.jsonRPC.getPVRClient(PVR_CLIENT_ID).get('clientid',-1)) #currently not supported by IPTV Simple.
             
             
