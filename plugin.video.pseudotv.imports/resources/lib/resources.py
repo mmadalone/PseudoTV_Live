@@ -288,16 +288,15 @@ class Resources(object):
         return mono
 
 
-    def generateLocal(self, text, background=os.path.join(MEDIA_LOC,'blank.png'),
-                      font_path=FileAccess.translatePath(os.path.join('special://skin','fonts','arial.ttf')),
+    def generateLocal(self, text, background=None, font_path=None,
                       font_size=120, text_color=(255,255,255,255)):
         """
         Generates a placeholder image with text on a background image.
 
         Args:
             text: The text to display on the placeholder.
-            background: Path to the background image.
-            font_path: Path to the font file (optional).
+            background: Path to the background image (defaults to MEDIA_LOC/blank.png).
+            font_path: Path to the font file (defaults to Kodi's bundled arial.ttf).
             font_size: Font size for the text (optional).
             text_color: Color of the text (optional).
         Returns:
@@ -305,6 +304,24 @@ class Resources(object):
         """
         if not SETTINGS.hasAddon('script.module.pil'):
             return None
+
+        # imports.21: resolve mutable defaults per-call (not as def-time
+        # defaults). Two reasons:
+        #   1. font_path = special://skin/fonts/arial.ttf used to fail on
+        #      every skin that doesn't ship arial.ttf — including Aeon Nox
+        #      Silvo (BebasNeue/Roboto/etc.), Estuary's variants, most third
+        #      party skins. PIL's ImageFont.truetype raised IOError "cannot
+        #      open resource" and the warning fired for every channel that
+        #      reached the generate-local fallback. special://xbmc/media/
+        #      Fonts/arial.ttf is Kodi's bundled font — universally present
+        #      on standard Kodi installs (Linux, Pi, Android, Windows, Mac).
+        #   2. Default args evaluate ONCE at module-import time; if the user
+        #      switched skins mid-session the old `special://skin` path was
+        #      stale. Per-call resolution sidesteps that.
+        if background is None:
+            background = os.path.join(MEDIA_LOC, 'blank.png')
+        if font_path is None:
+            font_path = FileAccess.translatePath(os.path.join('special://xbmc','media','Fonts','arial.ttf'))
 
         try:
             from PIL import Image, ImageDraw, ImageFont
