@@ -21,7 +21,7 @@ import base64, gzip, mimetypes, re, socket, errno
 
 from zeroconf                  import *
 from globals                   import *
-from channels                  import Channels
+from channels                  import Channels, markOverrides
 from resources                 import Resources
 from six.moves.BaseHTTPServer  import BaseHTTPRequestHandler, HTTPServer
 from six.moves.socketserver    import ThreadingMixIn
@@ -601,6 +601,11 @@ class MyHandler(BaseHTTPRequestHandler):
                             if k in fields: fields[k] = bool(fields[k])
                         for k, v in fields.items():
                             target[k] = v
+                        # imports.20: mark every operator-edited field in
+                        # operator_overrides so Builder._verify / Manager.setLogo
+                        # respect the operator's pick. Mirrors the inline pattern
+                        # at server.py:847-851 (import-side /imports/channel/edit.json).
+                        markOverrides(target, *fields.keys())
                         # Cascade-bump on number collision (mirrors imports/channel/edit.json).
                         if 'number' in fields:
                             target_num = fields['number']

@@ -20,7 +20,7 @@
 from globals    import *
 from cache      import Cache
 from library    import Library 
-from channels   import Channels
+from channels   import Channels, markOverrides
 from jsonrpc    import JSONRPC
 from rules      import RulesList
 from resources  import Resources
@@ -419,7 +419,11 @@ class Manager(xbmcgui.WindowXMLDialog):
         if not retval is None:
             citem['changed']    = value != retval
             self.madeItemchange = value != retval
-            if key in list(self.newChannel.keys()): citem[key] = retval
+            if key in list(self.newChannel.keys()):
+                citem[key] = retval
+                # imports.20: mark the operator-edited field so Builder._verify
+                # / Manager.setLogo skip auto re-derivation on this channel.
+                markOverrides(citem, key)
             self.log('itemInput, Out value = %s, key = %s\ncitem = %s'%(retval,key,citem))
         return citem
    
@@ -570,6 +574,14 @@ class Manager(xbmcgui.WindowXMLDialog):
 
 
     def setLogo(self, name=None, citem={}, force=False):
+        # imports.20: respect operator_overrides. If the operator manually
+        # picked a logo (web manager or in-Kodi switchLogo), skip re-derive
+        # even when force=True. __validateName calls setLogo(force=True) on
+        # rename to refresh the auto-logo; without this guard, every rename
+        # of a manually-customized channel would wipe the operator's logo.
+        if 'logo' in (citem.get('operator_overrides') or []):
+            self.log('setLogo, id = %s, skipped - logo in operator_overrides'%(citem.get('id')))
+            return citem
         name = (name or citem.get('name'))
         if name:
             if force: logo = ''
@@ -891,6 +903,9 @@ class Manager(xbmcgui.WindowXMLDialog):
             DIALOG.notificationDialog(LANGUAGE(32139))
             self.madeChanges = True
             channelData['logo'] = chlogo
+            # imports.20: mark 'logo' so Builder._verify skips getLogo on the
+            # next rebuild and Manager.setLogo skips re-derive on rename.
+            markOverrides(channelData, 'logo')
             self.newChannels[channelPOS] = channelData
             self.fillChanList(self.newChannels,refresh=True,focus=channelPOS)
 

@@ -217,7 +217,14 @@ class Builder(object):
                 continue
             else:
                 if not citem.get('id'): citem['id'] = getChannelID(citem['name'],citem['path'],citem['number'],SETTINGS.getMYUUID()) #generate new channelid
-                citem['logo'] = self.resources.getLogo(citem,fallback=self.resources.getCache(citem['name']),lookup=True)
+                # imports.20: respect operator_overrides. The operator can set
+                # a logo via web manager (/channels/edit.json) or in-Kodi
+                # Channel Manager (manager.switchLogo). Without this guard,
+                # every Builder rebuild silently re-derives the auto-logo via
+                # getLogo and overwrites the operator's pick. Logo is the only
+                # Custom-channel field _verify re-derives (audit confirmed).
+                if 'logo' not in (citem.get('operator_overrides') or []):
+                    citem['logo'] = self.resources.getLogo(citem,fallback=self.resources.getCache(citem['name']),lookup=True)
                 self.log('[%s] VERIFIED - channel %s: %s changed = %s'%(citem['id'],citem['number'],citem['name'],citem.get('changed',False)),xbmc.LOGINFO)
                 yield self.runActions(RULES_ACTION_CHANNEL_CITEM, citem, citem, inherited=self) #inject persistent citem changes here
 

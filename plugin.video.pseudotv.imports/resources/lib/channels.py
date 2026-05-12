@@ -21,6 +21,34 @@
 from globals    import *
 from multiroom  import Multiroom
 
+
+# imports.20: operator_overrides helpers. The channel record carries a
+# sorted list of field-name strings recording which fields the operator
+# manually set (vs. the auto-derived defaults). Builder._verify and
+# Manager.setLogo respect this list to avoid silently overwriting an
+# operator's pick. Module-level (not Channels-method) because callers
+# operate on a single citem dict and don't need a Channels() instance —
+# which would re-load channels.json on every edit.
+#
+# Idempotent (set semantics). Output is sorted to match the existing
+# inline pattern at server.py:847-851, 1005-1007, 1166-1168 so future
+# greps for `operator_overrides` keep matching everywhere.
+def markOverrides(citem: dict, *keys: str) -> list:
+    """Add keys to citem['operator_overrides']. Returns the new sorted list."""
+    overrides = set(citem.get('operator_overrides') or [])
+    overrides.update(keys)
+    citem['operator_overrides'] = sorted(overrides)
+    return citem['operator_overrides']
+
+
+def unmarkOverrides(citem: dict, *keys: str) -> list:
+    """Remove keys from citem['operator_overrides']. No-op on missing keys."""
+    overrides = set(citem.get('operator_overrides') or [])
+    overrides.difference_update(keys)
+    citem['operator_overrides'] = sorted(overrides)
+    return citem['operator_overrides']
+
+
 #todo create dataclasses for all jsons
 # https://pypi.org/project/dataclasses-json/
 class Channels(object):
