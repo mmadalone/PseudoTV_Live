@@ -337,7 +337,11 @@ class Tasks(object):
                 self.log('_chkPropTimer, %s deferred (Builder.buildChannels running)'%(key))
                 return
             self.log('_chkPropTimer, key = %s'%(key))
-            PROPERTIES.clrEXTProperty(key)
+            # imports.19: was clrEXTProperty(key) which targets the raw key, but
+            # set/getPropTimer above operate on '<ADDON_ID>.<key>'. The clear
+            # silently missed; property stayed True; chkQueTimer re-queued every
+            # 15 s. clrPropTimer mirrors the namespacing of its siblings.
+            PROPERTIES.clrPropTimer(key)
             self.service._que(func, priority, *args, **kwargs)
             
 

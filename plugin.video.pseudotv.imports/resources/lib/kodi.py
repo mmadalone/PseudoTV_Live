@@ -693,6 +693,17 @@ class Properties(object):
         return self.getEXTProperty(key,default)
 
 
+    def clrPropTimer(self, key):
+        # imports.19: symmetric with set/getPropTimer — both prepend ADDON_ID.
+        # Without this, `_chkPropTimer` (tasks.py) called clrEXTProperty(raw_key)
+        # after getPropTimer(raw_key→namespaced), so the namespaced property was
+        # never cleared. Once any caller set chkPVRRefresh True it stayed True
+        # forever, and chkQueTimer re-queued chkPVRRefresh every 15s, which in
+        # turn pumped HTTP.pendingRestart and cycled the HTTP server.
+        if not key.startswith(ADDON_ID): key = '%s.%s'%(ADDON_ID, key)
+        return self.clrEXTProperty(key)
+
+
     def setRemoteHost(self, value):
         return self.setEXTProperty('%s.Remote_Host'%(ADDON_ID),value)
         
