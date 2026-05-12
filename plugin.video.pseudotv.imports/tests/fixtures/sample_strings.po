@@ -1,0 +1,88 @@
+# Test strings for settings_schema parser
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+
+msgctxt "#30000"
+msgid "General"
+msgstr ""
+
+msgctxt "#30010"
+msgid "Foo group"
+msgstr ""
+
+msgctxt "#30011"
+msgid "Enable Foo"
+msgstr ""
+
+msgctxt "#30012"
+msgid "Foo limit"
+msgstr ""
+
+msgctxt "#30013"
+msgid "Foo mode"
+msgstr ""
+
+msgctxt "#30014"
+msgid "Off"
+msgstr ""
+
+msgctxt "#30015"
+msgid "On"
+msgstr ""
+
+msgctxt "#30020"
+msgid "Actions"
+msgstr ""
+
+msgctxt "#30021"
+msgid "Launch foo"
+msgstr ""
+
+msgctxt "#30022"
+msgid "Foo gated"
+msgstr ""
+
+msgctxt "#30030"
+msgid "Paths"
+msgstr ""
+
+msgctxt "#30031"
+msgid "Foo folder"
+msgstr ""
+
+msgctxt "#30032"
+msgid "Foo resources"
+msgstr ""
+
+msgctxt "#33000"
+msgid "General category help"
+msgstr ""
+
+msgctxt "#33011"
+msgid "Enable foo help"
+msgstr ""
+
+msgctxt "#33012"
+msgid "Foo limit help"
+msgstr ""
+
+msgctxt "#33013"
+msgid "Foo mode help"
+msgstr ""
+
+msgctxt "#33021"
+msgid "Launch foo help"
+msgstr ""
+
+msgctxt "#33022"
+msgid "Foo gated help"
+msgstr ""
+
+msgctxt "#33031"
+msgid "Foo folder help"
+msgstr ""
+
+msgctxt "#33032"
+msgid "Foo resources help. Quoted: \"test\"."
+msgstr ""

@@ -1,0 +1,16 @@
+#EXTM3U
+## Movistar+
+#EXTINF:-1 tvg-name="LA 1" tvg-id="TVE" tvg-logo="https://example.com/tve.png" tvg-chno="1" group-title="Movistar+",LA 1
+plugin://plugin.video.movistarplus/?action=play&id=TVE&url=https%3A%2F%2Fexample.com%2Ftve.mpd
+
+#EXTINF:-1 tvg-name="LA 2" tvg-id="LA2" tvg-logo="https://example.com/la2.png" tvg-chno="2" group-title="Movistar+",LA 2
+plugin://plugin.video.movistarplus/?action=play&id=LA2&url=https%3A%2F%2Fexample.com%2Fla2.mpd
+
+#EXTINF:-1 tvg-name="Antena 3" tvg-id="A3" tvg-logo="https://example.com/a3.png" tvg-chno="3" group-title="Movistar+",Antena 3
+plugin://plugin.video.movistarplus/?action=play&id=A3&url=https%3A%2F%2Fexample.com%2Fa3.mpd
+
+#EXTINF:-1 tvg-name="Cuatro" tvg-id="C4" tvg-logo="https://example.com/c4.png" tvg-chno="4" group-title="Movistar+" catchup="vod" catchup-source="plugin://plugin.video.movistarplus/?action=catchup&id=C4&start={utc}&end={utcend}",Cuatro
+plugin://plugin.video.movistarplus/?action=play&id=C4&url=https%3A%2F%2Fexample.com%2Fc4.mpd
+
+#EXTINF:-1 tvg-name="Telecinco" tvg-id="T5" tvg-logo="https://example.com/t5.png" tvg-chno="5" group-title="Movistar+",Telecinco
+plugin://plugin.video.movistarplus/?action=play&id=T5&url=https%3A%2F%2Fexample.com%2Ft5.mpd

@@ -1,0 +1,5 @@
+#EXTM3U
+#EXTINF:-1 tvg-name="GoodOne" tvg-id="GOOD",GoodOne
+http://example.com/good
+
+#EXTINF:-1 tvg-name="NoUrl" tvg-id="NOURL",NoUrl

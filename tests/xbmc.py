@@ -295,6 +295,33 @@ def sleep(timemillis):
     time.sleep(timemillis / 1000)
 
 
+# Language format constants — match Kodi's xbmc module
+ISO_639_1    = 0
+ISO_639_2    = 1
+ENGLISH_NAME = 2
+
+
+# madteevee: tiny stub for xbmc.convertLanguage. Real Kodi consults installed
+# language packs; we hard-code a few common conversions sufficient for tests
+# that exercise lang_codes.normalize_lang's xbmc-first path.
+_CONVERT_LANG_2_TO_1 = {
+    'eng': 'en', 'spa': 'es', 'fre': 'fr', 'fra': 'fr',
+    'ger': 'de', 'deu': 'de', 'jpn': 'ja', 'cat': 'ca',
+    'ita': 'it', 'por': 'pt', 'kor': 'ko', 'chi': 'zh',
+    'rus': 'ru', 'ara': 'ar',
+}
+def convertLanguage(language, format=ISO_639_1):
+    """Stub of xbmc.convertLanguage. Returns ISO 639-1 from 3-letter input,
+    empty string when unknown (mirrors Kodi's behavior when language packs
+    aren't installed — the bug lang_codes.normalize_lang's fallback handles)."""
+    if not isinstance(language, str): return ''
+    code = language.lower().strip()
+    if format == ISO_639_1:
+        if len(code) == 2: return code
+        return _CONVERT_LANG_2_TO_1.get(code, '')
+    return code
+
+
 def translatePath(path):
     """A stub implementation of the xbmc translatePath() function"""
     assert isinstance(path, str)

@@ -1,0 +1,18 @@
+{
+    "servers": {
+        "friendly": {
+            "id": "",
+            "version": "",
+            "uuid": "",
+            "name": "",
+            "host": "",
+            "remotes": {
+            },
+            "settings": {
+            },
+            "enabled": false,
+            "online": false,
+            "updated": null
+        }
+    }
+}

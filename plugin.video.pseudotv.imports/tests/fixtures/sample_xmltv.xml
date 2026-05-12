@@ -1,0 +1,35 @@
+<?xml version='1.0' encoding='utf-8'?>
+<tv generator-info-name="test-fixture" generator-info-url="https://example.com">
+  <channel id="TVE">
+    <display-name lang="es">LA 1</display-name>
+    <icon src="https://example.com/tve.png" />
+  </channel>
+  <channel id="LA2">
+    <display-name lang="es">LA 2</display-name>
+    <icon src="https://example.com/la2.png" />
+  </channel>
+  <channel id="A3">
+    <display-name lang="es">Antena 3</display-name>
+  </channel>
+  <programme start="20260510130000 +0000" stop="20260510140000 +0000" channel="TVE">
+    <title lang="es">Telediario</title>
+    <desc lang="es">Resumen de noticias del día.</desc>
+    <category lang="es">News</category>
+  </programme>
+  <programme start="20260510140000 +0000" stop="20260510150000 +0000" channel="TVE">
+    <title lang="es">El Tiempo</title>
+    <category lang="es">Weather</category>
+  </programme>
+  <programme start="20260510130000 +0000" stop="20260510143000 +0000" channel="LA2">
+    <title lang="es">Documental</title>
+    <desc lang="es">La fauna salvaje de los Pirineos.</desc>
+    <category lang="es">Documentary</category>
+  </programme>
+  <programme start="20260510130000 +0000" stop="20260510140000 +0000" channel="A3">
+    <title lang="es">El Hormiguero</title>
+    <category lang="es">Entertainment</category>
+  </programme>
+  <programme start="20260510130000 +0000" stop="20260510140000 +0000" channel="ORPHAN_NOT_IN_M3U">
+    <title lang="es">Should be filtered</title>
+  </programme>
+</tv>

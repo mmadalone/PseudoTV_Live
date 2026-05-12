@@ -1,0 +1,2641 @@
+# Kodi Media Center language file
+# Addon Name: "PseudoTV Live"
+# Addon id: plugin.video.pseudotv.live
+# Addon Provider: Lunatixz
+msgid ""
+msgstr ""
+"Project-Id-Version: plugin.video.pseudotv.live\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: Lunatixz Translation Team\n"
+"Language-Team: English (http://www.transifex.com/projects/p/xbmc-addons/language/en/)\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: en\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+# Settings - strings 30000 thru 30999 reserved for plugins and plugin settings
+msgctxt "#30000"
+msgid "Miscellaneous"
+msgstr ""
+
+msgctxt "#30001"
+msgid "Enable Debugging [Log errors]"
+msgstr ""
+
+msgctxt "#30002"
+msgid "Debug Level"
+msgstr ""
+
+msgctxt "#30003"
+msgid "LOGDEBUG"
+msgstr ""
+
+msgctxt "#30004"
+msgid "LOGINFO"
+msgstr ""
+
+msgctxt "#30005"
+msgid "LOGWARNING"
+msgstr ""
+
+msgctxt "#30006"
+msgid "LOGERROR"
+msgstr ""
+
+msgctxt "#30007"
+msgid "LOGFATAL"
+msgstr ""
+
+msgctxt "#30008"
+msgid "Install Log Uploader"
+msgstr ""
+
+msgctxt "#30009"
+msgid "Submit Log"
+msgstr ""
+
+msgctxt "#30010"
+msgid "Options"
+msgstr ""
+
+msgctxt "#30011"
+msgid "[COLOR=orange][B]Notice!! [/B]It's Recommend Flash/SSD users change path to a HDD or PMem.[/COLOR]"
+msgstr ""
+
+msgctxt "#30012"
+msgid "Centralized file location"
+msgstr ""
+
+msgctxt "#30013"
+msgid "Tweaks"
+msgstr ""
+
+msgctxt "#30014"
+msgid "Building"
+msgstr ""
+
+msgctxt "#30015"
+msgid "Pagination Size"
+msgstr ""
+
+msgctxt "#30016"
+msgid "Fillers"
+msgstr ""
+
+msgctxt "#30017"
+msgid "Enable Pre-Roll"
+msgstr ""
+
+msgctxt "#30018"
+msgid "Add Ratings & Bumpers"
+msgstr ""
+
+msgctxt "#30019"
+msgid "Enable Post-Roll"
+msgstr ""
+
+msgctxt "#30020"
+msgid "Add Adverts & Trailers"
+msgstr ""
+
+msgctxt "#30021"
+msgid "Disabled"
+msgstr ""
+
+msgctxt "#30022"
+msgid "Auto"
+msgstr ""
+
+msgctxt "#30023"
+msgid "Unable to reload %s"
+msgstr ""
+
+msgctxt "#30024"
+msgid "Two Inserts"
+msgstr ""
+
+msgctxt "#30025"
+msgid "Three Inserts"
+msgstr ""
+
+msgctxt "#30026"
+msgid "One Insert"
+msgstr ""
+
+msgctxt "#30027"
+msgid "Logo Resources"
+msgstr ""
+
+msgctxt "#30028"
+msgid "Ratings Resource"
+msgstr ""
+
+msgctxt "#30029"
+msgid "Bumpers Resource"
+msgstr ""
+
+msgctxt "#30030"
+msgid "Adverts Resource"
+msgstr ""
+
+msgctxt "#30031"
+msgid "Trailers Resource"
+msgstr ""
+
+msgctxt "#30032"
+msgid "Resources"
+msgstr ""
+
+msgctxt "#30033"
+msgid "%s Support & Discussion Thread"
+msgstr ""
+
+msgctxt "#30034"
+msgid "ZeroConf Already"
+msgstr ""
+
+msgctxt "#30035"
+msgid "ZeroConf"
+msgstr ""
+
+msgctxt "#30036"
+msgid "Minimum (Past) Guide Days"
+msgstr ""
+
+msgctxt "#30037"
+msgid "Maximum (Future) Guide Days"
+msgstr ""
+
+msgctxt "#30038"
+msgid "AutoTune"
+msgstr ""
+
+msgctxt "#30039"
+msgid "Clear Recommended Blacklist"
+msgstr ""
+
+msgctxt "#30040"
+msgid "Clear All Autotuned Channels"
+msgstr ""
+
+msgctxt "#30041"
+msgid "Global"
+msgstr ""
+
+msgctxt "#30042"
+msgid "Enable Overlay"
+msgstr ""
+
+msgctxt "#30043"
+msgid "Show Channel Bug"
+msgstr ""
+
+msgctxt "#30044"
+msgid "Select Diffuse Color"
+msgstr ""
+
+msgctxt "#30045"
+msgid "Show OnNext"
+msgstr ""
+
+msgctxt "#30046"
+msgid "Remove Server"
+msgstr ""
+
+msgctxt "#30047"
+msgid "Strms"
+msgstr ""
+
+msgctxt "#30048"
+msgid "Overlay"
+msgstr ""
+
+msgctxt "#30049"
+msgid "Parse for Accurate Duration Meta"
+msgstr ""
+
+msgctxt "#30050"
+msgid "Prefer Kodi Metadata"
+msgstr ""
+
+msgctxt "#30051"
+msgid "Prefer File Metadata"
+msgstr ""
+
+msgctxt "#30052"
+msgid "Save Accurate Duration to Kodi's Library"
+msgstr ""
+
+msgctxt "#30053"
+msgid "Include Specials/Extras"
+msgstr ""
+
+msgctxt "#30054"
+msgid "Include STRMs"
+msgstr ""
+
+msgctxt "#30055"
+msgid "Include 3D Media"
+msgstr ""
+
+msgctxt "#30056"
+msgid "Include Fillers"
+msgstr ""
+
+msgctxt "#30057"
+msgid "Playback"
+msgstr ""
+
+msgctxt "#30058"
+msgid "Playback Method"
+msgstr ""
+
+msgctxt "#30059"
+msgid "PVR Callback"
+msgstr ""
+
+msgctxt "#30060"
+msgid "Playlist"
+msgstr ""
+
+msgctxt "#30061"
+msgid "Playback Seek Tolerance (Seconds)"
+msgstr ""
+
+msgctxt "#30062"
+msgid "Adjust Seek Threshold (Percentage)"
+msgstr ""
+
+msgctxt "#30063"
+msgid "Enable Automatic Guide Grouping"
+msgstr ""
+
+msgctxt "#30064"
+msgid "Add Custom Group"
+msgstr ""
+
+msgctxt "#30065"
+msgid "EPG Artwork"
+msgstr ""
+
+msgctxt "#30066"
+msgid "Prefer Landscape"
+msgstr ""
+
+msgctxt "#30067"
+msgid "Prefer Poster"
+msgstr ""
+
+msgctxt "#30068"
+msgid "Enable Nearest Holiday"
+msgstr ""
+
+msgctxt "#30069"
+msgid "Third-Party"
+msgstr ""
+
+msgctxt "#30070"
+msgid "Clearing %s Cache"
+msgstr ""
+
+msgctxt "#30071"
+msgid "IPTV Simple Settings"
+msgstr ""
+
+msgctxt "#30072"
+msgid "Debugging"
+msgstr ""
+
+msgctxt "#30073"
+msgid "Version: [B]%s[/B]"
+msgstr ""
+
+msgctxt "#30074"
+msgid "Enable Access to Kodi Settings"
+msgstr ""
+
+msgctxt "#30075"
+msgid "More Info"
+msgstr ""
+
+msgctxt "#30076"
+msgid "Play from here"
+msgstr ""
+
+msgctxt "#30077"
+msgid "Play programme"
+msgstr ""
+
+msgctxt "#30078"
+msgid "Idle Timer"
+msgstr ""
+
+msgctxt "#30079"
+msgid "Something Went Wrong, Contact the plugin developer..."
+msgstr ""
+
+msgctxt "#30080"
+msgid "3 Hours"
+msgstr ""
+
+msgctxt "#30081"
+msgid "6 Hours"
+msgstr ""
+
+msgctxt "#30082"
+msgid "12 Hours"
+msgstr ""
+
+msgctxt "#30083"
+msgid "24 Hours"
+msgstr ""
+
+msgctxt "#30084"
+msgid "Disable Cache"
+msgstr ""
+
+msgctxt "#30085"
+msgid "%s updated by %s"
+msgstr ""
+
+msgctxt "#30086"
+msgid "Channel Bug Visibility"
+msgstr "" 
+
+msgctxt "#30087"
+msgid "Browse"
+msgstr ""
+
+msgctxt "#30088"
+msgid "Documents"
+msgstr ""
+
+msgctxt "#30089"
+msgid "Show Readme"
+msgstr ""
+
+msgctxt "#30090"
+msgid "Show Changelog"
+msgstr ""
+
+msgctxt "#30091"
+msgid "Find More"
+msgstr ""
+
+msgctxt "#30092"
+msgid "Multi-room"
+msgstr ""
+
+msgctxt "#30093"
+msgid "Server Information"
+msgstr ""
+
+msgctxt "#30094"
+msgid "M3U:"
+msgstr ""
+
+msgctxt "#30095"
+msgid "XMLTV:"
+msgstr ""
+
+msgctxt "#30096"
+msgid "Genre:"
+msgstr ""
+
+msgctxt "#30097"
+msgid "Port %s is In-Use! Port %s is available on this instance\n All PseudoTV Instances must be configured to use the same port."
+msgstr ""
+
+msgctxt "#30098"
+msgid "TCP Port:"
+msgstr ""
+
+msgctxt "#30099"
+msgid "Server Added (%s)"
+msgstr ""
+
+msgctxt "#30100"
+msgid "Removed Server (%s)"
+msgstr ""
+
+msgctxt "#30101"
+msgid "Remote Server"
+msgstr ""
+
+msgctxt "#30102"
+msgid "Centralized Folder"
+msgstr ""
+
+msgctxt "#30103"
+msgid "ZeroConf Information"
+msgstr ""
+
+msgctxt "#30104"
+msgid "SmartPlaylists"
+msgstr ""
+
+msgctxt "#30105"
+msgid "Detect Compatible Kodi Plugins?"
+msgstr ""
+
+msgctxt "#30106"
+msgid "Utilities"
+msgstr ""
+
+msgctxt "#30107"
+msgid "Channel Manager"
+msgstr ""
+
+msgctxt "#30108"
+msgid "Channels"
+msgstr ""
+
+msgctxt "#30109"
+msgid "Edit Channel %s\n[COLOR=white][B]In-use[/B][/COLOR] | [COLOR=dimgray][B]Unused[/B][/COLOR] | [COLOR=yellow][B]Favorite[/B][/COLOR] | [COLOR=cyan][B]Radio[/B][/COLOR] | [COLOR=orange][B]Uneditable[/B][/COLOR] | [COLOR=red][B]Warning[/B][/COLOR] *see wiki for details."
+msgstr ""
+
+msgctxt "#30110"
+msgid "JSONRPC Delay"
+msgstr ""
+
+msgctxt "#30111"
+msgid "Expert Options"
+msgstr ""
+
+msgctxt "#30112"
+msgid "Channel Bug Position"
+msgstr ""
+
+msgctxt "#30113"
+msgid "Force Diffuse Color"
+msgstr ""
+
+msgctxt "#30114"
+msgid "Add to PseudoTV Live"
+msgstr ""
+
+msgctxt "#30115"
+msgid "Add to Recordings"
+msgstr ""
+
+msgctxt "#30116"
+msgid "Added to Recordings."
+msgstr ""
+
+msgctxt "#30117"
+msgid "Remove Recording"
+msgstr ""
+
+msgctxt "#30118"
+msgid "Removed Recording"
+msgstr ""
+
+msgctxt "#30119"
+msgid "Watch Later"
+msgstr ""
+
+msgctxt "#30120"
+msgid "[COLOR=red][B]Warning!! [/B][/COLOR]%s\nAlready Exists, override it?."
+msgstr ""
+
+msgctxt "#30121"
+msgid "Even Show Distribution"
+msgstr ""
+
+msgctxt "#30122"
+msgid "Enter Device Name"
+msgstr ""
+
+msgctxt "#30123"
+msgid "Two Shows"
+msgstr ""
+
+msgctxt "#30124"
+msgid "Three Shows"
+msgstr ""
+
+msgctxt "#30125"
+msgid "Include IMDB Trailers"
+msgstr ""
+
+msgctxt "#30126"
+msgid "Include Kodi Trailers"
+msgstr ""
+
+msgctxt "#30127"
+msgid "Custom"
+msgstr ""
+
+msgctxt "#30128"
+msgid "Searching for %s logo"
+msgstr ""
+
+msgctxt "#30129"
+msgid "Enable Kodi ZeroConf?"
+msgstr ""
+
+msgctxt "#30130"
+msgid "Select Server to enable."
+msgstr ""
+
+msgctxt "#30131"
+msgid "Disable Trakt scrobbling during playback"
+msgstr ""
+
+msgctxt "#30132"
+msgid "Rollback watched playcount after playback"
+msgstr ""
+
+msgctxt "#30133"
+msgid "Player"
+msgstr ""
+
+msgctxt "#30134"
+msgid "Random Post-Roll Filler"
+msgstr ""
+
+msgctxt "#30135"
+msgid "Include"
+msgstr ""
+
+msgctxt "#30136"
+msgid "Unavailable while playing..."
+msgstr ""
+
+msgctxt "#30137"
+msgid "Node Editor"
+msgstr ""
+
+msgctxt "#30138"
+msgid "Smartplaylist Editor"
+msgstr ""
+
+msgctxt "#30139"
+msgid "Random Pre-Roll Filler"
+msgstr ""
+
+msgctxt "#30140"
+msgid "Build Filler Folders"
+msgstr ""
+
+msgctxt "#30141"
+msgid "Overlay Resource"
+msgstr ""
+
+msgctxt "#30142"
+msgid "Disable Overlay"
+msgstr ""
+
+msgctxt "#30143"
+msgid "Channel Bug Rules"
+msgstr ""
+
+msgctxt "#30144"
+msgid "Change channel Bug attributes."
+msgstr ""
+
+msgctxt "#30145"
+msgid "Show Channel Bug"
+msgstr ""
+
+msgctxt "#30146"
+msgid "Every %s Minutes"
+msgstr ""
+
+msgctxt "#30147"
+msgid "Hide Channel Bug"
+msgstr ""
+
+msgctxt "#30148"
+msgid "Select Interval in minutes. [-1 = Indefinitely, 0 = Randomly]"
+msgstr ""
+
+msgctxt "#30149"
+msgid "Enable Recording Cleanup"
+msgstr ""
+
+msgctxt "#30150"
+msgid "Copy Logo Folder?"
+msgstr ""
+
+msgctxt "#30151"
+msgid "Copy Fillers Folder?"
+msgstr ""
+
+msgctxt "#30151"
+msgid "Copy Fillers Folder?"
+msgstr ""
+
+msgctxt "#30152"
+msgid "Resume Later"
+msgstr ""
+
+msgctxt "#30153"
+msgid "Restart Percentage"
+msgstr ""
+
+msgctxt "#30154"
+msgid "Restart Unavailable..."
+msgstr ""
+
+msgctxt "#30155"
+msgid "Enable Automatic PVR Refresh"
+msgstr ""
+
+msgctxt "#30156"
+msgid "Enable ZeroConf"
+msgstr ""
+
+msgctxt "#30157"
+msgid "PVR & Live TV Settings"
+msgstr ""
+
+msgctxt "#30158"
+msgid "Scan QRCode"
+msgstr ""
+
+msgctxt "#30159"
+msgid "Visit Support Forum"
+msgstr ""
+
+msgctxt "#30160"
+msgid "Editors & Settings"
+msgstr ""
+
+msgctxt "#30161"
+msgid "Manager & Backup"
+msgstr ""
+
+msgctxt "#30162"
+msgid "Miscellaneous Options"
+msgstr ""
+
+msgctxt "#30163"
+msgid "Ratings & Bumpers"
+msgstr ""
+
+msgctxt "#30164"
+msgid "Adverts & Trailers"
+msgstr ""
+
+msgctxt "#30165"
+msgid "View Snapshot"
+msgstr ""
+
+msgctxt "#30166"
+msgid "Submit Snapshot"
+msgstr ""
+
+msgctxt "#30167"
+msgid "Enable Log Uploader"
+msgstr ""
+
+msgctxt "#30168"
+msgid "Visit Project Wiki"
+msgstr ""
+
+msgctxt "#30169"
+msgid "Channel information (OSD) display time"
+msgstr ""
+
+msgctxt "#30170"
+msgid "Show OSD on change"
+msgstr ""
+
+msgctxt "#30171"
+msgid "Hide OSD on change"
+msgstr ""
+
+msgctxt "#30172"
+msgid "Channel List"
+msgstr ""
+
+msgctxt "#30173"
+msgid "Select Server"
+msgstr ""
+
+msgctxt "#30174"
+msgid "Enable Vignette"
+msgstr ""
+
+msgctxt "#30175"
+msgid "Vignette Image"
+msgstr ""
+
+msgctxt "#30176"
+msgid "Vignette Zoom"
+msgstr ""
+
+msgctxt "#30177"
+msgid "Vignette Rules"
+msgstr ""
+
+msgctxt "#30178"
+msgid "Vignette V-Shift"
+msgstr ""
+
+msgctxt "#30179"
+msgid "Interleave sets"
+msgstr ""
+
+msgctxt "#30180"
+msgid "Group TV shows in blocks"
+msgstr ""
+
+msgctxt "#30181"
+msgid "Force Episode Ordering"
+msgstr ""
+
+msgctxt "#30182"
+msgid "Force Random Ordering"
+msgstr ""
+
+msgctxt "#30183"
+msgid "Interleave TV & Movies after Ordering"
+msgstr ""
+
+msgctxt "#30184"
+msgid "Enabled"
+msgstr ""
+
+msgctxt "#30185"
+msgid "Vignette Pixel Ratio"
+msgstr ""
+
+msgctxt "#30186"
+msgid "Vignette Non-Linear Stretch"
+msgstr ""
+
+msgctxt "#30187"
+msgid "Trailer"
+msgstr ""
+
+msgctxt "#30188"
+msgid "Label"
+msgstr ""
+
+msgctxt "#30189"
+msgid "Last Position"
+msgstr ""
+
+msgctxt "#30190"
+msgid "Failed to retrieve the paste url"
+msgstr ""
+
+msgctxt "#30191"
+msgid "Error posting snapshot."
+msgstr ""
+
+msgctxt "#30192"
+msgid "Interleaving"
+msgstr ""
+
+msgctxt "#30193"
+msgid "Text"
+msgstr ""
+
+msgctxt "#30194"
+msgid "Artwork"
+msgstr ""
+
+msgctxt "#30195"
+msgid "UpNext"
+msgstr ""
+
+msgctxt "#30196"
+msgid "Select OnNext Mode"
+msgstr ""
+
+msgctxt "#30197"
+msgid "OSD"
+msgstr ""
+
+msgctxt "#30198"
+msgid "Enable Executors"
+msgstr ""
+
+msgctxt "#30199"
+msgid "Request"
+msgstr ""
+
+msgctxt "#30200"
+msgid "Received"
+msgstr ""
+
+msgctxt "#30201"
+msgid "JSONRPC Wait"
+msgstr ""
+
+msgctxt "#30202"
+msgid "Failed to validate Path!\nForce Approval?\n*Forced channels may fail to build or playback properly."
+msgstr ""
+
+msgctxt "#30203"
+msgid "Name:"
+msgstr ""
+
+msgctxt "#30204"
+msgid "Install CPU Benchmark"
+msgstr ""
+
+msgctxt "#30204"
+msgid "Enable CPU Benchmark"
+msgstr ""
+
+msgctxt "#30205"
+msgid "CPU Benchmark"
+msgstr ""
+
+msgctxt "#30206"
+msgid "Install I/O Benchmark"
+msgstr ""
+
+msgctxt "#30207"
+msgid "Enable I/O Benchmark"
+msgstr ""
+
+msgctxt "#30208"
+msgid "I/O Benchmark"
+msgstr ""
+
+msgctxt "#30209"
+msgid "Select Transparency"
+msgstr ""
+
+msgctxt "#30210"
+msgid "Auto tuning"
+msgstr ""
+
+msgctxt "#30211"
+msgid "Interleave repeating content"
+msgstr ""
+
+msgctxt "#30212"
+msgid "Notifications During Playback"
+msgstr ""
+
+msgctxt "#30213"
+msgid "Client Only"
+msgstr ""
+
+msgctxt "#30214"
+msgid "Detect Playlist Changes"
+msgstr ""
+
+msgctxt "#30215"
+msgid "Integrations"
+msgstr ""
+
+msgctxt "#30216"
+msgid "Artificial Intelligence"
+msgstr ""
+
+msgctxt "#30217"
+msgid "Open-router API-Key"
+msgstr ""
+
+msgctxt "#30218"
+msgid "Use generative artwork"
+msgstr ""
+
+msgctxt "#30219"
+msgid "Allow A.I. Integration"
+msgstr ""
+
+msgctxt "#30220"
+msgid "A.I. artwork prompt"
+msgstr ""
+
+msgctxt "#30221"
+msgid "remove.bg API-Key"
+msgstr ""
+
+msgctxt "#30222"
+msgid "Playback Timeout"
+msgstr ""
+
+msgctxt "#30223"
+msgid "Channel"
+msgstr ""
+
+msgctxt "#30224"
+msgid "Folder Depth"
+msgstr ""
+
+msgctxt "#30225"
+msgid "Enable Additional Details"
+msgstr ""
+
+msgctxt "#30226"
+msgid "Enable Smart Shuffling"
+msgstr ""
+
+msgctxt "#30227"
+msgid "System Memory Limit Percentage."
+msgstr ""
+
+msgctxt "#30228"
+msgid "Professional TV network station identifier logo for a channel titled '{name}'. The design should feature bold, high-clarity typography of the station name as the central focus. Subtly integrate visual motifs and textures inspired by '{group}' into the lettering or the immediate surrounding frame. The style should be clean, high-contrast, and optimized for a [512x512 square / 400x175 wide] format on a transparent background. Avoid cluttered backgrounds; prioritize brand legibility."
+msgstr ""
+
+msgctxt "#30229"
+msgid "Predefined"
+msgstr ""
+
+msgctxt "#30230"
+msgid "Autotune Channels"
+msgstr ""
+
+msgctxt "#30231"
+msgid "Select Image Model"
+msgstr ""
+
+msgctxt "#30232"
+msgid "Select Contextual Model"
+msgstr ""
+
+# Skin - strings 31000 thru 31999 reserved for skins
+
+
+# Labels - strings 32000 thru 32999 reserved buildChannelsfor scripts
+msgctxt "#32000"
+msgid "Something went wrong, Try again later..."
+msgstr ""
+
+msgctxt "#32001"
+msgid "Recently Added"
+msgstr ""
+
+msgctxt "#32002"
+msgid "Seasonal"
+msgstr ""
+
+msgctxt "#32003"
+msgid "PVR Recordings"
+msgstr ""
+
+msgctxt "#32004"
+msgid "TV Networks"
+msgstr ""
+
+msgctxt "#32005"
+msgid "TV Shows"
+msgstr ""
+
+msgctxt "#32006"
+msgid "TV Genres"
+msgstr ""
+
+msgctxt "#32007"
+msgid "Movie Genres"
+msgstr ""
+
+msgctxt "#32008"
+msgid "Movie Studios"
+msgstr ""
+
+msgctxt "#32009"
+msgid "Mixed Genres"
+msgstr ""
+
+msgctxt "#32010"
+msgid "Mixed"
+msgstr ""
+
+msgctxt "#32011"
+msgid "Music Genres"
+msgstr ""
+
+msgctxt "#32012"
+msgid "Recommended"
+msgstr ""
+
+msgctxt "#32013"
+msgid "Services"
+msgstr ""
+
+msgctxt "#32014"
+msgid "TV"
+msgstr ""
+
+msgctxt "#32015"
+msgid "Movies"
+msgstr ""
+
+msgctxt "#32016"
+msgid "Music"
+msgstr ""
+
+msgctxt "#32017"
+msgid "Select One or More %s"
+msgstr ""
+
+msgctxt "#32018"
+msgid "No %s found..."
+msgstr ""
+
+msgctxt "#32019"
+msgid "Favorites"
+msgstr ""
+
+msgctxt "#32020"
+msgid "Unavailable"
+msgstr ""
+
+msgctxt "#32021"
+msgid "AutoTuning"
+msgstr ""
+
+msgctxt "#32022"
+msgid "Updating"
+msgstr ""
+
+msgctxt "#32023"
+msgid "Channels"
+msgstr ""
+
+msgctxt "#32024"
+msgid "Autotuning samples available via Misc. Utilities"
+msgstr ""
+
+msgctxt "#32025"
+msgid "Complete"
+msgstr ""
+
+msgctxt "#32026"
+msgid "No Content Found"
+msgstr ""
+
+msgctxt "#32027"
+msgid "Skipping"
+msgstr ""
+
+msgctxt "#32028"
+msgid "Checking"
+msgstr ""
+
+msgctxt "#32029"
+msgid "Listen to %s Radio..."
+msgstr ""
+
+msgctxt "#32030"
+msgid "In-Valid Path!"
+msgstr ""
+
+msgctxt "#32031"
+msgid "No Media Found!"
+msgstr ""
+
+msgctxt "#32032"
+msgid "No Duration Found!"
+msgstr ""
+               
+msgctxt "#32033"
+msgid ""
+msgstr ""
+
+msgctxt "#32034"
+msgid "%s not found, Please Install!"
+msgstr ""
+
+msgctxt "#32035"
+msgid "[COLOR=yellow][B]Notice!! [/B]The following changes will be applied to [B]%s[/B], if you select [B]YES![/B][/COLOR]"
+msgstr ""
+
+msgctxt "#32036"
+msgid "Apply Changes to %s?"
+msgstr ""
+
+msgctxt "#32037"
+msgid "%s settings updated."
+msgstr ""
+
+msgctxt "#32038"
+msgid "Something went wrong! wait while we try again...\nPlayback Attempt (%s)"
+msgstr ""
+
+msgctxt "#32039"
+msgid "Are You Still Watching?"
+msgstr ""
+
+msgctxt "#32040"
+msgid "Stopping Playback in [B]%s[/B] seconds.\n[B]Cancel[/B] to continue watching."
+msgstr ""
+
+msgctxt "#32041"
+msgid "Library"
+msgstr ""
+
+msgctxt "#32042"
+msgid "[B]Welcome to %s![/B]\n[B]No[/B] Channels found, Would you like enable Autotuned Channels for automatic channel creation?"
+msgstr ""
+
+msgctxt "#32043"
+msgid "%s - Readme v.%s"
+msgstr ""
+
+msgctxt "#32044"
+msgid "Enter Custom Groups\nSeparate by '|' ex. Action|Comedy"
+msgstr ""
+
+msgctxt "#32045"
+msgid "%s - Changelog v.%s"
+msgstr ""
+
+msgctxt "#32046"
+msgid "No Changes Applied!"
+msgstr ""
+
+msgctxt "#32047"
+msgid "Discovered Server"
+msgstr ""
+
+msgctxt "#32048"
+msgid "Select Servers"
+msgstr ""
+
+msgctxt "#32049"
+msgid "Restarting..."
+msgstr ""
+
+msgctxt "#32050"
+msgid "Preparing to copy"
+msgstr ""
+
+msgctxt "#32051"
+msgid "Copying"
+msgstr ""
+
+msgctxt "#32052"
+msgid "Failed!"
+msgstr ""
+
+msgctxt "#32053"
+msgid "Settings"
+msgstr ""
+
+msgctxt "#32054"
+msgid "Initializing"
+msgstr ""
+
+msgctxt "#32055"
+msgid "%s compatible plugin found!\nWould you like to add [B]%s[/B] to your recommended list?"
+msgstr ""
+
+msgctxt "#32056"
+msgid "Yes to all"
+msgstr ""
+
+msgctxt "#32057"
+msgid "%s is busy, try again later..."
+msgstr ""
+
+msgctxt "#32058"
+msgid "No Channels Configured!"
+msgstr ""
+
+msgctxt "#32059"
+msgid "Save"
+msgstr ""
+
+msgctxt "#32060"
+msgid "Cancel"
+msgstr ""
+
+msgctxt "#32061"
+msgid "Delete"
+msgstr ""
+
+msgctxt "#32062"
+msgid "Close"
+msgstr ""
+
+msgctxt "#32063"
+msgid "OK"
+msgstr ""
+
+msgctxt "#32064"
+msgid "Max Channels by Type"
+msgstr ""
+
+msgctxt "#32065"
+msgid "Channel Name Missing..."
+msgstr ""
+
+msgctxt "#32066"
+msgid "[B]Browse[/B] - Manually browse for logo[CR][B]Select[/B] - Choose a matching logo[CR][B]Auto[/B] - Automatically select best logo"
+msgstr ""
+
+msgctxt "#32067"
+msgid "Select"
+msgstr ""
+
+msgctxt "#32068"
+msgid "Browse"
+msgstr ""
+
+msgctxt "#32069"
+msgid "Ask"
+msgstr ""
+
+msgctxt "#32070"
+msgid "No Logo Found!"
+msgstr "" 
+
+msgctxt "#32071"
+msgid "Add Content Paths before adding channel rules."
+msgstr ""
+
+msgctxt "#32072"
+msgid "Select Channel Rule"
+msgstr ""
+
+msgctxt "#32073"
+msgid "Clear Configurations?"
+msgstr ""
+
+msgctxt "#32074"
+msgid "Adding Channel"
+msgstr ""
+
+msgctxt "#32075"
+msgid "Saving..."
+msgstr ""
+
+msgctxt "#32076"
+msgid "Save All Channel Changes?"
+msgstr ""
+
+msgctxt "#32077"
+msgid "%s Configuration In-valid, Try again..."
+msgstr ""
+
+msgctxt "#32078"
+msgid "Select Channel %s"
+msgstr ""
+
+msgctxt "#32079"
+msgid "Enter Channel Name"
+msgstr ""
+
+msgctxt "#32080"
+msgid "Select Media Path"
+msgstr ""
+
+msgctxt "#32081"
+msgid "Select Channel Groups"
+msgstr ""
+
+msgctxt "#32082"
+msgid "Clear this Channels Configurations"
+msgstr ""
+
+msgctxt "#32083"
+msgid "Is this a Favorite Channel?"
+msgstr ""
+
+msgctxt "#32084"
+msgid "Is this a Radio/Music Channel?"
+msgstr ""
+
+msgctxt "#32085"
+msgid "Enter Channel Name"
+msgstr ""
+
+msgctxt "#32086"
+msgid "Build Channel Sources"
+msgstr ""
+
+msgctxt "#32087"
+msgid "Select Channel Groups"
+msgstr ""
+
+msgctxt "#32088"
+msgid "Create Advanced Channel Rules"
+msgstr ""
+
+msgctxt "#32089"
+msgid "Select Media Source"
+msgstr ""
+
+msgctxt "#32090"
+msgid "Favorite"
+msgstr ""
+
+msgctxt "#32091"
+msgid "Radio"
+msgstr ""
+
+msgctxt "#32092"
+msgid "Name"
+msgstr ""
+
+msgctxt "#32093"
+msgid "Paths"
+msgstr ""
+
+msgctxt "#32094"
+msgid "Groups"
+msgstr ""
+
+msgctxt "#32095"
+msgid "Rules"
+msgstr ""
+
+msgctxt "#32096"
+msgid "Position Changed, Do you want to save?"
+msgstr ""
+
+msgctxt "#32097"
+msgid "[COLOR=yellow][B]Notice!! [/B][/COLOR]Kodi is in Windowed Display!\nIt's recommend you switch to Fullscreen.\nCurrent Resolution (%s)"
+msgstr ""
+
+msgctxt "#32098"
+msgid "Validating"
+msgstr ""
+
+msgctxt "#32099"
+msgid ""
+msgstr ""
+
+msgctxt "#32100"
+msgid ""
+msgstr ""
+
+msgctxt "#32101"
+msgid ""
+msgstr ""
+
+msgctxt "#32102"
+msgid "Delete Path?"
+msgstr ""
+
+msgctxt "#32103"
+msgid "Edit Path"
+msgstr ""
+
+msgctxt "#32104"
+msgid "[B]You're Watching:[/B]"
+msgstr ""
+
+msgctxt "#32105"
+msgid "Unknown"
+msgstr ""
+
+msgctxt "#32106"
+msgid "Last Backup"
+msgstr ""
+
+msgctxt "#32107"
+msgid "Restore"
+msgstr ""
+
+msgctxt "#32108"
+msgid "Replace existing Backup from"
+msgstr ""
+
+msgctxt "#32109"
+msgid "Replace existing channels with %s\n%s"
+msgstr ""
+
+msgctxt "#32110"
+msgid "Backup"
+msgstr ""
+
+msgctxt "#32111"
+msgid "Recover Channels from a backup?"
+msgstr ""
+
+msgctxt "#32112"
+msgid "Recover"
+msgstr ""
+
+msgctxt "#32113"
+msgid "Recovering Channel"
+msgstr ""
+
+msgctxt "#32115"
+msgid "Running as a client."
+msgstr ""
+
+msgctxt "#32116"
+msgid "[B]Next[/B]"
+msgstr ""
+
+msgctxt "#32117"
+msgid "Delete M3U/XMLTV"
+msgstr ""
+
+msgctxt "#32118"
+msgid "Clean Start"
+msgstr ""
+
+msgctxt "#32119"
+msgid "Remove all files and configurations"
+msgstr ""
+
+msgctxt "#32120"
+msgid "Remove m3u and xmltv files"
+msgstr ""
+
+msgctxt "#32121"
+msgid "Force %s to reload"
+msgstr ""
+
+msgctxt "#32122"
+msgid "[COLOR=red][B]Warning!! [/B][/COLOR]System can become unresponsive."
+msgstr ""
+
+msgctxt "#32123"
+msgid "Force background service to reload."
+msgstr ""
+
+msgctxt "#32124"
+msgid "Restarting background service..."
+msgstr ""
+
+msgctxt "#32125"
+msgid "Reloading..."
+msgstr ""
+
+msgctxt "#32126"
+msgid "Utility Menu"
+msgstr ""
+
+msgctxt "#32127"
+msgid "Deleting %s"
+msgstr ""
+
+msgctxt "#32128"
+msgid "Rebuilding Autotuned Channels"
+msgstr ""
+
+msgctxt "#32129"
+msgid "%s is missing guide data for this channel\nPlease wait for Kodi and %s to finish updating."
+msgstr ""
+
+msgctxt "#32130"
+msgid "[COLOR=red][B]Warning!! [/B][/COLOR]File caching disabled\nIt's recommended you re-enable when finished debugging"
+msgstr ""
+
+msgctxt "#32131"
+msgid "[COLOR=yellow][B]Notice!! [/B][/COLOR]Kodi's Webserver is disabled.\nIt's recommend you enable."
+msgstr ""
+
+msgctxt "#32132"
+msgid "Default device name [B]%s[/B] detected!\nPlease change your instance name to something unique this will assure proper multi-room functionality."
+msgstr ""
+
+msgctxt "#32133"
+msgid "[COLOR=yellow][B]Notice!! [/B][/COLOR] Something went wrong, Please double check your PVR configurations and reboot Kodi."
+msgstr ""
+
+msgctxt "#32134"
+msgid "Playback failed! This maybe because %s is building this channel.\nPlease check your channel settings."
+msgstr ""
+
+msgctxt "#32135"
+msgid "Interrupted"
+msgstr ""
+
+msgctxt "#32136"
+msgid "Move"
+msgstr ""
+
+msgctxt "#32137"
+msgid "Input new channel number"
+msgstr ""
+
+msgctxt "#32138"
+msgid "Inputted channel number already in-use."
+msgstr ""
+
+msgctxt "#32139"
+msgid "Channel logo updated"
+msgstr ""
+
+msgctxt "#32140"
+msgid "This may take a moment..."
+msgstr ""
+
+msgctxt "#32141"
+msgid "Shutting down background service..."
+msgstr ""
+
+msgctxt "#32142"
+msgid "Debugging is [B]enabled[/B]\nIt is recommend you disable debugging when applicable.\nWould you like to disable debugging now?"
+msgstr ""
+
+msgctxt "#32143"
+msgid "Debugging Disabled!"
+msgstr ""
+
+msgctxt "#32144"
+msgid "Background Service"
+msgstr ""
+
+msgctxt "#32145"
+msgid "Paused"
+msgstr ""
+
+msgctxt "#32146"
+msgid "Resumed"
+msgstr ""
+
+msgctxt "#32147"
+msgid "Media File Missing!"
+msgstr ""
+
+msgctxt "#32148"
+msgid "Please wait for announcements to finish, Try again later..."
+msgstr ""
+
+msgctxt "#32149"
+msgid "[COLOR=orange][B]Idle[/B][/COLOR]"
+msgstr ""
+
+msgctxt "#32150"
+msgid "Run during playback"
+msgstr ""
+
+msgctxt "#32151"
+msgid "Creating Backup"
+msgstr ""
+
+msgctxt "#32152"
+msgid "Changes Applied!"
+msgstr ""
+
+msgctxt "#32153"
+msgid "[COLOR=red][B]File migration required!![/B][/COLOR]\n[B]Copying File:[/B] %s\n[B]From:[/B] %s\n[B]To:[/B] %s"
+msgstr ""
+
+msgctxt "#32154"
+msgid "Show M3U"
+msgstr ""
+
+msgctxt "#32155"
+msgid "Show XMLTV"
+msgstr ""
+
+msgctxt "#32156"
+msgid "Would you like to Install %s?"
+msgstr ""
+
+msgctxt "#32157"
+msgid "Changes Detected!"
+msgstr ""
+
+msgctxt "#32158"
+msgid "Online"
+msgstr ""
+
+
+msgctxt "#32159"
+msgid "Rebuild Library"
+msgstr ""
+
+msgctxt "#32160"
+msgid "Cancelling..."
+msgstr ""
+
+msgctxt "#32161"
+msgid "[COLOR=yellow][B]- Create Path[/B][/COLOR]"
+msgstr ""
+
+msgctxt "#32162"
+msgid "Looking for multi-room instances (%ss)"
+msgstr ""
+
+msgctxt "#32163"
+msgid "Announcing [B]%s[/B]\nDialog will close when paired: Timeout in %s seconds."
+msgstr ""
+
+msgctxt "#32164"
+msgid "Can not locate broadcast!"
+msgstr ""
+
+msgctxt "#32165"
+msgid "No Changes Applied!"
+msgstr ""
+
+msgctxt "#32166"
+msgid "Playback Unavailable! Guide data is updating\nTry again later..."
+msgstr ""
+
+msgctxt "#32167"
+msgid "Playback Failed!"
+msgstr ""
+
+msgctxt "#32168"
+msgid "Update Available!"
+msgstr ""
+
+msgctxt "#32169"
+msgid "Edit Channel %s (%s)"
+msgstr ""
+
+msgctxt "#32170"
+msgid "- Delete Path"
+msgstr ""
+
+msgctxt "#32171"
+msgid "%s in-use, Try Again..."
+msgstr ""
+
+msgctxt "#32172"
+msgid "Select Channel Logo"
+msgstr ""
+
+msgctxt "#32173"
+msgid "- Add Rule"
+msgstr ""
+
+msgctxt "#32174"
+msgid "- Save Rules"
+msgstr ""
+
+msgctxt "#32175"
+msgid "Delete Rule?"
+msgstr ""
+
+msgctxt "#32176"
+msgid "Edit Rule"
+msgstr ""
+
+msgctxt "#32177"
+msgid "Finish Configuring channel first"
+msgstr ""
+
+msgctxt "#32178"
+msgid "Sort & Filter rules do not apply to Smartplaylist"
+msgstr ""
+
+msgctxt "#32179"
+msgid "Building Filler Folder"
+msgstr ""
+
+msgctxt "#32180"
+msgid "Build Filler Folders"
+msgstr ""
+
+msgctxt "#32181"
+msgid "Run Autotune"
+msgstr ""
+
+msgctxt "#32182"
+msgid "ZeroConf Status:"
+msgstr ""
+
+msgctxt "#32183"
+msgid "Select server to remove."
+msgstr ""
+
+msgctxt "#32184"
+msgid "Restart Percentage (%s)"
+msgstr ""
+
+msgctxt "#32185"
+msgid "Playing %s"
+msgstr ""
+
+msgctxt "#32186"
+msgid "Unable to automatically configure IPTV-Simple, Please check user configurations."
+msgstr ""
+
+msgctxt "#32187"
+msgid "No errors found in debug snapshot!"
+msgstr ""
+
+msgctxt "#32188"
+msgid "Snapshot uploaded to [B]https://paste.kodi.tv/[/B][CR]Sensitive information removed before upload.[CR]Continue?"
+msgstr ""
+
+msgctxt "#32189"
+msgid "Post this url or QRcode for your snapshot, together with a problem description, on the Kodi forum: %s"
+msgstr ""
+
+msgctxt "#32190"
+msgid "Error posting snapshot[CR]%s"
+msgstr ""
+
+msgctxt "#32191"
+msgid "Video SmartPlaylist [Recommended]"
+msgstr ""
+
+msgctxt "#32192"
+msgid "Music SmartPlaylist"
+msgstr ""
+
+msgctxt "#32193"
+msgid "Mixed SmartPlaylist"
+msgstr ""
+
+msgctxt "#32194"
+msgid "STRM Import"
+msgstr ""
+
+msgctxt "#32195"
+msgid "Dynamic SmartPlaylist"
+msgstr ""
+
+msgctxt "#32196"
+msgid "Video"
+msgstr ""
+
+msgctxt "#32197"
+msgid "Currently Supported!" 
+msgstr ""
+
+msgctxt "#32198"
+msgid "All"
+msgstr ""
+
+msgctxt "#32199"
+msgid "Local"
+msgstr ""
+
+msgctxt "#32200"
+msgid "Shared"
+msgstr ""
+
+msgctxt "#32201"
+msgid "Image Sources"
+msgstr ""
+
+msgctxt "#32202"
+msgid "Resources Plugins"
+msgstr ""
+
+msgctxt "#32203"
+msgid "Current Path"
+msgstr ""
+
+msgctxt "#32206"
+msgid "Basic Playlist"
+msgstr ""
+
+msgctxt "#32207"
+msgid "Music"
+msgstr ""
+
+msgctxt "#32208"
+msgid "Parsing Trailer"
+msgstr ""
+
+msgctxt "#32209"
+msgid "Applying Rule"
+msgstr ""
+
+msgctxt "#32210"
+msgid "Parsing Details"
+msgstr ""
+
+msgctxt "#32211"
+msgid "[COLOR=%s][B]%s[/B][/COLOR]"
+msgstr ""
+
+msgctxt "#32212"
+msgid "Running"
+msgstr ""
+
+msgctxt "#32213"
+msgid "Stopping"
+msgstr ""
+
+msgctxt "#32214"
+msgid "Sort Method"
+msgstr ""
+
+msgctxt "#32215"
+msgid "Enable Multi-Room Instances (Client Only) ?"
+msgstr ""
+
+msgctxt "#32216"
+msgid "[B]Welcome to %s![/B][CR][CR]If you're new please visit our wiki for helpful tips & guides.[CR][CR]Thank you for your support, enjoy![CR][CR][B][I]%s[/I][/B]"
+msgstr ""
+
+msgctxt "#32217"
+msgid "Download Bonjour Print Services for Windows"
+msgstr ""
+
+msgctxt "#32218"
+msgid "Not Needed..."
+msgstr ""
+
+msgctxt "#32219"
+msgid "%s Enabled"
+msgstr ""
+
+msgctxt "#32220"
+msgid "%s Disabled"
+msgstr ""
+
+msgctxt "#32221"
+msgid "Add"
+msgstr ""
+
+msgctxt "#32222"
+msgid "Save"
+msgstr ""
+
+msgctxt "#32223"
+msgid "Select One %s"
+msgstr ""
+
+msgctxt "#32224"
+msgid "Indefinitely"
+msgstr ""
+
+msgctxt "#32225"
+msgid "Randomly"
+msgstr ""
+
+msgctxt "#32226"
+msgid "Forcing"
+msgstr ""
+
+msgctxt "#32227"
+msgid "Show Screen Vignette"
+msgstr ""
+
+msgctxt "#32228"
+msgid "Hide Screen Vignette"
+msgstr ""
+
+msgctxt "#32229"
+msgid "On Next Position"
+msgstr ""
+
+msgctxt "#32230"
+msgid "Pause Channel"
+msgstr ""
+
+msgctxt "#32231"
+msgid "Enable Pause"
+msgstr ""
+
+msgctxt "#32232"
+msgid "Sort Methods"
+msgstr ""
+
+msgctxt "#32233"
+msgid "Minimum Duration"
+msgstr ""
+
+msgctxt "#32234"
+msgid "Changes Detected, Do you want to save?"
+msgstr ""
+
+msgctxt "#32235"
+msgid "Preview"
+msgstr ""
+
+msgctxt "#32236"
+msgid "Building Preview"
+msgstr ""
+
+msgctxt "#32237"
+msgid "Waiting for Background Service to idle..."
+msgstr ""
+
+msgctxt "#32238"
+msgid "Autotuned Channels must be\n disabled in settings."
+msgstr ""
+
+msgctxt "#32239"
+msgid "Clear"
+msgstr ""
+
+msgctxt "#32240"
+msgid "Confirm"
+msgstr ""
+
+msgctxt "#32241"
+msgid "PVR Searches"
+msgstr ""
+
+msgctxt "#32242"
+msgid "PVR Search"
+msgstr ""
+
+msgctxt "#32243"
+msgid "Save Current Channel Changes?"
+msgstr ""
+
+msgctxt "#32244"
+msgid "Removing"
+msgstr ""
+
+msgctxt "#32245"
+msgid "Parsing"
+msgstr ""
+
+msgctxt "#32246"
+msgid "Loading"
+msgstr ""
+
+msgctxt "#32247"
+msgid "Starting"
+msgstr ""
+
+msgctxt "#32248"
+msgid "Querying"
+msgstr ""
+
+msgctxt "#32249"
+msgid "Updated"
+msgstr ""
+
+msgctxt "#32250"
+msgid "Viewed"
+msgstr ""
+
+msgctxt "#32251"
+msgid "New"
+msgstr ""
+
+msgctxt "#32252"
+msgid "Listening"
+msgstr ""
+
+msgctxt "#32253"
+msgid "Offline"
+msgstr ""
+
+msgctxt "#32254"
+msgid "More"
+msgstr ""
+
+msgctxt "#32255"
+msgid "or view more options?"
+msgstr ""
+
+msgctxt "#32256"
+msgid "Recover Autotune from M3U"
+msgstr ""
+
+msgctxt "#32257"
+msgid "Recover M3U"
+msgstr ""
+
+msgctxt "#32258"
+msgid "Parser"
+msgstr ""
+
+msgctxt "#32259"
+msgid "Changed"
+msgstr ""
+
+msgctxt "#32260"
+msgid "Controls Temporarily Locked!"
+msgstr ""
+
+msgctxt "#32261"
+msgid "Edit Channel"
+msgstr ""
+
+msgctxt "#32262"
+msgid "No Content Found\nTry increasing channels recursive limit."
+msgstr ""
+
+msgctxt "#32263"
+msgid "Set Limits"
+msgstr ""
+         
+msgctxt "#32264"
+msgid "%s disabled, Please Enable!"
+msgstr ""
+
+
+# Help - strings 33000 thru 33999 reserved for common strings used in add-ons
+
+msgctxt "#33001"
+msgid "Only enable for short DEBUGGING sessions. The Kodi log will be spammed; You may experience poor system performance while enabled."
+msgstr ""
+
+msgctxt "#33002"
+msgid "AutoTune Video/Mixed/Music SmartPlaylists."
+msgstr ""
+
+msgctxt "#33003"
+msgid "AutoTune from Recommended (Supported) plugins installed on Kodi.\nSupport does not imply a relation between projects, PseudoTV is not responsible for the content provided by third-party plugins."
+msgstr ""
+
+msgctxt "#33004"
+msgid "AutoTune TV Networks collected from your Kodi Library."
+msgstr ""
+
+msgctxt "#33005"
+msgid "AutoTune TV Shows collected from your Kodi Library."
+msgstr ""
+
+msgctxt "#33006"
+msgid "AutoTune TV Genres collected from your Kodi Library."
+msgstr ""
+
+msgctxt "#33007"
+msgid "AutoTune Movie Genres collected from your Kodi Library."
+msgstr ""
+
+msgctxt "#33008"
+msgid "AutoTune Movie Studios collected from your Kodi Library."
+msgstr ""
+
+msgctxt "#33009"
+msgid "AutoTune Mixed TV/Movie Genres collected from your Kodi Library."
+msgstr ""
+
+msgctxt "#33010"
+msgid "AutoTune Mixed content collected from your Kodi Library."
+msgstr ""
+
+msgctxt "#33011"
+msgid "AutoTune Music Genres collected from your Kodi Library."
+msgstr ""
+
+msgctxt "#33012"
+msgid "Move critical files to a central location.\nIf you're concerned with Write Amplification move to HDD or Persistent (Restorable) RAMDISK"
+msgstr ""
+
+msgctxt "#33013"
+msgid "AutoTune from Recommended (Supported) services installed on Kodi and supplied by IPTV Manager.\nSupport does not imply a relation between projects, PseudoTV is not responsible for the content provided by third-party plugins."
+msgstr ""
+
+msgctxt "#33015"
+msgid "Pagination Limit, How many items are requested and parsed per call. [0:Unlimited, 25:Default]"
+msgstr ""
+
+msgctxt "#33016"
+msgid "Global Filler rules apply to all channels, Advanced channel manager rules apply per channel. *see wiki for details.\nChanges will propagate slowly over time and may not be instantaneous."
+msgstr ""
+
+msgctxt "#33023"
+msgid "Artwork changes will propagate slowly over time and are not instantaneous."
+msgstr ""
+
+msgctxt "#33036"
+msgid "Kodi PVR & LiveTV"
+msgstr ""
+
+msgctxt "#33038"
+msgid "Run AutoTuning in Channels Tab"
+msgstr ""
+
+msgctxt "#33039"
+msgid "Clear Plugin Blacklist. Blacklisted plugins are ignored in Recommended list."
+msgstr ""
+
+msgctxt "#33040"
+msgid "Clear all Pre-defined selections and remove their channels."
+msgstr ""
+
+msgctxt "#33041"
+msgid "Global rules set the default for all channels, Advanced Channel Rules apply per channel. *see wiki for details.\nGlobals are the default setting for every channel."
+msgstr ""
+
+msgctxt "#33042"
+msgid "Enable visual features."
+msgstr ""
+
+msgctxt "#33043"
+msgid "Display the channel logo at the bottom corner of your screen."
+msgstr ""
+
+msgctxt "#33044"
+msgid "Select Color to apply [#FFFFFFFF Default]"
+msgstr ""
+
+msgctxt "#33045"
+msgid "Display OnNext information towards the end of program.\nUp-Next requires service install. [0 Disabled, 1 Default]"
+msgstr ""
+
+msgctxt "#33046"
+msgid "Remove paired server from list below."
+msgstr ""
+
+msgctxt "#33048"
+msgid "Enable/Disable paired servers."
+msgstr ""
+
+msgctxt "#33049"
+msgid "Prefer Kodi Metadata - Use less accurate runtimes from meta-providers.\nPrefer File Metadata - Parse file for accurate runtimes.\nCan impact system performance! *see wiki for details."
+msgstr ""
+
+msgctxt "#33052"
+msgid "Save parsed file duration meta to the Kodi library. Improves runtime accuracy. *see wiki for details."
+msgstr ""
+
+msgctxt "#33053"
+msgid "Include Specials and Extras.\nSeason 00 & Movie Extras"
+msgstr ""
+
+msgctxt "#33054"
+msgid "Include .strm files *see wiki for details."
+msgstr ""
+
+msgctxt "#33055"
+msgid "Include 3D Media"
+msgstr ""
+
+msgctxt "#33056"
+msgid "Include content fillers (Ratings/Bumpers/Adverts/Trailers) in-between channel content\nDownload Filler Resources for content\nLocal directories will be automatically created.. *see wiki for details."
+msgstr ""
+
+msgctxt "#33058"
+msgid "PVR Callback - Play channel as if from a PVR backend.\nPlaylist - Queue channel as a Playlist *see wiki for details."
+msgstr ""
+
+msgctxt "#33061"
+msgid "Adjust (in seconds) to ignore differentials between load times and live offset. [60secs Default] *see wiki for details."
+msgstr ""
+
+msgctxt "#33062"
+msgid "Adjust (by percentage) to ignore loading content near the end of its runtime. [98% Default] / [100% Disables]. *see wiki for details."
+msgstr ""
+
+msgctxt "#33063"
+msgid "Group PseudoTV Live guide data by category."
+msgstr ""
+
+msgctxt "#33064"
+msgid "Enter custom guide data categories for use in the channel manager."
+msgstr ""
+
+msgctxt "#33068"
+msgid "Allow the Seasonal Holiday Channel to advance to the nearest holiday within its given month."
+msgstr ""
+
+msgctxt "#33070"
+msgid "Allow PseudoTV Live to configure Third-Party plugins (IPTV Simple/IPTV Manager) for optimal usage.\nOptimal changes will be reinforced automatically without a user prompt!"
+msgstr ""
+
+msgctxt "#33071"
+msgid "Open IPTV Simple's settings"
+msgstr ""
+
+msgctxt "#33074"
+msgid "Allow Access to configure aspects of Kodi for use with PseudoTV Live [Minimal risk of overriding existing user configurations]."
+msgstr ""
+
+msgctxt "#33078"
+msgid "Stop Playback when Idle for x Hours.\nCancelable with prompt and countdown."
+msgstr ""
+
+
+msgctxt "#33084"
+msgid "Not recommend!! Only disable if you understand the impact of theses changes."
+msgstr ""
+
+msgctxt "#33085"
+msgid "Extending guidedata"
+msgstr ""
+
+msgctxt "#33086"
+msgid "Interval between channel Bug appearances (Minutes). [-1 Indefinitely, 0 Random]"
+msgstr ""
+
+msgctxt "#33089"
+msgid "QRCode - Visit PseudoTV Live Wiki"
+msgstr ""
+
+msgctxt "#33092"
+msgid "Multi-room help"
+msgstr ""
+
+msgctxt "#33097"
+msgid "Only recommend you change port if a conflict exists."
+msgstr ""
+
+msgctxt "#33100"
+msgid "Denote this instance of PseudoTV Live as a client.\nRemote Server | Centralized Folder."
+msgstr ""
+
+msgctxt "#33104"
+msgid "AutoTune from SmartPlaylists from Kodi."
+msgstr ""
+
+msgctxt "#33105"
+msgid "Scan Kodi for Recommended (Supported) Plugins.\nSupport does not imply a relation between projects, PseudoTV is not responsible for the content provided by third-party plugins."
+msgstr ""
+
+msgctxt "#33107"
+msgid "Restore the last channel backup."
+msgstr ""
+
+msgctxt "#33109"
+msgid "Adjust delay between JSONRPC requests (in seconds) to avoid crashes.\nIncreasing value decreases performance; while adding system stability. [1 Default]"
+msgstr ""
+
+msgctxt "#33110"
+msgid "Backup channel configurations & rules."
+msgstr ""
+
+msgctxt "#33111"
+msgid "Apply diffuse color to channel bug regardless of monochromatics"
+msgstr ""
+
+msgctxt "#33112"
+msgid "Change the onscreen Channel Bug position. [Auto Default]"
+msgstr ""
+
+msgctxt "#33113"
+msgid "Add New Path"
+msgstr ""
+
+msgctxt "#33114"
+msgid "Confirm Paths"
+msgstr ""
+
+msgctxt "#33115"
+msgid "Create dynamic path"
+msgstr ""
+
+msgctxt "#33121"
+msgid "Group channel TV shows in blocks. [0 Disabled, 0 Default] (Pagination size influences grouping).\nChanges may propagate slowly over time and may not be instantaneous. [0 Default] *see wiki for details"
+msgstr ""
+
+msgctxt "#33125"
+msgid "Include Coming Soon Trailers from the IMDB Trailer plugin."
+msgstr ""
+
+msgctxt "#33126"
+msgid "Include Trailers from your Kodi library.\nTrailer genres are matched with channel genres when applicable."
+msgstr ""
+
+msgctxt "#33129"
+msgid "Server Status:"
+msgstr ""
+
+msgctxt "#33130"
+msgid ""
+msgstr ""
+
+msgctxt "#33131"
+msgid "Prevent Trakt scrobbling during PseudoTV usage."
+msgstr ""
+
+msgctxt "#33132"
+msgid "Restore the previous playcount and resume points at the end of playback. ie. Passive PseudoTV usage."
+msgstr ""
+
+msgctxt "#33134"
+msgid "Probability a non-channel specific i.e generic video will be used when no match is found.\n[0% Disabled, 50% Default] [Lower == Less Probable]"
+msgstr ""
+
+msgctxt "#33137"
+msgid "Launch Node Editor"
+msgstr ""
+
+msgctxt "#33138"
+msgid "Open Smartplaylist Editor"
+msgstr ""
+
+msgctxt "#33140"
+msgid "Automatically create local channel & genre subfolders for fillers\n./cache/fillers/."
+msgstr ""
+
+msgctxt "#33148"
+msgid "Remove PseudoTV Live recordings when media path no longer exists."
+msgstr ""
+
+msgctxt "#33149"
+msgid "Override Low-Power background pausing and performance throttling."
+msgstr ""
+
+msgctxt "#33150"
+msgid "Parse Library & Build Channels while playing."
+msgstr ""
+
+msgctxt "#33153"
+msgid "[B]Restart[/B] prompt when media progress above % [0% Disabled, 95% Default]."
+msgstr ""
+
+msgctxt "#33155"
+msgid "Allow PseudoTV Live to force Kodi's PVR Backend to reload after a channel update [May Cause System Instability]."
+msgstr ""
+
+msgctxt "#33157"
+msgid "Open Kodi's PVR & Live TV settings."
+msgstr ""
+
+msgctxt "#33159"
+msgid "Force a complete rebuild of your Autotune library."
+msgstr ""
+
+msgctxt "#33160"
+msgid "Select one or more channel logo resource packs."
+msgstr ""
+
+msgctxt "#33161"
+msgid "QRCode - Visit Kodi.TV PseudoTV Live Support Forum."
+msgstr ""
+
+msgctxt "#33165"
+msgid "QRCode - View Snapshot."
+msgstr ""
+
+msgctxt "#33166"
+msgid "QRCode - Submit Snapshot for review to http://paste.kodi.tv."
+msgstr ""
+
+msgctxt "#33168"
+msgid "QRCode - Visit PseudoTV Live Wiki."
+msgstr ""
+
+msgctxt "#33169"
+msgid "Be sure to install the Lunatixz Beta repository in-order to stay update.\nInformation available in the readme or in the official Kodi Forums."
+msgstr ""
+
+msgctxt "#33170"
+msgid "Delete channel Path"
+msgstr ""
+
+msgctxt "#33171"
+msgid "Display OSD on change"
+msgstr ""
+
+msgctxt "#33172"
+msgid "Default Channel List the Channel Manager starts with."
+msgstr ""
+
+msgctxt "#33174"
+msgid "Enable Vignette"
+msgstr ""
+
+msgctxt "#33175"
+msgid "Set Vignette Image"
+msgstr ""
+
+msgctxt "#33176"
+msgid "Set Vignette Zoom"
+msgstr ""
+
+msgctxt "#33177"
+msgid "Set Various Vignette Attributes to create a immersive viewing experience"
+msgstr ""
+
+msgctxt "#33178"
+msgid "Select Vignette Image"
+msgstr ""
+
+msgctxt "#33179"
+msgid "Change Vignette V-Shift"
+msgstr ""
+
+msgctxt "#33180"
+msgid "Build Filler Template folders based on your channels."
+msgstr ""
+
+msgctxt "#33181"
+msgid "Autotuned Channel Limit by Type. [2 Min.|Default, 25 Max.]"
+msgstr ""
+
+msgctxt "#33182"
+msgid "Enabled in discovered servers in the list below."
+msgstr ""
+
+msgctxt "#33184"
+msgid "Enabled Channel Building"
+msgstr ""
+
+msgctxt "#33185"
+msgid "Vignette Pixel Ratio"
+msgstr ""
+
+msgctxt "#33186"
+msgid "Vignette Non-Linear Stretch"
+msgstr ""
+
+msgctxt "#33198"
+msgid "Boost Background Processing through Multi-Threading. [Disabled Default]\nDisable if you experience system instability."
+msgstr ""
+
+msgctxt "#33201"
+msgid "How long to wait for JSONRPC response in seconds [-1 Disabled Default]\nPervent system hangs while waiting for a lengthy response."
+msgstr ""
+
+msgctxt "#33202"
+msgid "Minimum Debugging Level [LOGERROR - Default]\nIf submit is [COLOR=dimgray][B]dim[/B][/COLOR] no debugging information logged, change to [B]LOGDEBUG[/B] and reproduce error."
+msgstr ""
+
+msgctxt "#33209"
+msgid "Select Channel Bug Transparency. [25% = More Transparent, 50% = Less Transparent]"
+msgstr ""
+
+msgctxt "#33211"
+msgid "Include repeating content when interleave for a round-robin of content *see wiki for details [True Default]"
+msgstr ""
+
+msgctxt "#33212"
+msgid "Notifications During Playback"
+msgstr ""
+
+msgctxt "#33213"
+msgid "This Instance of PseudoTV only runs as a client, with no channels configured locally."
+msgstr ""
+
+msgctxt "#33214"
+msgid "Force Channel rebuilding when Playlist changes are detected"
+msgstr ""
+
+msgctxt "#33215"
+msgid "Interleave individual paths in sets of x *see wiki for details [0 Disabled]"
+msgstr ""
+
+msgctxt "#33219"
+msgid "[COLOR=red][B]Warning!! [/B][/COLOR]PseudoTV is not responsible for excessive API usage or any charges incurred from A.I. services.\nUsers are advised to configure their platforms carefully to manage usage."
+msgstr ""
+
+msgctxt "#33220"
+msgid "Change the default A.I. generative prompt use {name} and {group} along with details on the type of logo to generate."
+msgstr ""
+
+msgctxt "#33222"
+msgid "How long to wait in seconds before PseudoTV attempts to correct failed playback. [90 Default]"
+msgstr ""
+
+msgctxt "#33224"
+msgid "How many sub-folders to recursively search, 0 == Root Folder Only. [0 Default]\nIncrease based on your media folder hierarchy."
+msgstr ""
+
+msgctxt "#33225"
+msgid "Enable parsing additional media details, Enabling will impact channel building performance. [False Default]"
+msgstr ""
+
+msgctxt "#33226"
+msgid "Enable Smart Shuffling\nChanges may propagate slowly over time and may not be instantaneous. [False Default] *see wiki for details"
+msgstr ""
+
+msgctxt "#33227"
+msgid "System Memory limit by percentage cache can utilize."
+msgstr ""
+
+msgctxt "#33228"
+msgid "Pause Channel when not viewing (Experimental)"
+msgstr ""
+
+msgctxt "#33229"
+msgid "Change the onscreen On Next position. [Auto Default]"
+msgstr ""
+
+msgctxt "#33230"
+msgid "Force TV in Episode order, Movies in Year order\nBased on available content provided by your channel configuration and supersedes SmartPlaylist rules"
+msgstr ""
+
+msgctxt "#33231"
+msgid "Random sort & shuffle channel content."
+msgstr ""
+
+msgctxt "#33232"
+msgid "Change sorting methods like episode order, random order."
+msgstr ""
+
+msgctxt "#33259"
+msgid "Rebuild channel after change?"
+msgstr ""
+
+
+msgctxt "#33308"
+msgid "Install Log Uploader."
+msgstr ""
+
+msgctxt "#33309"
+msgid "Submit debugging log for review to http://paste.kodi.tv."
+msgstr ""
+
+msgctxt "#33310"
+msgid "Open Settings"
+msgstr ""
+
+msgctxt "#33311"
+msgid "Periodically populate channels based on your top 25 Kodi content by category.\nDisable to enable Channel Manager."
+msgstr ""
+
+# Master-fork HDD-quiet tunables (forward-ported on madteevee-on-nightly).
+# Re-apply from .bak after upstream addon updates.
+
+msgctxt "#30900"
+msgid "Decouple from Kodi PVR settings"
+msgstr ""
+
+msgctxt "#30901"
+msgid "Streamdetails cache (days)"
+msgstr ""
+
+msgctxt "#30902"
+msgid "Library walk interval (hours)"
+msgstr ""
+
+msgctxt "#30903"
+msgid "Skip PVR recordings scan"
+msgstr ""
+
+msgctxt "#30904"
+msgid "Skip PVR searches scan"
+msgstr ""
+
+msgctxt "#30905"
+msgid "Skip music library scan"
+msgstr ""
+
+msgctxt "#30906"
+msgid "Skip TV library aggregation"
+msgstr ""
+
+msgctxt "#30907"
+msgid "Skip movie library aggregation"
+msgstr ""
+
+msgctxt "#30908"
+msgid "Skip smartplaylist discovery"
+msgstr ""
+
+msgctxt "#33900"
+msgid "When enabled, pseudotv's Min Days, Max Days and OSD Timer stop auto-syncing from Kodi's PVR settings every hour. Required to set Max Days higher than Kodi's epg.futuredaystodisplay. NOTE: After changing Max Days, restart Kodi for downstream caches to pick up the new value."
+msgstr ""
+
+msgctxt "#33901"
+msgid "How long pseudotv keeps cached file streamdetails before re-querying Kodi. Longer = fewer HDD spinups but staler data after re-encodes in place. Default 30. Cache is keyed per file by path; file moves automatically invalidate."
+msgstr ""
+
+msgctxt "#33902"
+msgid "How often pseudotv refreshes its cache of TV/movie/music library types. Channel building still responds to event triggers immediately. Default 12. Increase to reduce HDD activity for libraries that don't change often; decrease if you autotune frequently."
+msgstr ""
+
+msgctxt "#33903"
+msgid "Skip the pvr://recordings/tv/active/ enumeration. Useful if you don't record from PVR. The recordings autotune source will be empty until disabled."
+msgstr ""
+
+msgctxt "#33904"
+msgid "Skip the pvr://search/tv/savedsearches/ enumeration. Useful if you don't use PVR saved searches. The searches autotune source will be empty until disabled."
+msgstr ""
+
+msgctxt "#33905"
+msgid "Skip the AudioLibrary.GetGenres scan. Useful if you don't use audio for pseudotv channels. Music Genres autotune list will be empty until disabled."
+msgstr ""
+
+msgctxt "#33906"
+msgid "Skip the VideoLibrary.GetTVShows scan (the heaviest single scanner). Useful if you don't autotune TV channels. TV Networks / TV Shows / TV Genres autotune lists will be empty until disabled."
+msgstr ""
+
+msgctxt "#33907"
+msgid "Skip the VideoLibrary.GetMovies scan. Useful if you don't autotune movie channels. Movie Genres / Movie Studios autotune lists will be empty until disabled."
+msgstr ""
+
+msgctxt "#33908"
+msgid "Skip the special://profile/playlists/{video,mixed,music}/ enumeration used by the autotune wizard. Does NOT affect channel building (your XSP-backed channels still resolve via Files.GetDirectory at build time). Playlists autotune list will be empty until disabled."
+msgstr ""
+
+# --- madteevee imports fork: live imports settings ---
+
+msgctxt "#33910"
+msgid "Live imports"
+msgstr ""
+
+msgctxt "#33911"
+msgid "Cache imported channel logos"
+msgstr ""
+
+msgctxt "#33912"
+msgid "Download channel logos from M3U tvg-logo URLs into cache/logos/ and rewrite the M3U to point at the local files. Avoids re-fetching logos from upstream on every Kodi PVR refresh."
+msgstr ""
+
+msgctxt "#33913"
+msgid "Logo refresh policy"
+msgstr ""
+
+msgctxt "#33914"
+msgid "Choose how often cached logos are re-downloaded. 'If missing' is fastest and lowest bandwidth; 'Conditional GET' catches upstream updates with one round-trip per channel per cycle; 'Refetch every cycle' is wasteful for ~100 channels."
+msgstr ""
+
+msgctxt "#33915"
+msgid "Fetch if missing"
+msgstr ""
+
+msgctxt "#33916"
+msgid "Conditional GET (ETag / Last-Modified)"
+msgstr ""
+
+msgctxt "#33917"
+msgid "Refetch every cycle"
+msgstr ""
+
+msgctxt "#33920"
+msgid "Trigger PVR scan after first sync"
+msgstr ""
+
+msgctxt "#33921"
+msgid "Once per Kodi session, after the first imports cycle finishes, probe IPTV Simple's readiness and send a single PVR.Scan JSON-RPC. Cuts ~30-50s off the time from Kodi start to EPG visible. Disable if it interferes with your PVR Manager startup."
+msgstr ""
+
+msgctxt "#33922"
+msgid "Show library walk toast"
+msgstr ""
+
+msgctxt "#33923"
+msgid "Show a persistent progress indicator while the library walk runs (the autotune-types scan that triggers channel rebuilds). The walk takes 1-10 minutes after a Kodi restart; without this indicator the operator may think the system is frozen. Disable to keep the walk silent."
+msgstr ""

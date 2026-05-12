@@ -1,0 +1,1498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ addon_name }} | Live Imports</title>
+    <style>
+        :root {
+            --pstv-bg-dark: #002b4d; --pstv-bg-light: #005a92; --pstv-accent: #ffffff;
+            --pstv-input-bg: #1a4a70; --pstv-border: rgba(255, 255, 255, 0.3);
+            --pstv-focus: #5dade2; --pstv-dim: rgba(255, 255, 255, 0.4);
+            --pstv-card-bg: rgba(0, 0, 0, 0.35);
+            --pstv-ok: #6fcf6f; --pstv-warn: #ffb84d; --pstv-err: #ff6b6b;
+        }
+        * { box-sizing: border-box; }
+        body {
+            background: radial-gradient(circle, var(--pstv-bg-light) 0%, var(--pstv-bg-dark) 100%);
+            background-attachment: fixed; color: var(--pstv-accent);
+            font-family: 'Segoe UI', sans-serif; margin: 0;
+            display: flex; flex-direction: column; align-items: center;
+        }
+        h1 { margin: 18px 0 8px; font-size: 1.5rem; }
+        h2 { margin: 0 0 12px; font-size: 1.1rem; color: var(--pstv-focus); }
+        .container {
+            width: 95%; max-width: 1100px; background: var(--pstv-card-bg);
+            backdrop-filter: blur(12px); padding: 20px; border-radius: 12px;
+            border: 1px solid var(--pstv-border); margin-bottom: 24px;
+        }
+        .header { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; }
+        .header .actions { margin-left: auto; }
+        button, .btn {
+            background: var(--pstv-input-bg); color: var(--pstv-accent);
+            border: 1px solid var(--pstv-border); border-radius: 6px;
+            padding: 8px 14px; font-size: 0.85rem; cursor: pointer;
+            font-family: inherit;
+        }
+        button:hover, .btn:hover { background: var(--pstv-bg-light); border-color: var(--pstv-focus); }
+        button.primary { background: var(--pstv-focus); color: #002b4d; border-color: var(--pstv-focus); font-weight: bold; }
+        button.danger  { background: var(--pstv-err);   color: #fff; border-color: var(--pstv-err); }
+        button.save-toggles { background: var(--pstv-bg); color: var(--pstv-dim); border-color: var(--pstv-border); }
+        button.save-toggles.has-pending { background: var(--pstv-focus); color: #000; border-color: var(--pstv-focus); font-weight: bold; }
+        button.save-toggles:disabled { opacity: 0.5; cursor: default; }
+        button.subtle  { background: transparent; }
+
+        .import-row {
+            background: rgba(0,0,0,0.25); border: 1px solid var(--pstv-border);
+            border-radius: 8px; padding: 14px; margin-bottom: 12px;
+            display: grid; grid-template-columns: 1fr auto; gap: 14px;
+        }
+        .import-row .meta { line-height: 1.5; }
+        .import-row .meta .name { font-size: 1.05rem; font-weight: bold; }
+        .import-row .meta .id { color: var(--pstv-dim); font-size: 0.8rem; font-family: monospace; }
+        .import-row .meta .src { color: var(--pstv-dim); font-size: 0.85rem; word-break: break-all; }
+        .import-row .meta .status { font-size: 0.85rem; margin-top: 6px; }
+        .status .ok   { color: var(--pstv-ok); }
+        .status .warn { color: var(--pstv-warn); }
+        .status .err  { color: var(--pstv-err); }
+        .import-row .controls { display: flex; flex-direction: column; gap: 6px; min-width: 110px; }
+        .import-row.disabled { opacity: 0.55; }
+        .import-row .channels-toggle { color: var(--pstv-focus); cursor: pointer; user-select: none; margin-top: 8px; font-size: 0.85rem; }
+        .channels-list {
+            display: none; margin-top: 10px; padding-top: 10px;
+            border-top: 1px dashed var(--pstv-border);
+            max-height: 360px; overflow-y: auto;
+        }
+        .channels-list.open { display: block; }
+        .channel-row {
+            display: flex; align-items: center; gap: 6px;
+            padding: 3px 6px; font-size: 0.85rem;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .channel-row .num { flex: 0 0 70px; }
+        .channel-row .name {
+            flex: 0 1 auto;
+            max-width: 320px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .channel-row .marker { flex: 0 0 auto; }
+        .channel-row label { flex: 0 0 auto; padding-left: 0; margin-left: 4px; }
+        .channel-row.disabled { opacity: 0.45; }
+        .channel-row .num input {
+            width: 56px; padding: 2px 4px; font-family: monospace;
+            text-align: right; background: var(--pstv-input-bg);
+            color: var(--pstv-focus); border: 1px solid var(--pstv-border);
+            border-radius: 3px; font-size: 0.85rem;
+        }
+        .channel-row .num input:focus, .channel-row .name input:focus { outline: 1px solid var(--pstv-focus); }
+        .channel-row .num input.saving, .channel-row .name input.saving { opacity: 0.5; }
+        .channel-row .num input.error,  .channel-row .name input.error  { border-color: var(--pstv-err); background: rgba(255,107,107,0.1); }
+        .channel-row .name input {
+            width: 100%; padding: 2px 6px;
+            background: transparent;
+            color: var(--pstv-accent); border: 1px solid transparent;
+            border-radius: 3px; font-size: 0.85rem; font-family: inherit;
+        }
+        .channel-row .name input:hover { border-color: var(--pstv-border); background: var(--pstv-input-bg); }
+        .channel-row .name input:focus { background: var(--pstv-input-bg); }
+        .channel-row .badge { font-size: 0.7rem; padding: 2px 6px; border-radius: 3px; background: var(--pstv-warn); color: #002b4d; }
+        .channel-row label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+        .channels-help { color: var(--pstv-dim); font-size: 0.75rem; margin: 6px 0; padding: 4px 6px; }
+
+        .empty {
+            text-align: center; padding: 40px 20px; color: var(--pstv-dim);
+            border: 2px dashed var(--pstv-border); border-radius: 8px;
+        }
+
+        /* Modal form */
+        .modal-overlay {
+            display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65);
+            z-index: 100; align-items: center; justify-content: center;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal {
+            background: linear-gradient(135deg, var(--pstv-bg-dark), var(--pstv-bg-light));
+            border: 1px solid var(--pstv-border); border-radius: 10px;
+            padding: 24px; min-width: 540px; max-width: 90vw; max-height: 90vh; overflow: auto;
+        }
+        .modal h2 { margin-top: 0; }
+        .modal label {
+            display: block; margin: 12px 0 4px; font-size: 0.85rem; color: var(--pstv-dim);
+        }
+        .modal input[type=text], .modal input[type=number], .modal select {
+            width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--pstv-border);
+            background: var(--pstv-input-bg); color: var(--pstv-accent); font-family: inherit;
+        }
+
+        /* Step 6 Phase 11 (madteevee): rules editor */
+        .rule-card { padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+        .rule-card:last-child { border-bottom: none; }
+        .rule-header { display: flex; align-items: center; gap: 12px; }
+        .rule-header h4 { margin: 0; flex: 1; font-size: 0.92rem; color: var(--pstv-focus); }
+        .rule-card .rule-desc { font-size: 0.72rem; opacity: 0.6; margin: 4px 0 8px; }
+        .rule-card .rule-options { display: none; padding: 10px 0 0; }
+        .rule-card.enabled .rule-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .rule-card.enabled { background: rgba(93,173,226,0.08); }
+        .rule-option label { font-size: 0.75rem; margin-bottom: 2px; }
+        .rule-option .rule-opt-desc { font-size: 0.65rem; opacity: 0.55; margin-top: 2px; }
+
+        /* Step 6 Phase 9 (madteevee): pending-channels indicator */
+        .pending-strip { background: rgba(241,196,15,0.16); border: 1px solid #f1c40f; border-radius: 4px; padding: 8px 10px; margin: 6px 0; font-size: 0.78rem; }
+        .pending-strip .pending-row { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
+        .pending-strip .pending-row button { padding: 1px 6px; }
+        .modal .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .modal .checkboxes { display: flex; gap: 16px; margin-top: 12px; }
+        .modal .checkboxes label { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--pstv-accent); }
+        .modal .actions { display: flex; gap: 10px; margin-top: 20px; justify-content: flex-end; }
+        .modal .help { font-size: 0.75rem; color: var(--pstv-dim); margin-top: 4px; }
+        .modal .source-group { border: 1px solid var(--pstv-border); padding: 12px; border-radius: 6px; margin-top: 8px; }
+        .modal .source-group legend { padding: 0 8px; color: var(--pstv-focus); }
+
+        .toast {
+            position: fixed; top: 20px; right: 20px; padding: 12px 18px;
+            background: var(--pstv-card-bg); border: 1px solid var(--pstv-border);
+            border-radius: 6px; max-width: 320px;
+            backdrop-filter: blur(12px); transition: opacity 0.3s;
+        }
+        .toast.ok  { border-color: var(--pstv-ok); }
+        .toast.err { border-color: var(--pstv-err); }
+    </style>
+</head>
+<body>
+    <h1>{{ addon_name }} — Channels &amp; Live Imports</h1>
+
+    <!-- PseudoTV-built (operator-curated) channels -->
+    <div class="container">
+        <div class="header">
+            <h2 style="margin:0;">PseudoTV channels</h2>
+            <div class="actions">
+                <button class="primary" id="add-pseudo-btn">+ Add PseudoTV channel</button>
+                <button id="rebuild-all-pseudo-btn" title="Mark every PseudoTV channel as changed and trigger a full Builder rebuild. Regenerates programme schedules from each channel's source path.">🔨 Rebuild all</button>
+                <!-- data-id="PseudoTV_Live" matches the @-suffix on PseudoTV-Custom
+                     channel ids (e.g. 36...@PseudoTV_Live), so the existing
+                     `_importIdFromCid` filter routes pending toggles/numbers
+                     for these rows through the same Save batch the per-import
+                     Save buttons use. -->
+                <button data-action="save-toggles" data-id="PseudoTV_Live" class="save-toggles" title="Apply pending enable/disable + number changes for PseudoTV channels" disabled>Save</button>
+            </div>
+        </div>
+        <div id="pseudo-list">
+            <div class="empty">Loading…</div>
+        </div>
+    </div>
+
+    <!-- Live imports (M3U/XMLTV from external sources) -->
+    <div class="container">
+        <div class="header">
+            <h2 style="margin:0;">Live imports</h2>
+            <div class="actions">
+                <button class="primary" id="add-btn">+ Add import</button>
+                <button id="refresh-all-btn" title="Trigger immediate sync of all imports">↻ Refresh all</button>
+                <button id="cleanup-stranded-btn" title="Purge channel records whose import_source no longer matches any registered import. Happens when you delete an import but its channels stay behind.">🧹 Cleanup stranded</button>
+                <button id="pvr-refresh-btn" title="Nudges IPTV Simple to re-read M3U+XML and fires PVR.Scan. Non-destructive; existing EPG entries survive.">↻ Refresh EPG</button>
+                <button class="danger" id="pvr-hard-reset-btn" title="DESTRUCTIVE: wipes Kodi's entire EPG database (all PVR clients). Live EPG goes dark until Kodi re-pulls (~30s+).">⚠ Hard reset EPG DB</button>
+            </div>
+        </div>
+        <div id="imports-list">
+            <div class="empty">Loading…</div>
+        </div>
+    </div>
+
+    <!-- Edit/Add modal -->
+    <div class="modal-overlay" id="modal-overlay">
+        <div class="modal">
+            <h2 id="modal-title">Add import</h2>
+            <input type="hidden" id="f-orig-id" />
+            <label>Identifier <span class="help">(unique slug, e.g. <code>movistarplus</code>; lowercase a-z/0-9/_- only)</span></label>
+            <input type="text" id="f-id" placeholder="movistarplus" />
+
+            <label>Display name</label>
+            <input type="text" id="f-name" placeholder="MovistarPlus" />
+
+            <fieldset class="source-group">
+                <legend>M3U source</legend>
+                <label>Local file path <span class="help">(<code>special://...</code> or absolute path)</span></label>
+                <input type="text" id="f-m3u-path" placeholder="special://userdata/addon_data/plugin.video.foo/channels.m3u8" />
+                <label>OR remote URL</label>
+                <input type="text" id="f-m3u-url" placeholder="https://example.com/playlist.m3u" />
+                <p class="help">Leave both blank for an EPG-only import (matches existing channels by epg_id).</p>
+            </fieldset>
+
+            <fieldset class="source-group">
+                <legend>EPG source (optional)</legend>
+                <label>Local file path</label>
+                <input type="text" id="f-epg-path" placeholder="" />
+                <label>OR remote URL <span class="help">(<code>.xml</code> or <code>.xml.gz</code> auto-detected)</span></label>
+                <input type="text" id="f-epg-url" placeholder="https://example.com/epg.xml.gz" />
+            </fieldset>
+
+            <div class="row">
+                <div>
+                    <label>Start channel number</label>
+                    <input type="number" id="f-start-num" value="800" min="1" max="9999" />
+                    <p class="help">First number for new channels from this source.</p>
+                </div>
+                <div>
+                    <label>Refresh interval (minutes)</label>
+                    <input type="number" id="f-refresh" value="60" min="1" max="1440" />
+                    <p class="help">5 for local files; 60 for remote URLs.</p>
+                </div>
+            </div>
+
+            <div class="checkboxes">
+                <label><input type="checkbox" id="f-respect" /> Respect source channel numbers</label>
+                <label><input type="checkbox" id="f-rediscover" /> Re-discover deleted channels</label>
+                <label><input type="checkbox" id="f-enabled" checked /> Enabled</label>
+            </div>
+
+            <div class="actions">
+                <button class="subtle" id="cancel-btn">Cancel</button>
+                <button class="primary" id="save-btn">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add PseudoTV channel modal -->
+    <div class="modal-overlay" id="pseudo-modal-overlay">
+        <div class="modal">
+            <h2>Add PseudoTV channel</h2>
+            <p class="help">Creates a new operator-curated channel. Builder will populate its programme schedule from the source path on the next build cycle (~5–15s).</p>
+
+            <label>Display name <span class="help">(shown in PVR Guide)</span></label>
+            <input type="text" id="pf-name" placeholder="My Movies Channel" />
+
+            <label>Channel number <span class="help">(if taken, the existing channel is bumped to next free slot)</span></label>
+            <input type="number" id="pf-number" min="1" max="9999" value="600" />
+
+            <label>Source path <span class="help">required</span></label>
+            <input type="text" id="pf-path" placeholder="special://profile/playlists/video/MyShow.xsp" />
+            <p class="help">
+                Examples:<br>
+                • <code>special://profile/playlists/video/Action.xsp</code> (Kodi smart playlist)<br>
+                • <code>plugin://plugin.video.youtube/channel/UCxxxxx/</code> (plugin URL)<br>
+                • <code>library://video/movies/genres/Comedy/</code> (Kodi library node)<br>
+                • <code>{Seasonal}</code> (PseudoTV's seasonal/holiday rotator)
+            </p>
+
+            <div class="actions">
+                <button class="subtle" id="pseudo-cancel-btn">Cancel</button>
+                <button class="primary" id="pseudo-save-btn">Stage</button>
+            </div>
+            <p class="help" style="margin-top:8px;opacity:0.65;font-size:0.7rem;">Step 6 Phase 9 (madteevee): adds are now staged. Click <b>Save</b> under the channels list (or any import's Save) to commit all pending entries in one batch — single Builder run for all.</p>
+        </div>
+    </div>
+
+    <!-- Step 6 Phase 10 (madteevee): per-channel field editor modal — Custom channels only -->
+    <div class="modal-overlay" id="chfields-modal-overlay">
+        <div class="modal" style="max-width:600px;">
+            <h2 id="chfields-modal-title">Edit channel</h2>
+            <p class="help">Stages edits locally. Click <b>Stage</b> then commit via the channels-list <b>Save</b>.</p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                <div><label>Name</label><input type="text" id="cf-name"></div>
+                <div><label>Number</label><input type="number" id="cf-number" min="1" max="9999"></div>
+                <div><label>Group <span class="help">(pipe-separated)</span></label><input type="text" id="cf-group"></div>
+                <div><label>Logo URL</label><input type="text" id="cf-logo"></div>
+                <div style="grid-column:span 2;"><label>Source path</label><input type="text" id="cf-path"></div>
+                <div><label>Catchup mode</label><select id="cf-catchup">
+                    <option value="">(none)</option>
+                    <option value="default">default</option>
+                    <option value="vod">vod</option>
+                    <option value="timeshift">timeshift</option>
+                </select></div>
+                <div style="display:flex;align-items:center;gap:14px;padding-top:18px;">
+                    <label><input type="checkbox" id="cf-radio"> radio</label>
+                    <label><input type="checkbox" id="cf-favorite"> favorite</label>
+                    <label><input type="checkbox" id="cf-enabled"> enabled</label>
+                </div>
+            </div>
+            <div class="actions">
+                <button class="subtle" id="cf-cancel-btn">Cancel</button>
+                <button class="primary" id="cf-save-btn">Stage</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Step 6 Phase 11 (madteevee): per-channel rules editor modal — Custom channels only -->
+    <div class="modal-overlay" id="rules-modal-overlay">
+        <div class="modal" style="max-width:780px;">
+            <h2 id="rules-modal-title">Channel rules</h2>
+            <p class="help">Each rule is independent. Toggle to enable (writes channel-scoped values); leave disabled to use channel defaults. Stages locally — commit via the channels-list <b>Save</b>.</p>
+            <div id="rules-list" style="max-height:60vh;overflow-y:auto;border:1px solid var(--pstv-border);border-radius:4px;background:rgba(0,0,0,0.2);"></div>
+            <div class="actions">
+                <button class="subtle" id="rules-cancel-btn">Cancel</button>
+                <button class="primary" id="rules-save-btn">Stage</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast-area"></div>
+
+<script>
+const UUID = "{{ uuid }}";
+// Use the host the browser actually loaded the page from — so http://<kodi-hostname>:50002/...,
+// http://<kodi-lan-ip>:50002/..., or any other reachable hostname all work without
+// CORS issues. The template's `{{ remote_host }}` is kept as a fallback for the
+// (unlikely) case where window.location.host is empty (file:// origin etc.).
+const REMOTE_HOST = window.location.host || "{{ remote_host }}";
+let CURRENT = { imports: [] };
+let EDITING_INDEX = -1;  // -1 = adding new
+
+function $(id) { return document.getElementById(id); }
+function toast(msg, kind) {
+    const div = document.createElement('div');
+    div.className = 'toast ' + (kind || '');
+    div.textContent = msg;
+    $('toast-area').appendChild(div);
+    setTimeout(() => { div.style.opacity = '0'; setTimeout(() => div.remove(), 300); }, 2800);
+}
+function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function fmtAge(epoch) {
+    if (!epoch) return 'never';
+    const secs = Math.floor((Date.now()/1000) - epoch);
+    if (secs < 60)        return secs + 's ago';
+    if (secs < 3600)      return Math.floor(secs/60) + 'm ago';
+    if (secs < 86400)     return Math.floor(secs/3600) + 'h ago';
+    return Math.floor(secs/86400) + 'd ago';
+}
+function statusBadge(imp) {
+    const st = imp.last_status || 'never';
+    const cls = ({'ok':'ok','unchanged':'ok','disabled':'warn','warning':'warn','failed':'err'})[st] || '';
+    const err = imp.last_error ? ` — ${escapeHtml(imp.last_error)}` : '';
+    return `<span class="${cls}">${escapeHtml(st)}${err}</span>`;
+}
+function renderRow(imp, idx) {
+    const m3uSrc = imp.m3u_url || imp.m3u_path || '<em>(no M3U — EPG-only)</em>';
+    const epgSrc = imp.epg_url || imp.epg_path || '<em>(no EPG)</em>';
+    const myChannels = (CURRENT.channels || []).filter(c => c.import_source === imp.id);
+    const orphCount = myChannels.filter(c => c.is_orphan).length;
+    return `
+        <div class="import-row ${imp.enabled === false ? 'disabled' : ''}">
+            <div class="meta">
+                <div class="name">${escapeHtml(imp.name || imp.id)}</div>
+                <div class="id">${escapeHtml(imp.id)}</div>
+                <div class="src"><b>M3U:</b> ${escapeHtml(m3uSrc)}</div>
+                <div class="src"><b>EPG:</b> ${escapeHtml(epgSrc)}</div>
+                <div class="status">
+                    <b>start_num:</b> ${imp.start_num || 1} ·
+                    <b>respect_src:</b> ${imp.respect_source_numbers ? 'yes' : 'no'} ·
+                    <b>refresh:</b> ${imp.refresh_interval_mins || 60}m ·
+                    <b>last sync:</b> ${fmtAge(imp.last_sync_at)} · ${statusBadge(imp)}
+                </div>
+                <div class="channels-toggle" data-action="togglech" data-id="${escapeHtml(imp.id)}">
+                    <span class="arrow">▸</span> Channels (${myChannels.length}${orphCount ? `, ${orphCount} orphan` : ''}) — click to expand
+                </div>
+                <div class="channels-list" id="channels-${escapeHtml(imp.id)}">
+                    <div class="channels-help">
+                        Edit channel numbers and toggle enable/disable inline. Shift+click an enabled checkbox to set/unset a range. All changes stage locally — click <b>Save</b> (under Delete) to commit. Press Escape to revert a single field to its server-side value.
+                    </div>
+                    ${myChannels.sort((a,b) => {
+            // Enabled before disabled, then by number ASC
+            const ae = a.enabled === false ? 1 : 0;
+            const be = b.enabled === false ? 1 : 0;
+            if (ae !== be) return ae - be;
+            return (a.number||0) - (b.number||0);
+        }).map(c => `
+                        <div class="channel-row ${c.enabled === false ? 'disabled' : ''}">
+                            <div class="num"><input type="number" min="1" max="9999" value="${c.number || ''}" data-action="setnumber" data-cid="${escapeHtml(c.id)}" data-original="${c.number || ''}" /></div>
+                            <div class="name"><input type="text" value="${escapeHtml(c.name || '')}" data-action="setname" data-cid="${escapeHtml(c.id)}" data-original="${escapeHtml(c.name || '')}" placeholder="(unnamed)" /></div>
+                            <label><input type="checkbox" ${c.enabled === false ? '' : 'checked'} data-action="togglech-enable" data-cid="${escapeHtml(c.id)}"> enabled</label>
+                            <div class="marker" style="font-size:0.85rem;color:var(--pstv-dim);" title="${(c.operator_overrides||[]).length ? 'Edited: ' + (c.operator_overrides||[]).join(', ') : ''}">${(c.operator_overrides||[]).length ? '✏️' : ''}</div>
+                            ${c.is_orphan ? '<span class="badge" style="margin-left:4px;">orphan</span>' : ''}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+            <div class="controls">
+                <button data-action="edit" data-idx="${idx}">Edit</button>
+                <button data-action="refresh" data-id="${escapeHtml(imp.id)}">↻ Refresh</button>
+                <button data-action="renumber" data-id="${escapeHtml(imp.id)}" title="Fill gaps from start_num. Hand-pinned channel numbers (✏️ on number column) are PRESERVED.">⟳ Renumber</button>
+                <button data-action="renumber-hard" data-id="${escapeHtml(imp.id)}" class="danger" title="DESTRUCTIVE: also wipes every hand-pinned channel number for this import, then re-allocates from start_num. Use only if you want a true clean slate.">⟳⟳ Reset pins</button>
+                <button data-action="remove-orphans" data-id="${escapeHtml(imp.id)}" title="Delete channels that exist in our cache but are no longer in the source M3U. Tombstones them so they don't reappear on next sync.">🗑 Orphans</button>
+                <button data-action="delete" data-idx="${idx}" class="danger">Delete</button>
+                <button data-action="save-toggles" data-id="${escapeHtml(imp.id)}" class="save-toggles" title="Apply pending enable/disable + number changes for this import" disabled>Save</button>
+            </div>
+        </div>`;
+}
+function renderPseudoChannel(c) {
+    const editHref = `/manager.html#${encodeURIComponent(c.id || '')}`;
+    return `
+        <div class="channel-row ${c.enabled === false ? 'disabled' : ''}">
+            <div class="num"><input type="number" min="1" max="9999" value="${c.number || ''}" data-action="setnumber" data-cid="${escapeHtml(c.id)}" data-original="${c.number || ''}" /></div>
+            <div class="name"><input type="text" value="${escapeHtml(c.name || '')}" data-action="setname" data-cid="${escapeHtml(c.id)}" data-original="${escapeHtml(c.name || '')}" placeholder="(unnamed)" /></div>
+            <label><input type="checkbox" ${c.enabled === false ? '' : 'checked'} data-action="togglech-enable" data-cid="${escapeHtml(c.id)}"> enabled</label>
+            <div class="marker" style="font-size:0.85rem;color:var(--pstv-dim);" title="${(c.operator_overrides||[]).length ? 'Edited: ' + (c.operator_overrides||[]).join(', ') : ''}">${(c.operator_overrides||[]).length ? '✏️' : ''}</div>
+            <button style="padding:2px 8px;font-size:0.75rem;" data-action="edit-pseudo" data-cid="${escapeHtml(c.id)}" title="Edit channel fields (name, group, logo, path, catchup, radio, favorite). Step 6 Phase 10.">✏ Edit</button>
+            <button style="padding:2px 8px;font-size:0.75rem;" data-action="rules-pseudo" data-cid="${escapeHtml(c.id)}" title="Per-channel rules editor (24 rule classes). Step 6 Phase 11.">⚙ Rules</button>
+            <button style="padding:2px 8px;font-size:0.75rem;" data-action="rebuild-pseudo" data-cid="${escapeHtml(c.id)}" title="Mark this channel as changed and trigger a Builder rebuild — regenerates its programme schedule (EPG) from the source path. Use when EPG is missing or out-of-date.">🔨 Rebuild</button>
+            <button class="danger" style="padding:2px 8px;font-size:0.75rem;" data-action="delete-pseudo" data-cid="${escapeHtml(c.id)}">×</button>
+        </div>`;
+}
+function renderPseudo() {
+    const list = $('pseudo-list');
+    const ps = (CURRENT.channels || []).filter(c => c.type !== 'import')
+        .sort((a,b) => (a.number||0) - (b.number||0));
+    // Step 6 Phase 9 (madteevee): render staged-not-yet-committed adds at the top.
+    let pendingHtml = '';
+    if (PENDING_NEW_CHANNELS.length) {
+        const rows = PENDING_NEW_CHANNELS.map((p, i) => `
+            <div class="pending-row">
+                <span style="color:#f1c40f;">⏳</span>
+                <span style="min-width:50px;">#${p.number}</span>
+                <span style="flex:1;">${escapeHtml(p.name)} <span style="opacity:0.5;font-size:0.7rem;">— ${escapeHtml(p.path)}</span></span>
+                <button class="danger" data-action="discard-pending-add" data-idx="${i}" title="Remove this staged add">×</button>
+            </div>`).join('');
+        pendingHtml = `<div class="pending-strip"><b>${PENDING_NEW_CHANNELS.length} pending add${PENDING_NEW_CHANNELS.length===1?'':'s'}</b> — click Save to commit:${rows}</div>`;
+    }
+    if (ps.length === 0 && !PENDING_NEW_CHANNELS.length) {
+        list.innerHTML = '<div class="empty">No PseudoTV channels yet. Click <b>+ Add PseudoTV channel</b>.</div>';
+        return;
+    }
+    list.innerHTML = pendingHtml + ps.map(renderPseudoChannel).join('');
+}
+function render() {
+    renderPseudo();
+    const list = $('imports-list');
+    if (!CURRENT.imports || CURRENT.imports.length === 0) {
+        list.innerHTML = '<div class="empty">No imports yet. Click <b>+ Add import</b> to add one.</div>';
+    } else {
+        list.innerHTML = CURRENT.imports.map(renderRow).join('');
+    }
+    // Reapply any uncommitted toggle state to the freshly-rendered DOM
+    // (operator may have collapsed/expanded the list while staging changes).
+    // Selectors match both imports-list and pseudo-list rows.
+    Object.keys(PENDING_TOGGLES).forEach(cid => {
+        const target = PENDING_TOGGLES[cid];
+        const cb = document.querySelector(`input[data-action="togglech-enable"][data-cid="${cid}"]`);
+        if (cb) {
+            cb.checked = target;
+            const row = cb.closest('.channel-row');
+            if (row) row.classList.toggle('disabled', !target);
+        }
+    });
+    // Reapply staged numbers — input.value shows the staged value, but
+    // dataset.original keeps the true server-side number so Escape reverts.
+    Object.keys(PENDING_NUMBERS).forEach(cid => {
+        const target = PENDING_NUMBERS[cid];
+        const inp = document.querySelector(`input[data-action="setnumber"][data-cid="${cid}"]`);
+        if (inp) inp.value = target;
+    });
+    // Update Save button badges per import + the PseudoTV-channels Save button.
+    if (CURRENT.imports) CURRENT.imports.forEach(imp => _refreshSaveButton(imp.id));
+    _refreshSaveButton('PseudoTV_Live');
+}
+function openModal(idx) {
+    EDITING_INDEX = idx;
+    const imp = idx >= 0 ? CURRENT.imports[idx] : {
+        id: '', name: '', enabled: true,
+        m3u_path: null, m3u_url: null, epg_path: null, epg_url: null,
+        respect_source_numbers: true, start_num: 800, rediscover_deleted: false,
+        refresh_interval_mins: 60,
+    };
+    $('modal-title').textContent = idx >= 0 ? 'Edit import' : 'Add import';
+    $('f-orig-id').value      = imp.id || '';
+    $('f-id').value           = imp.id || '';
+    $('f-id').disabled        = idx >= 0;  // ID is immutable after creation
+    $('f-name').value         = imp.name || '';
+    $('f-m3u-path').value     = imp.m3u_path || '';
+    $('f-m3u-url').value      = imp.m3u_url || '';
+    $('f-epg-path').value     = imp.epg_path || '';
+    $('f-epg-url').value      = imp.epg_url || '';
+    $('f-start-num').value    = imp.start_num || 800;
+    $('f-refresh').value      = imp.refresh_interval_mins || 60;
+    $('f-respect').checked    = !!imp.respect_source_numbers;
+    $('f-rediscover').checked = !!imp.rediscover_deleted;
+    $('f-enabled').checked    = imp.enabled !== false;
+    $('modal-overlay').classList.add('open');
+}
+function closeModal() {
+    $('modal-overlay').classList.remove('open');
+    EDITING_INDEX = -1;
+}
+function gatherForm() {
+    const id = $('f-id').value.trim();
+    if (!id || !/^[a-z0-9_-]+$/i.test(id)) { toast('Invalid identifier (alnum, _ and - only)', 'err'); return null; }
+    const m3u_path = $('f-m3u-path').value.trim() || null;
+    const m3u_url  = $('f-m3u-url').value.trim()  || null;
+    if (m3u_path && m3u_url) { toast('Use either M3U path OR URL, not both', 'err'); return null; }
+    return {
+        id: id, name: $('f-name').value.trim() || id,
+        enabled: $('f-enabled').checked,
+        m3u_path: m3u_path, m3u_url: m3u_url,
+        epg_path: $('f-epg-path').value.trim() || null,
+        epg_url:  $('f-epg-url').value.trim()  || null,
+        respect_source_numbers: $('f-respect').checked,
+        start_num: parseInt($('f-start-num').value, 10) || 800,
+        rediscover_deleted: $('f-rediscover').checked,
+        refresh_interval_mins: parseInt($('f-refresh').value, 10) || 60,
+        tombstones: (EDITING_INDEX >= 0 ? (CURRENT.imports[EDITING_INDEX].tombstones || []) : []),
+        // Carry over runtime state if editing
+        last_sync_at:      EDITING_INDEX >= 0 ? CURRENT.imports[EDITING_INDEX].last_sync_at      : null,
+        last_status:       EDITING_INDEX >= 0 ? CURRENT.imports[EDITING_INDEX].last_status       : null,
+        last_error:        EDITING_INDEX >= 0 ? CURRENT.imports[EDITING_INDEX].last_error        : null,
+        etag:              EDITING_INDEX >= 0 ? CURRENT.imports[EDITING_INDEX].etag              : null,
+        last_modified:     EDITING_INDEX >= 0 ? CURRENT.imports[EDITING_INDEX].last_modified     : null,
+        epg_etag:          EDITING_INDEX >= 0 ? CURRENT.imports[EDITING_INDEX].epg_etag          : null,
+        epg_last_modified: EDITING_INDEX >= 0 ? CURRENT.imports[EDITING_INDEX].epg_last_modified : null,
+    };
+}
+async function save() {
+    const item = gatherForm();
+    if (!item) return;
+    const list = CURRENT.imports.slice();
+    if (EDITING_INDEX >= 0) list[EDITING_INDEX] = item;
+    else                    list.push(item);
+    await postImports(list);
+}
+async function postImports(list) {
+    try {
+        const res = await fetch(`http://${REMOTE_HOST}/imports.json`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({uuid: UUID, payload: list, name: '{{ addon_name }}'}),
+        });
+        if (!res.ok) {
+            const t = await res.text();
+            toast('Save failed: ' + (t || res.status), 'err'); return;
+        }
+        CURRENT.imports = list;
+        render();
+        closeModal();
+        toast('Saved', 'ok');
+    } catch (e) {
+        toast('Network error: ' + e.message, 'err');
+    }
+}
+async function refreshOne(id) {
+    try {
+        const res = await fetch(`http://${REMOTE_HOST}/imports/refresh.json`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({uuid: UUID, id: id || ''}),
+        });
+        if (!res.ok) { toast('Refresh failed: HTTP ' + res.status, 'err'); return; }
+        toast('Refresh queued: ' + (id || 'all'), 'ok');
+        setTimeout(loadImports, 6000);
+    } catch (e) {
+        toast('Network error: ' + e.message, 'err');
+    }
+}
+async function renumberOne(id, resetPins) {
+    // Count current hand-pins for this import so the prompt can warn loudly
+    // before the destructive variant nukes them.
+    const handPinned = (CURRENT.channels || []).filter(c =>
+        c.import_source === id && (c.operator_overrides || []).includes('number')
+    ).length;
+    let prompt;
+    if (resetPins) {
+        prompt = `RESET PINS for "${id}"?\n\n` +
+                 `This will WIPE ${handPinned} hand-pinned channel number${handPinned === 1 ? '' : 's'} ` +
+                 `and re-allocate everything from start_num using source tvg-chno.\n\n` +
+                 `You'll lose every manual #-edit. Use "⟳ Renumber" instead if you just ` +
+                 `want gaps removed while keeping your order.\n\n` +
+                 `Continue?`;
+    } else {
+        prompt = `Renumber "${id}"?\n\n` +
+                 `Compacts channels sequentially from start_num. Keeps your relative ` +
+                 `order (pinned + unpinned together), removes all gaps within this ` +
+                 `import. Slots claimed by other imports are skipped over.\n\n` +
+                 `Channels stay pinned at their new compact positions.`;
+    }
+    if (!confirm(prompt)) return;
+    try {
+        const res = await fetch(`http://${REMOTE_HOST}/imports/renumber.json`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({uuid: UUID, id: id, reset_pins: !!resetPins}),
+        });
+        if (!res.ok) { toast('Renumber failed: HTTP ' + res.status, 'err'); return; }
+        const r = await res.json();
+        const msg = resetPins
+            ? `Reset pins: cleared ${r.cleared||0}, cascaded ${r.cascaded||0}, wiped ${r.pins_cleared||0} pin${r.pins_cleared===1?'':'s'}`
+            : `Renumber: cleared ${r.cleared||0}, cascaded ${r.cascaded||0}`;
+        toast(msg, 'ok');
+        setTimeout(loadImports, 2000);
+    } catch (e) {
+        toast('Network error: ' + e.message, 'err');
+    }
+}
+async function removeOrphans(id) {
+    const orphanCount = (CURRENT.channels || []).filter(c =>
+        c.import_source === id && c.is_orphan === true
+    ).length;
+    if (orphanCount === 0) { toast(`No orphans in "${id}".`, 'ok'); return; }
+    if (!confirm(
+        `Remove ${orphanCount} orphan channel${orphanCount === 1 ? '' : 's'} from "${id}"?\n\n` +
+        `Orphans are channels in our cache that no longer exist in the source M3U. ` +
+        `They'll be deleted AND tombstoned so they don't reappear on the next sync.\n\n` +
+        `Use this when you've removed channels at the source (e.g. epg.best dashboard) ` +
+        `and want them gone from your guide too.`
+    )) return;
+    try {
+        const res = await fetch(`http://${REMOTE_HOST}/imports/orphans/remove.json`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({uuid: UUID, id: id}),
+        });
+        if (!res.ok) { toast('Remove orphans failed: HTTP ' + res.status, 'err'); return; }
+        const r = await res.json();
+        toast(`Removed ${r.removed || 0} orphan${(r.removed||0) === 1 ? '' : 's'} from "${id}"`, 'ok');
+        setTimeout(loadImports, 2000);
+    } catch (e) {
+        toast('Network error: ' + e.message, 'err');
+    }
+}
+async function toggleChannelEnabled(channelId, newEnabled, deferKick) {
+    try {
+        const body = {uuid: UUID, channel_id: channelId, fields: {enabled: newEnabled}};
+        if (deferKick) body.defer_kick = true;
+        const res = await fetch(`http://${REMOTE_HOST}/imports/channel/edit.json`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body),
+        });
+        if (!res.ok) { toast('Toggle failed: HTTP ' + res.status, 'err'); return false; }
+        const r = await res.json();
+        if (r.cascaded > 0) {
+            toast(`${newEnabled ? 'Enabled' : 'Disabled'} — ${r.cascaded} sibling channel(s) shifted to fill gap`, 'ok');
+        }
+        return true;
+    } catch (e) {
+        toast('Network error: ' + e.message, 'err');
+        return false;
+    }
+}
+async function setChannelNumber(channelId, newNumber) {
+    try {
+        const res = await fetch(`http://${REMOTE_HOST}/imports/channel/edit.json`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({uuid: UUID, channel_id: channelId, fields: {number: newNumber}}),
+        });
+        if (!res.ok) {
+            const t = await res.text();
+            const msg = (t.match(/<p>Message: ([^<]+)/) || [,'HTTP '+res.status])[1];
+            return {ok: false, error: msg};
+        }
+        return {ok: true};
+    } catch (e) {
+        return {ok: false, error: e.message};
+    }
+}
+async function setChannelName(channelId, newName) {
+    try {
+        const res = await fetch(`http://${REMOTE_HOST}/imports/channel/edit.json`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({uuid: UUID, channel_id: channelId, fields: {name: newName}}),
+        });
+        if (!res.ok) {
+            const t = await res.text();
+            const msg = (t.match(/<p>Message: ([^<]+)/) || [,'HTTP '+res.status])[1];
+            return {ok: false, error: msg};
+        }
+        return {ok: true};
+    } catch (e) {
+        return {ok: false, error: e.message};
+    }
+}
+async function loadImports() {
+    // Preserve expanded-channel-list state across reload
+    const openIds = new Set();
+    document.querySelectorAll('.channels-list.open').forEach(el => {
+        const id = el.id.replace(/^channels-/, '');
+        if (id) openIds.add(id);
+    });
+    try {
+        const res = await fetch(`http://${REMOTE_HOST}/imports.json?_=${Date.now()}`);
+        const data = await res.json();
+        CURRENT = data;
+        render();
+        // Re-expand previously-open lists
+        openIds.forEach(id => {
+            const list = document.getElementById('channels-' + id);
+            if (list) list.classList.add('open');
+            const tog = document.querySelector(`[data-action="togglech"][data-id="${id}"]`);
+            if (tog) {
+                const arrow = tog.querySelector('.arrow');
+                if (arrow) arrow.textContent = '▾';
+            }
+        });
+    } catch (e) {
+        $('imports-list').innerHTML = `<div class="empty">Failed to load imports: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+// PseudoTV-channel modal helpers
+function openPseudoModal() {
+    $('pf-name').value = '';
+    $('pf-number').value = nextSuggestedNumber();
+    $('pf-path').value = '';
+    $('pseudo-modal-overlay').classList.add('open');
+}
+function closePseudoModal() { $('pseudo-modal-overlay').classList.remove('open'); }
+function nextSuggestedNumber() {
+    const usedNums = new Set((CURRENT.channels || []).map(c => c.number).filter(n => typeof n === 'number'));
+    // First free starting at 600 (default for operator-curated)
+    let n = 600;
+    while (usedNums.has(n)) n++;
+    return n;
+}
+// Step 6 Phase 9 (madteevee): adds are staged to PENDING_NEW_CHANNELS and
+// flushed in one batch by the unified Save button (defer_kick=true on each
+// add except the last → single Builder run).
+async function addPseudoChannel() {
+    const name   = $('pf-name').value.trim();
+    const number = parseInt($('pf-number').value, 10);
+    const path   = $('pf-path').value.trim();
+    if (!name)         { toast('Name required', 'err'); return; }
+    if (!path)         { toast('Source path required', 'err'); return; }
+    if (isNaN(number)) { toast('Number must be int', 'err'); return; }
+    // Guard against staging duplicate numbers within the same batch.
+    if (PENDING_NEW_CHANNELS.some(p => p.number === number)) {
+        toast(`Already staged a channel at #${number}`, 'err'); return;
+    }
+    PENDING_NEW_CHANNELS.push({name, number, path});
+    toast(`Staged "${name}" at #${number} — click Save to commit`, 'ok');
+    closePseudoModal();
+    renderPseudo();
+    _refreshSaveButton('PseudoTV_Live');
+}
+async function rebuildPseudoChannel(cid) {
+    const c = (CURRENT.channels || []).find(x => x.id === cid);
+    if (!c) return;
+    if (!confirm(
+        `Rebuild "${c.name}" (#${c.number})?\n\n` +
+        `Marks this channel as changed and triggers Builder to regenerate its ` +
+        `programme schedule (EPG) from its source path. Useful when EPG is ` +
+        `missing or stale.\n\n` +
+        `Build runs in the background (~5-30s for typical source).`
+    )) return;
+    try {
+        const res = await fetch(`http://${REMOTE_HOST}/channels/rebuild.json`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({uuid: UUID, channel_id: cid}),
+        });
+        if (!res.ok) {
+            const t = await res.text();
+            const msg = (t.match(/<p>Message: ([^<]+)/) || [, 'HTTP ' + res.status])[1];
+            toast('Rebuild failed: ' + msg, 'err'); return;
+        }
+        toast(`Rebuild queued for "${c.name}" — Builder running…`, 'ok');
+    } catch (e) {
+        toast('Network error: ' + e.message, 'err');
+    }
+}
+async function deletePseudoChannel(cid) {
+    const c = (CURRENT.channels || []).find(x => x.id === cid);
+    if (!c) return;
+    if (!confirm(`Delete channel "${c.name}" (#${c.number})?`)) return;
+    try {
+        const res = await fetch(`http://${REMOTE_HOST}/channels/delete.json`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({uuid: UUID, channel_id: cid}),
+        });
+        if (!res.ok) { toast('Delete failed: HTTP ' + res.status, 'err'); return; }
+        toast('Channel deleted', 'ok');
+        setTimeout(loadImports, 600);
+    } catch (e) {
+        toast('Network error: ' + e.message, 'err');
+    }
+}
+
+// Wire UI
+$('add-btn').addEventListener('click', () => openModal(-1));
+$('cancel-btn').addEventListener('click', closeModal);
+$('save-btn').addEventListener('click', save);
+$('refresh-all-btn').addEventListener('click', () => refreshOne(''));
+$('cleanup-stranded-btn').addEventListener('click', async () => {
+    // Count channels whose import_source isn't in the current imports list.
+    const activeIds = new Set((CURRENT.imports || []).map(i => i.id));
+    const stranded = (CURRENT.channels || []).filter(c =>
+        (c.type === 'import') && (!c.import_source || !activeIds.has(c.import_source))
+    );
+    if (stranded.length === 0) {
+        toast('No stranded channels — every import_source matches an active import.', 'ok');
+        return;
+    }
+    const sources = {};
+    stranded.forEach(c => { sources[c.import_source || '<none>'] = (sources[c.import_source || '<none>'] || 0) + 1; });
+    const lines = Object.entries(sources).map(([s, n]) => `  • ${s}: ${n}`).join('\n');
+    if (!confirm(
+        `Delete ${stranded.length} stranded channel${stranded.length === 1 ? '' : 's'}?\n\n` +
+        `These belong to import sources that no longer exist:\n${lines}\n\n` +
+        `Their channel records are removed from channels.json + their EPG cache files are deleted. ` +
+        `The next sync regenerates pseudotv.m3u and pseudotv.xml without them.`
+    )) return;
+    try {
+        const res = await fetch(`http://${REMOTE_HOST}/imports/cleanup_stranded.json`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({uuid: UUID}),
+        });
+        if (!res.ok) { toast('Cleanup failed: HTTP ' + res.status, 'err'); return; }
+        const r = await res.json();
+        toast(`Cleaned ${r.removed || 0} channels across ${(r.stranded_sources || []).length} stranded source${(r.stranded_sources || []).length === 1 ? '' : 's'}`, 'ok');
+        setTimeout(loadImports, 2000);
+    } catch (e) {
+        toast('Network error: ' + e.message, 'err');
+    }
+});
+$('pvr-refresh-btn').addEventListener('click', async () => {
+    try {
+        const res = await fetch(`http://${REMOTE_HOST}/pvr/reset.json`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({uuid: UUID, hard: false}),
+        });
+        if (!res.ok) { toast('Refresh failed: HTTP ' + res.status, 'err'); return; }
+        toast('EPG refresh queued — IPTV Simple re-reading (~60s)', 'ok');
+    } catch (e) {
+        toast('Network error: ' + e.message, 'err');
+    }
+});
+$('pvr-hard-reset-btn').addEventListener('click', async () => {
+    if (!confirm(
+        'HARD RESET EPG DATABASE?\n\n' +
+        'This WIPES Kodi\'s entire EPG database for ALL PVR clients (not just imports).\n\n' +
+        'Live EPG will be gone for ~30s+ while Kodi re-pulls from every client.\n\n' +
+        'Only use this if Refresh EPG hasn\'t fixed your issue.\n\n' +
+        'Continue?'
+    )) return;
+    try {
+        const res = await fetch(`http://${REMOTE_HOST}/pvr/reset.json`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({uuid: UUID, hard: true}),
+        });
+        if (!res.ok) { toast('Hard reset failed: HTTP ' + res.status, 'err'); return; }
+        toast('EPG database wiped — Kodi re-pulling (~30s+)', 'ok');
+    } catch (e) {
+        toast('Network error: ' + e.message, 'err');
+    }
+});
+$('add-pseudo-btn').addEventListener('click', openPseudoModal);
+$('rebuild-all-pseudo-btn').addEventListener('click', async () => {
+    const customChannels = (CURRENT.channels || []).filter(c => c.type !== 'import');
+    if (customChannels.length === 0) {
+        toast('No PseudoTV channels to rebuild.', 'ok');
+        return;
+    }
+    if (!confirm(
+        `Rebuild ALL ${customChannels.length} PseudoTV channel${customChannels.length === 1 ? '' : 's'}?\n\n` +
+        `Marks every Custom channel as changed and triggers Builder to regenerate ` +
+        `programme schedules from their source paths. Use after EPG goes missing ` +
+        `(e.g. pseudotv.xml corruption).\n\n` +
+        `Builds run sequentially; allow ~5-30s per channel.`
+    )) return;
+    try {
+        const res = await fetch(`http://${REMOTE_HOST}/channels/rebuild.json`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({uuid: UUID, all: true}),
+        });
+        if (!res.ok) {
+            const t = await res.text();
+            const msg = (t.match(/<p>Message: ([^<]+)/) || [, 'HTTP ' + res.status])[1];
+            toast('Rebuild all failed: ' + msg, 'err'); return;
+        }
+        const r = await res.json();
+        toast(`Rebuild queued for ${r.flipped || 0} PseudoTV channels — Builder running…`, 'ok');
+    } catch (e) {
+        toast('Network error: ' + e.message, 'err');
+    }
+});
+$('pseudo-cancel-btn').addEventListener('click', closePseudoModal);
+$('pseudo-save-btn').addEventListener('click', addPseudoChannel);
+$('pseudo-modal-overlay').addEventListener('click', (e) => { if (e.target === $('pseudo-modal-overlay')) closePseudoModal(); });
+
+// =====================================================================
+// Step 6 Phase 10 (madteevee): Custom-channel field-editor modal.
+// =====================================================================
+let CF_CURRENT_CID = null;
+function openCustomEditModal(cid) {
+    const c = (CURRENT.channels || []).find(x => x.id === cid);
+    if (!c) { toast('Channel not found', 'err'); return; }
+    if (c.type === 'import') { toast('Use the import editor for imported channels', 'err'); return; }
+    CF_CURRENT_CID = cid;
+    // Pre-fill from existing channel state (CURRENT.channels comes from /imports.json
+    // which is the SLIM shape — fall back gracefully for fields not in slim).
+    $('chfields-modal-title').textContent = `Edit "${c.name || '(unnamed)'}" (#${c.number || '?'})`;
+    $('cf-name').value     = c.name || '';
+    $('cf-number').value   = c.number || '';
+    $('cf-group').value    = Array.isArray(c.group) ? c.group.join('|') : (c.group || '');
+    $('cf-logo').value     = c.logo || '';
+    $('cf-path').value     = Array.isArray(c.path) ? (c.path[0] || '') : (c.path || '');
+    $('cf-catchup').value  = c.catchup || '';
+    $('cf-radio').checked    = !!c.radio;
+    $('cf-favorite').checked = !!c.favorite;
+    $('cf-enabled').checked  = (c.enabled !== false);
+    // Apply any previously-staged edits over the on-disk values.
+    const staged = PENDING_CUSTOM_EDITS[cid] || {};
+    if ('name'     in staged) $('cf-name').value     = staged.name;
+    if ('number'   in staged) $('cf-number').value   = staged.number;
+    if ('group'    in staged) $('cf-group').value    = Array.isArray(staged.group) ? staged.group.join('|') : staged.group;
+    if ('logo'     in staged) $('cf-logo').value     = staged.logo;
+    if ('path'     in staged) $('cf-path').value     = Array.isArray(staged.path) ? staged.path[0] : staged.path;
+    if ('catchup'  in staged) $('cf-catchup').value  = staged.catchup;
+    if ('radio'    in staged) $('cf-radio').checked    = !!staged.radio;
+    if ('favorite' in staged) $('cf-favorite').checked = !!staged.favorite;
+    if ('enabled'  in staged) $('cf-enabled').checked  = !!staged.enabled;
+    $('chfields-modal-overlay').classList.add('open');
+}
+function closeCustomEditModal() {
+    CF_CURRENT_CID = null;
+    $('chfields-modal-overlay').classList.remove('open');
+}
+function stageCustomEdit() {
+    if (!CF_CURRENT_CID) return;
+    const fields = {};
+    fields.name     = $('cf-name').value.trim();
+    const num = parseInt($('cf-number').value, 10);
+    if (!isNaN(num)) fields.number = num;
+    const grp = $('cf-group').value.trim();
+    if (grp) fields.group = grp;
+    fields.logo     = $('cf-logo').value.trim();
+    fields.path     = $('cf-path').value.trim();
+    fields.catchup  = $('cf-catchup').value;
+    fields.radio    = $('cf-radio').checked;
+    fields.favorite = $('cf-favorite').checked;
+    fields.enabled  = $('cf-enabled').checked;
+    PENDING_CUSTOM_EDITS[CF_CURRENT_CID] = fields;
+    toast(`Staged edit for "${fields.name || CF_CURRENT_CID}" — click Save to commit`, 'ok');
+    closeCustomEditModal();
+    _refreshSaveButton('PseudoTV_Live');
+}
+
+// =====================================================================
+// Step 6 Phase 11 (madteevee): per-channel rules editor modal.
+// =====================================================================
+let RULES_CURRENT_CID    = null;
+let RULES_CATALOG_CACHE  = null;   // [{id, name, description, options:[...]}, ...]
+async function openRulesModal(cid) {
+    const c = (CURRENT.channels || []).find(x => x.id === cid);
+    if (!c) { toast('Channel not found', 'err'); return; }
+    if (c.type === 'import') { toast('Rules editor is for PseudoTV (Custom) channels only', 'err'); return; }
+    RULES_CURRENT_CID = cid;
+    $('rules-modal-title').textContent = `Rules — ${c.name || '(unnamed)'} (#${c.number || '?'})`;
+    $('rules-list').innerHTML = '<div style="padding:20px;text-align:center;opacity:0.6;">Loading rules…</div>';
+    $('rules-modal-overlay').classList.add('open');
+    try {
+        if (!RULES_CATALOG_CACHE) {
+            const catRes = await fetch(`http://${REMOTE_HOST}/api/channels/rules/catalog.json?_=${Date.now()}`);
+            const cat = await catRes.json();
+            if (cat.error) throw new Error(cat.error);
+            RULES_CATALOG_CACHE = cat.rules || [];
+        }
+        const chRes = await fetch(`http://${REMOTE_HOST}/api/channels/rules.json?channel_id=${encodeURIComponent(cid)}&_=${Date.now()}`);
+        const chRules = await chRes.json();
+        if (chRules.error) throw new Error(chRules.error);
+        // Apply any locally-staged overlay.
+        const persisted = chRules.rules || {};
+        const staged    = PENDING_RULES[cid] || {};
+        renderRulesList(persisted, staged);
+    } catch (e) {
+        $('rules-list').innerHTML = `<div style="padding:20px;text-align:center;color:#e74c3c;">Failed: ${escapeHtml(e.message)}</div>`;
+    }
+}
+function closeRulesModal() {
+    RULES_CURRENT_CID = null;
+    $('rules-modal-overlay').classList.remove('open');
+}
+function renderRulesList(persisted, staged) {
+    // Persisted comes from server (channels.json); staged is local pending overlay.
+    // Effective state: staged wins per-ruleId.
+    const effective = {...persisted, ...staged};
+    const cards = (RULES_CATALOG_CACHE || []).map(rule => {
+        const enabled = Object.prototype.hasOwnProperty.call(effective, rule.id);
+        const values  = (enabled && effective[rule.id] && effective[rule.id].values) || {};
+        const optsHtml = rule.options.map(opt => {
+            const cur = values[opt.idx] != null ? values[opt.idx] : opt.default;
+            let inputHtml = '';
+            if (opt.type === 'bool') {
+                inputHtml = `<input type="checkbox" data-ridx="${opt.idx}" ${cur ? 'checked' : ''}>`;
+            } else if (opt.type === 'select' && Array.isArray(opt.selectBox)) {
+                const opts = opt.selectBox.map(v => `<option value="${escapeHtml(String(v))}"${String(v)===String(cur)?' selected':''}>${escapeHtml(String(v))}</option>`).join('');
+                inputHtml = `<select data-ridx="${opt.idx}">${opts}</select>`;
+            } else if (opt.type === 'int') {
+                inputHtml = `<input type="number" data-ridx="${opt.idx}" value="${cur == null ? '' : cur}">`;
+            } else {
+                inputHtml = `<input type="text" data-ridx="${opt.idx}" value="${escapeHtml(cur == null ? '' : String(cur))}">`;
+            }
+            return `<div class="rule-option">
+                <label>${escapeHtml(opt.label || '(option ' + opt.idx + ')')}</label>
+                ${inputHtml}
+                ${opt.description ? `<div class="rule-opt-desc">${escapeHtml(opt.description)}</div>` : ''}
+            </div>`;
+        }).join('');
+        return `<div class="rule-card${enabled ? ' enabled' : ''}" data-rid="${rule.id}">
+            <div class="rule-header">
+                <label class="rule-toggle"><input type="checkbox" data-action="rule-enable" ${enabled ? 'checked' : ''}> Enable</label>
+                <h4>${escapeHtml(rule.name || ('Rule ' + rule.id))}</h4>
+                <span style="opacity:0.5;font-size:0.7rem;">#${rule.id}</span>
+            </div>
+            ${rule.description ? `<div class="rule-desc">${escapeHtml(rule.description)}</div>` : ''}
+            <div class="rule-options">${optsHtml}</div>
+        </div>`;
+    }).join('');
+    $('rules-list').innerHTML = cards;
+    // Bind enable-toggle to expand the options panel.
+    $('rules-list').addEventListener('change', _onRuleChange);
+}
+function _onRuleChange(ev) {
+    const tog = ev.target.closest('input[data-action="rule-enable"]');
+    if (tog) {
+        tog.closest('.rule-card').classList.toggle('enabled', tog.checked);
+    }
+}
+function stageRulesEdit() {
+    if (!RULES_CURRENT_CID) return;
+    const out = {};
+    document.querySelectorAll('#rules-list .rule-card').forEach(card => {
+        const rid = parseInt(card.dataset.rid, 10);
+        const tog = card.querySelector('input[data-action="rule-enable"]');
+        if (!tog || !tog.checked) return;   // not enabled → omit
+        const values = {};
+        card.querySelectorAll('.rule-options [data-ridx]').forEach(el => {
+            const idx = parseInt(el.dataset.ridx, 10);
+            if (isNaN(idx)) return;
+            if (el.type === 'checkbox')    values[idx] = el.checked;
+            else if (el.type === 'number') values[idx] = parseInt(el.value, 10);
+            else                            values[idx] = el.value;
+        });
+        out[rid] = {values};
+    });
+    PENDING_RULES[RULES_CURRENT_CID] = out;
+    toast(`Staged rules for channel — click Save to commit`, 'ok');
+    closeRulesModal();
+    _refreshSaveButton('PseudoTV_Live');
+}
+
+// Hook modal buttons
+$('cf-cancel-btn').addEventListener('click', closeCustomEditModal);
+$('cf-save-btn').addEventListener('click', stageCustomEdit);
+$('chfields-modal-overlay').addEventListener('click', (e) => { if (e.target === $('chfields-modal-overlay')) closeCustomEditModal(); });
+$('rules-cancel-btn').addEventListener('click', closeRulesModal);
+$('rules-save-btn').addEventListener('click', stageRulesEdit);
+$('rules-modal-overlay').addEventListener('click', (e) => { if (e.target === $('rules-modal-overlay')) closeRulesModal(); });
+
+// Attach the same channel-row handlers to the PseudoTV list as well, plus the
+// extra delete-button handler unique to PseudoTV channels.
+$('pseudo-list').addEventListener('click', (e) => {
+    // Step 6 Phase 9 (madteevee): discard a staged-but-not-yet-saved add.
+    const discardBtn = e.target.closest('button[data-action="discard-pending-add"]');
+    if (discardBtn) {
+        const idx = parseInt(discardBtn.dataset.idx, 10);
+        if (!isNaN(idx)) {
+            PENDING_NEW_CHANNELS.splice(idx, 1);
+            renderPseudo();
+            _refreshSaveButton('PseudoTV_Live');
+        }
+        return;
+    }
+    // Step 6 Phase 10 (madteevee): open Custom-channel field editor modal.
+    const editBtn = e.target.closest('button[data-action="edit-pseudo"]');
+    if (editBtn) { openCustomEditModal(editBtn.dataset.cid); return; }
+    // Step 6 Phase 11 (madteevee): open per-channel rules editor modal.
+    const rulesBtn = e.target.closest('button[data-action="rules-pseudo"]');
+    if (rulesBtn) { openRulesModal(rulesBtn.dataset.cid); return; }
+    // PseudoTV delete button — still immediate (it's a structural action,
+    // not a field edit, and has its own confirm() prompt).
+    const rebuildBtn = e.target.closest('button[data-action="rebuild-pseudo"]');
+    if (rebuildBtn) { rebuildPseudoChannel(rebuildBtn.dataset.cid); return; }
+    const delBtn = e.target.closest('button[data-action="delete-pseudo"]');
+    if (delBtn) { deletePseudoChannel(delBtn.dataset.cid); return; }
+    // Enable checkbox — DEFERRED: stage to PENDING_TOGGLES, same as the
+    // imports-list path. Previously this fired toggleChannelEnabled per
+    // click and reloaded immediately, which spawned overlapping chkImports
+    // cycles racing against subsequent number-edits in the same session
+    // (the same bug Step 5 fix #9 solved for import channels).
+    const cb = e.target.closest('input[type="checkbox"][data-action="togglech-enable"]');
+    if (!cb) return;
+    const newEnabled = cb.checked;
+    LAST_TOGGLED = {checkbox: cb, cid: cb.dataset.cid, list: cb.parentElement};
+    cb.closest('.channel-row').classList.toggle('disabled', !newEnabled);
+    _stagePendingToggle(cb.dataset.cid, newEnabled);
+});
+$('pseudo-list').addEventListener('keydown', (e) => {
+    const inp = e.target.closest('input[data-action="setnumber"], input[data-action="setname"]');
+    if (!inp) return;
+    if (e.key === 'Enter')  inp.blur();
+    if (e.key === 'Escape') { inp.value = inp.dataset.original; inp.blur(); }
+});
+$('pseudo-list').addEventListener('blur', async (e) => {
+    const inp = e.target.closest('input[data-action="setnumber"], input[data-action="setname"]');
+    if (!inp) return;
+    if (inp.dataset.action === 'setnumber') {
+        // DEFERRED: stage to PENDING_NUMBERS, same as the imports-list path.
+        // Previously this fired setChannelNumber per blur (no defer_kick) and
+        // each POST kicked chkImports, with overlapping syncAll cycles
+        // racing against subsequent edits — silently clobbering some.
+        const newNum = parseInt(inp.value, 10);
+        const oldNum = parseInt(inp.dataset.original, 10);
+        if (isNaN(newNum)) { inp.value = inp.dataset.original; return; }
+        if (newNum === oldNum) {
+            delete PENDING_NUMBERS[inp.dataset.cid];
+            _refreshSaveButton(_importIdFromCid(inp.dataset.cid));
+            return;
+        }
+        _stagePendingNumber(inp.dataset.cid, newNum);
+    } else if (inp.dataset.action === 'setname') {
+        const newName = inp.value.trim();
+        const oldName = inp.dataset.original;
+        if (newName === oldName) return;
+        inp.classList.add('saving'); inp.classList.remove('error');
+        const r = await setChannelName(inp.dataset.cid, newName);
+        inp.classList.remove('saving');
+        if (r.ok) {
+            inp.dataset.original = newName;
+            toast(`Renamed to "${newName}"`, 'ok');
+            const ch = (CURRENT.channels || []).find(c => c.id === inp.dataset.cid);
+            if (ch) ch.name = newName;
+        } else {
+            inp.classList.add('error'); inp.value = inp.dataset.original;
+            toast('Rename failed: ' + r.error, 'err');
+        }
+    }
+}, true);
+$('imports-list').addEventListener('click', (e) => {
+    // Button actions
+    const btn = e.target.closest('button');
+    if (btn) {
+        const action = btn.dataset.action;
+        if (action === 'edit')           openModal(parseInt(btn.dataset.idx, 10));
+        if (action === 'refresh')        refreshOne(btn.dataset.id);
+        if (action === 'renumber')       renumberOne(btn.dataset.id, false);
+        if (action === 'renumber-hard')  renumberOne(btn.dataset.id, true);
+        if (action === 'remove-orphans') removeOrphans(btn.dataset.id);
+        if (action === 'delete') {
+            const idx = parseInt(btn.dataset.idx, 10);
+            const imp = CURRENT.imports[idx];
+            if (!confirm(`Delete import "${imp.name || imp.id}"?\n\nThe import config is removed but its imported channels stay in your channel list as orphans (you can edit/delete them via the channel manager).`)) return;
+            const list = CURRENT.imports.slice();
+            list.splice(idx, 1);
+            postImports(list);
+        }
+        return;
+    }
+    // Channels-list expand/collapse
+    const tog = e.target.closest('[data-action="togglech"]');
+    if (tog) {
+        const id = tog.dataset.id;
+        const list = document.getElementById('channels-' + id);
+        if (list) {
+            list.classList.toggle('open');
+            const arrow = tog.querySelector('.arrow');
+            if (arrow) arrow.textContent = list.classList.contains('open') ? '▾' : '▸';
+        }
+    }
+});
+// Per-channel enable toggle — DEFERRED: clicks update local state only,
+// operator clicks the per-import "Save" button to commit. This way single
+// clicks AND shift-click ranges work without page reloads (the previous
+// auto-save-on-click reset LAST_TOGGLED across reloads, breaking ranges).
+let LAST_TOGGLED = null;  // {checkbox: el, cid: id, list: el}
+// Pending edits awaiting Save: {channel_id: target_state}.
+// Survives the import-list collapse/expand re-renders since render() also
+// reapplies pending state to UI elements.
+const PENDING_TOGGLES = {};   // {cid: bool}    — enable/disable
+const PENDING_NUMBERS = {};   // {cid: int}     — number/order
+// Step 6 Phase 9/10/11 (madteevee): additional pending pools, all flushed by
+// the single Save click. Phase 9 = batch add Custom channels. Phase 10 =
+// full-field edits for Custom channels. Phase 11 = per-channel rules edits.
+const PENDING_NEW_CHANNELS = []; // [{name, number, path}]
+const PENDING_CUSTOM_EDITS = {}; // {cid: {field: value, ...}}
+const PENDING_RULES        = {}; // {cid: {ruleId:{values:{idx:val}}}}
+function _importIdFromCid(cid) {
+    // Channel IDs are namespaced as `<source_tvg_id>@<import_id>`.
+    const at = cid.lastIndexOf('@');
+    return at >= 0 ? cid.slice(at + 1) : '';
+}
+function _pendingCountFor(importId) {
+    const ids = new Set();
+    Object.keys(PENDING_TOGGLES).forEach(cid => { if (_importIdFromCid(cid) === importId) ids.add(cid); });
+    Object.keys(PENDING_NUMBERS).forEach(cid => { if (_importIdFromCid(cid) === importId) ids.add(cid); });
+    // Phase 9/10/11: Custom-channel edits + rules + staged adds all surface on
+    // the PseudoTV_Live save badge (which the operator clicks to commit them).
+    if (importId === 'PseudoTV_Live') {
+        Object.keys(PENDING_CUSTOM_EDITS).forEach(cid => ids.add(cid));
+        Object.keys(PENDING_RULES).forEach(cid => ids.add(cid));
+        // Treat each staged new channel as its own pending unit so the badge counts them.
+        PENDING_NEW_CHANNELS.forEach((_, i) => ids.add('__pending_add_' + i));
+    }
+    return ids.size;
+}
+function _refreshSaveButton(importId) {
+    const btn = document.querySelector(`button[data-action="save-toggles"][data-id="${importId}"]`);
+    if (!btn) return;
+    const count = _pendingCountFor(importId);
+    btn.disabled = count === 0;
+    btn.textContent = count === 0 ? 'Save' : `Save (${count})`;
+    btn.classList.toggle('has-pending', count > 0);
+}
+function _stagePendingToggle(cid, target) {
+    const ch = (CURRENT.channels || []).find(c => c.id === cid);
+    const original = ch ? (ch.enabled !== false) : true;
+    if (original === target) {
+        delete PENDING_TOGGLES[cid];  // back to original — no pending change
+    } else {
+        PENDING_TOGGLES[cid] = target;
+    }
+    _refreshSaveButton(_importIdFromCid(cid));
+}
+function _stagePendingNumber(cid, target) {
+    const ch = (CURRENT.channels || []).find(c => c.id === cid);
+    const original = ch ? parseInt(ch.number, 10) : NaN;
+    if (Number.isFinite(target) && target === original) {
+        delete PENDING_NUMBERS[cid];  // back to original — no pending change
+    } else {
+        PENDING_NUMBERS[cid] = target;
+    }
+    _refreshSaveButton(_importIdFromCid(cid));
+}
+$('imports-list').addEventListener('click', (e) => {
+    const cb = e.target.closest('input[type="checkbox"][data-action="togglech-enable"]');
+    if (!cb) return;
+    // `cb.checked` already reflects the post-click state (browser toggled it).
+    const newEnabled = cb.checked;
+
+    // Shift-click → set a range to the same state.
+    // NOTE: do NOT call e.preventDefault() here. The browser's pre-toggle of
+    // the clicked checkbox already happened by the time this handler runs;
+    // calling preventDefault() makes the browser REVERT that toggle AFTER our
+    // handler returns. The result was a half-state on the shift-click target
+    // (its row class said disabled but its checkmark stayed checked, looking
+    // like a greyed-out checkmark). Letting the default action stand keeps
+    // cb.checked stable through the revert window.
+    if (e.shiftKey && LAST_TOGGLED && LAST_TOGGLED.list === cb.closest('.channels-list')) {
+        const allBoxes = Array.from(cb.closest('.channels-list').querySelectorAll('input[data-action="togglech-enable"]'));
+        const startIdx = allBoxes.indexOf(LAST_TOGGLED.checkbox);
+        const endIdx   = allBoxes.indexOf(cb);
+        if (startIdx === -1 || endIdx === -1) return;
+        const [lo, hi] = [Math.min(startIdx, endIdx), Math.max(startIdx, endIdx)];
+        const range = allBoxes.slice(lo, hi + 1);
+        const targetState = newEnabled;  // browser flipped cb.checked already
+        for (const box of range) {
+            box.checked = targetState;
+            box.closest('.channel-row').classList.toggle('disabled', !targetState);
+            _stagePendingToggle(box.dataset.cid, targetState);
+        }
+        toast(`Staged ${range.length} channel${range.length === 1 ? '' : 's'} → ${targetState ? 'enabled' : 'disabled'}. Click Save to apply.`, 'ok');
+        LAST_TOGGLED = {checkbox: cb, cid: cb.dataset.cid, list: cb.closest('.channels-list')};
+        return;
+    }
+
+    // Single toggle — also deferred
+    LAST_TOGGLED = {checkbox: cb, cid: cb.dataset.cid, list: cb.closest('.channels-list')};
+    cb.closest('.channel-row').classList.toggle('disabled', !newEnabled);
+    _stagePendingToggle(cb.dataset.cid, newEnabled);
+});
+
+// Save button for pending toggles (per-import + the PseudoTV-channels Save).
+// Walks PENDING_TOGGLES/PENDING_NUMBERS for this importId only, posts each
+// via /imports/channel/edit.json with defer_kick=true, then fires ONE
+// /imports/refresh.json kick at the end. Server-side cascade-compaction
+// runs per-edit, so siblings shift correctly.
+//
+// Listener is on document (not #imports-list) so the PseudoTV-channels
+// Save button — which lives in a separate container above #imports-list —
+// is also caught by the same delegation.
+document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-action="save-toggles"]');
+    if (!btn || btn.disabled) return;
+    // madteevee (imports fork): clicking ANY per-import Save button (or the
+    // PseudoTV-channels Save button) now flushes pending changes across
+    // ALL imports + PseudoTV-Custom, not just the import whose button was
+    // clicked. Previously the handler filtered toggleCids/numberCids by
+    // `_importIdFromCid(cid) === importId` — meaning operator had to click
+    // each import's Save button separately if they'd edited channels
+    // across multiple imports. That was confusing because the per-import
+    // badges visually showed pending counts everywhere but clicking one
+    // button only saved one slice. Now: any Save click commits everything.
+    // Cross-import edits no longer have ordering surprises and operator
+    // sees a single "Saved N" toast covering the entire batch.
+    const toggleCids = Object.keys(PENDING_TOGGLES);
+    const numberCids = Object.keys(PENDING_NUMBERS);
+    const customCids = Object.keys(PENDING_CUSTOM_EDITS);
+    const rulesCids  = Object.keys(PENDING_RULES);
+    const newAdds    = PENDING_NEW_CHANNELS.slice();
+    if (!toggleCids.length && !numberCids.length && !customCids.length && !rulesCids.length && !newAdds.length) return;
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    let okCount = 0, failCount = 0;
+
+    // Helper: POST a single field-edit with defer_kick=true. The per-edit
+    // chkImports kick would otherwise spawn overlapping syncAll cycles
+    // that race against sibling edits in the same batch and silently
+    // clobber some.
+    async function _postEdit(cid, fields) {
+        try {
+            const res = await fetch(`http://${REMOTE_HOST}/imports/channel/edit.json`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({uuid: UUID, channel_id: cid, fields, defer_kick: true}),
+            });
+            return res.ok;
+        } catch (e) { return false; }
+    }
+    // Phase 10/11 helpers.
+    async function _postCustomEdit(cid, fields, deferKick) {
+        try {
+            const res = await fetch(`http://${REMOTE_HOST}/channels/edit.json`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({uuid: UUID, channel_id: cid, fields, defer_kick: deferKick}),
+            });
+            return res.ok;
+        } catch (e) { return false; }
+    }
+    async function _postRules(cid, rules, deferKick) {
+        try {
+            const res = await fetch(`http://${REMOTE_HOST}/api/channels/rules.json`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({uuid: UUID, channel_id: cid, rules, defer_kick: deferKick}),
+            });
+            return res.ok;
+        } catch (e) { return false; }
+    }
+    async function _postNewChannel(payload, deferKick) {
+        try {
+            const res = await fetch(`http://${REMOTE_HOST}/channels/add.json`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({uuid: UUID, ...payload, defer_kick: deferKick}),
+            });
+            return res.ok;
+        } catch (e) { return false; }
+    }
+
+    // Flush enable/disable changes
+    for (const cid of toggleCids) {
+        const ok = await _postEdit(cid, {enabled: PENDING_TOGGLES[cid]});
+        if (ok) {
+            const ch = (CURRENT.channels || []).find(c => c.id === cid);
+            if (ch) ch.enabled = PENDING_TOGGLES[cid];
+            delete PENDING_TOGGLES[cid];
+            okCount++;
+        } else { failCount++; }
+    }
+    // Flush number changes
+    for (const cid of numberCids) {
+        const ok = await _postEdit(cid, {number: PENDING_NUMBERS[cid]});
+        if (ok) {
+            const ch = (CURRENT.channels || []).find(c => c.id === cid);
+            if (ch) ch.number = PENDING_NUMBERS[cid];
+            delete PENDING_NUMBERS[cid];
+            okCount++;
+        } else { failCount++; }
+    }
+    // Step 6 Phase 10 (madteevee): flush Custom-channel field edits.
+    // All with defer_kick=true — the /imports/refresh.json kick below covers
+    // the whole batch.
+    for (const cid of customCids) {
+        const ok = await _postCustomEdit(cid, PENDING_CUSTOM_EDITS[cid], true);
+        if (ok) { delete PENDING_CUSTOM_EDITS[cid]; okCount++; }
+        else    { failCount++; }
+    }
+    // Step 6 Phase 11 (madteevee): flush rules edits.
+    for (const cid of rulesCids) {
+        const ok = await _postRules(cid, PENDING_RULES[cid], true);
+        if (ok) { delete PENDING_RULES[cid]; okCount++; }
+        else    { failCount++; }
+    }
+    // Step 6 Phase 9 (madteevee): flush new-channel adds. defer_kick=true on
+    // every add except the LAST one → that last add kicks chkChanged once,
+    // letting Builder process the whole batch in one run.
+    //
+    // If there are NO new adds but there are Custom edits/rules to flush,
+    // those endpoints' defer_kick=true flow needs at least one kick — we
+    // skip-defer on the last one of those if we have no adds to act as
+    // the terminal kicker.
+    const customNeedsKick = (customCids.length > 0 || rulesCids.length > 0);
+    for (let i = 0; i < newAdds.length; i++) {
+        const isLast = (i === newAdds.length - 1);
+        const ok = await _postNewChannel(newAdds[i], !isLast);   // last add fires the kick
+        if (ok) okCount++; else failCount++;
+    }
+    if (newAdds.length && !failCount) PENDING_NEW_CHANNELS.length = 0;
+    // If no new adds but we DO have Custom edits/rules pending, fire one
+    // extra Custom edit re-kick by re-POSTing the last successfully-edited
+    // channel with defer_kick=false. Cleanest way to bounce chkChanged once.
+    if (!newAdds.length && customNeedsKick && !failCount) {
+        const allCids = customCids.concat(rulesCids);
+        const lastCid = allCids[allCids.length - 1];
+        if (lastCid) {
+            // Empty fields={}: server sets target['changed']=true regardless
+            // and re-writes channels.json (idempotent), then kicks chkChanged.
+            await _postCustomEdit(lastCid, {}, false);
+        }
+    }
+    // ONE end-of-batch kick for the imports side (M3U/XMLTV regen).
+    try {
+        await fetch(`http://${REMOTE_HOST}/imports/refresh.json`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({uuid: UUID, target: 'all'}),
+        });
+    } catch (e) { /* non-fatal — daemon thread will pick up on next 5-min tick */ }
+    // (Phase 9/10/11 already issued the trailing chkChanged kick in their
+    // own flush blocks via the last-non-deferred POST.)
+    toast(`Saved ${okCount}${failCount ? ' (' + failCount + ' failed — will retry on next Save)' : ''}`,
+          failCount ? 'err' : 'ok');
+    setTimeout(loadImports, 600);
+});
+
+// Per-channel number/name editing — commit on blur or Enter; revert on Escape.
+$('imports-list').addEventListener('keydown', (e) => {
+    const inp = e.target.closest('input[data-action="setnumber"], input[data-action="setname"]');
+    if (!inp) return;
+    if (e.key === 'Enter')  inp.blur();
+    if (e.key === 'Escape') { inp.value = inp.dataset.original; inp.blur(); }
+});
+$('imports-list').addEventListener('blur', async (e) => {
+    const inp = e.target.closest('input[data-action="setnumber"], input[data-action="setname"]');
+    if (!inp) return;
+    if (inp.dataset.action === 'setnumber') {
+        // DEFERRED: stage the number locally, don't POST. Operator clicks
+        // the per-import Save button to commit. Avoids the same race we
+        // hit on enable/disable: blur firing per-edit POSTs that each
+        // kick chkImports, with overlapping cycles clobbering siblings.
+        // CURRENT.channels[].number is NOT mutated here so dataset.original
+        // (rebuilt from c.number on each render) remains the true server-
+        // side original — Escape correctly reverts to that across renders.
+        const newNum = parseInt(inp.value, 10);
+        const oldNum = parseInt(inp.dataset.original, 10);
+        if (isNaN(newNum)) { inp.value = inp.dataset.original; return; }
+        if (newNum === oldNum) {
+            // No-op: clear any stale pending entry and leave UI alone.
+            delete PENDING_NUMBERS[inp.dataset.cid];
+            _refreshSaveButton(_importIdFromCid(inp.dataset.cid));
+            return;
+        }
+        _stagePendingNumber(inp.dataset.cid, newNum);
+    } else if (inp.dataset.action === 'setname') {
+        const newName = inp.value.trim();
+        const oldName = inp.dataset.original;
+        if (newName === oldName) return;  // no-change (allow empty for now)
+        inp.classList.add('saving'); inp.classList.remove('error');
+        const r = await setChannelName(inp.dataset.cid, newName);
+        inp.classList.remove('saving');
+        if (r.ok) {
+            inp.dataset.original = newName;
+            toast(`Renamed to "${newName}"`, 'ok');
+            // Don't full-reload here — name change doesn't affect sort order
+            const ch = (CURRENT.channels || []).find(c => c.id === inp.dataset.cid);
+            if (ch) ch.name = newName;
+        } else {
+            inp.classList.add('error'); inp.value = inp.dataset.original;
+            toast('Rename failed: ' + r.error, 'err');
+        }
+    }
+}, true);  // capture phase — blur doesn't bubble
+$('modal-overlay').addEventListener('click', (e) => { if (e.target === $('modal-overlay')) closeModal(); });
+
+loadImports();
+</script>
+</body>
+</html>

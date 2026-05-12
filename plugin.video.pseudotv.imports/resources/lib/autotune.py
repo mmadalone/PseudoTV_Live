@@ -1,0 +1,110 @@
+#   Copyright (C) 2025 Lunatixz
+#
+#
+# This file is part of PseudoTV Live.
+#
+# PseudoTV Live is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# PseudoTV Live is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
+
+# -*- coding: utf-8 -*-
+
+from globals    import *
+from manager    import Manager
+from library    import Library
+from channels   import Channels
+
+class Autotune(object):    
+    def __init__(self, sysARG=sys.argv):
+        self.log('__init__, sysARG = %s'%(sysARG))
+        self.sysARG  = sysARG 
+        
+        
+    def log(self, msg, level=xbmc.LOGDEBUG):
+        return log('%s: %s'%(self.__class__.__name__,msg),level)
+
+
+    def _runTune(self, start=1, count=None):
+        def __buildAutotune(type, count):
+            return Globals._randomSamples(Library().getLibrary(type),count)
+                
+        autoChannels = SETTINGS.getSettingBool('Autotuned_Channels')
+        if not autoChannels:
+            hasChannels  = PROPERTIES.hasChannels()
+            hasLibrary   = any([PROPERTIES.hasLibrary(ty) for ty in AUTOTUNE_TYPES])
+            if count is None: count = min(max(SETTINGS.getSettingInt('Autotune_Limit'), AUTOTUNE_CHANNEL_DEFAULT), AUTOTUNE_CHANNEL_LIMIT)
+            self.log(f'_runTune, Count = {count}, hasChannels = {hasChannels}, hasLibrary = {hasLibrary}')
+            
+            if not hasChannels and hasLibrary:
+                hasBackup  = PROPERTIES.hasBackup()
+                hasServers = PROPERTIES.hasServers()
+                self.log(f'_runTune, hasBackup = {hasBackup}, hasServers = {hasServers}')
+                while not MONITOR().abortRequested():
+                    retval = DIALOG.yesnoDialog(message='%s\n%s'%(LANGUAGE(32042)%(ADDON_NAME),LANGUAGE(32255)),customlabel=LANGUAGE(32254))
+                    if retval == 0: #No
+                        return True if hasChannels else Globals._openSettings()
+                    elif retval == 1: #Yes
+                        SETTINGS.setSettingBool('Autotuned_Channels',True)
+                        break       
+                    elif retval == 2:#Custom
+                        with BUILTIN.busy_dialog():
+                            menu = [LISTITEMS.buildMenuListItem(LANGUAGE(30107),LANGUAGE(33310),url='special://home/addons/%s/resources/lib/utilities.py, Channel_Manager'%(ADDON_ID))]
+                            if hasBackup:  menu.append(LISTITEMS.buildMenuListItem('%s %s'%(LANGUAGE(32112),LANGUAGE(30108)),LANGUAGE(32111),url='special://home/addons/%s/resources/lib/backup.py, Recover_Backup'%(ADDON_ID)))
+                            if hasServers: menu.append(LISTITEMS.buildMenuListItem(LANGUAGE(30173),LANGUAGE(32215),url='special://home/addons/%s/resources/lib/multiroom.py, Select_Server_Client'%(ADDON_ID)))
+                        select = DIALOG.selectDialog(menu,multi=False)
+                        if not select is None: return BUILTIN.executescript(menu[select].getPath())
+                    return False #Cancel
+            else: return True
+            
+        with DIALOG._progressDialog("", LANGUAGE(30038)) as self.pDialog:
+            items   = []
+            manager = Manager(MANAGER_XML, ADDON_PATH, "default", start=False, channel=-1)
+            if autoChannels: 
+                if manager.backup.backupChannels(CHANNELFLE_AUTOTUNE,silent=True): 
+                    FileAccess.delete(CHANNELFLEPATH)
+            
+            for idx, type in enumerate(AUTOTUNE_TYPES):
+                self.pMSG    = type
+                self.pCount  = int(idx*100//len(AUTOTUNE_TYPES))
+                self.pDialog = DIALOG._updateProgress(self.pDialog, self.pCount, type, header='%s, %s'%(ADDON_NAME,LANGUAGE(32021)))
+                items.extend(__buildAutotune(type,count))
+            
+            manager._addChannels(start, Globals._randomShuffle(items))
+            manager.closeManager()
+        del manager
+        return True
+                
+                    
+    def clrLibrary(self):
+        Library().clrLibraryCache()
+        DIALOG.notificationDialog(LANGUAGE(32025))
+       
+       
+    def clrBlacklist(self):
+        SETTINGS.setSetting('Clear_BlackList','')
+        DIALOG.notificationDialog(LANGUAGE(32025))
+        
+        
+    def run(self):  
+        with BUILTIN.busy_dialog():
+            ctl = (1,1) #settings return focus
+            try:    param = self.sysARG[1]
+            except Exception: param = None
+            if param.replace('_',' ') in AUTOTUNE_TYPES:
+                ctl = (1,AUTOTUNE_TYPES.index(param.replace('_',' '))+1)
+                self.selectAutotune(param.replace('_',' '))
+            elif param == 'Clear_Autotune' :  self.clrLibrary()
+            elif param == 'Clear_BlackList':  self.clrBlacklist()
+            elif param == None: return
+            return Globals._openSettings(ctl)
+        
+if __name__ == '__main__': Autotune(sys.argv).run()

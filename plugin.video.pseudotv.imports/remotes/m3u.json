@@ -1,0 +1,45 @@
+{
+    "item": {
+        "id": "",
+        "number": 0,
+        "name": "",
+        "logo": "",
+        "group": [
+        ],
+        "catchup": "vod",
+        "radio": false,
+        "favorite": false,
+        "realtime": false,
+        "media": "",
+        "label": "",
+        "url": "",
+        "tvg-shift": "",
+        "x-tvg-url": "",
+        "media-dir": "",
+        "media-size": "",
+        "media-type": "",
+        "catchup-source": "",
+        "catchup-days": "",
+        "catchup-correction": "",
+        "provider": "",
+        "provider-type": "",
+        "provider-logo": "",
+        "provider-countries": "",
+        "provider-languages": "",
+        "x-playlist-type": "",
+        "kodiprops": [
+        ]
+    },
+    "required": {
+        "id": "",
+        "number": 0,
+        "name": "",
+        "logo": "",
+        "group": [
+        ],
+        "catchup": "vod",
+        "radio": false,
+        "label": "",
+        "url": ""
+    }
+}

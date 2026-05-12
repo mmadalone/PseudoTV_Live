@@ -7,7 +7,39 @@ Personal fork of [PseudoTV/PseudoTV_Live](https://github.com/PseudoTV/PseudoTV_L
 | Branch | Purpose |
 |---|---|
 | `madteevee-patches` | (current default) Patches on top of `upstream/nightly`. Each fix is its own commit so future cherry-picks against newer nightly tips stay surgical. |
+| `madteevee-on-nightly` | (current working branch) Continues from `madteevee-patches`; carries both `plugin.video.pseudotv.live` patches AND the sibling `plugin.video.pseudotv.imports` addon. |
 | `madteevee-patches-0.6.1q-archive` | Snapshot of the previous master-based fork, kept for reference / rollback. Tag `pre-nightly-rebase` points at the same tip. |
+
+## The imports sibling addon
+
+In addition to the per-commit patches against the `plugin.video.pseudotv.live` upstream, this repo carries a **sibling addon** at `plugin.video.pseudotv.imports/`. It's a fork of `plugin.video.pseudotv.live`, with a new addon ID, a different port (50002), and a substantial value-add: native ingestion of external M3U + XMLTV sources (Movistar+, epg.best, generic provider lineups) alongside PseudoTV's existing Custom channels.
+
+**Why it exists**: PseudoTV upstream's `getImports / setImports` are vestigial (defined, zero call sites). The original feature intent was external-source import, but it never landed beyond stubs. The imports addon picks that up — ingestion engine in `resources/lib/imports.py` (~1300 LOC), web dashboard at `remotes/manager.html` (single-page UI with Imports / Channels / Live Guide / System Info / Settings tabs), atomic M3U/XMLTV write infrastructure, per-source EPG/logo caches with HTTP 304 conditional GETs, and a settings-driven dependency engine surfacing 109 PseudoTV settings as a JSON form.
+
+**Version scheme**: `0.8.0+imports.NN` — distinct from the `.live` addon's `0.7.3+madteevee.NN`. The two run side-by-side; both can coexist in a Kodi install (different addon IDs, ports, addon_data dirs).
+
+**Architectural decisions worth knowing about** (the per-decision durable notes live in operator memory; this is the cliff-notes summary):
+
+- **`PSEUDOTV_SLUG = 'PseudoTV_Live'`** is shared with the `.live` parent — both addons emit Custom channels with `@PseudoTV_Live` suffix so they cross-recognize.
+- **Import channel IDs are namespaced**: `<source_tvg_id>@<import_id>`. Prevents IPTV Simple's tvg-id dedup from collapsing two imports that happen to share an upstream tvg-id.
+- **`mediaEnabled=false`** on IPTV Simple's instance-settings-50002.xml. Without this, IPTV Simple classifies all imported channels as "media items" not channels.
+- **`CHANNEL_LIMIT=9999`** in `constants.py` (was 999). Required so disabled channels can land in the 9000+ bucket.
+- **chkImports daemon thread** (`Tasks._startImportsThread`), NOT the priority queue. The queue worker can block on `chkLibrary._exe` for minutes; daemon thread guarantees imports sync regardless.
+- **`PROPERTIES.setEXTProperty` for cross-thread signals.** `setProperty`/`getProperty` thread-scope the keys; only EXT variants are visible across threads. Caused a recurring `chkImports.kick` bug until traced.
+- **WRITER_LOCK** (`writer_lock.py`, imports.12) — process-wide RLock around M3U/XMLTV render+os.replace. Defense in depth against in-process write races. Cross-process races (context_record.py separate process, operator hand-edits) still defended by a Custom-merge-from-disk workaround at `imports.py:916-955`.
+- **Renderers module** (`renderers.py`, imports.13) — render_m3u, render_xmltv, write_atomic as module-level pure functions. Eliminates the prior duplication across m3u.py + xmltvs.py + tasks.py.
+
+**Thread-safety hardening (imports.16/17/18, this session's work):**
+
+- `Player._chkCallback` CAS gate (imports.16) — protects against writer-races-writer on `self.playingItem['callback']` when an `_onPlay` worker swaps state between the idle thread's read and write.
+- `HTTP.run()` socket-release (imports.17) — adds `self._server.server_close()` after `shutdown()` to release the listening socket; without it every `chkPVRRefresh` cycle leaked the socket and forced fallback to port 50003 with a user-visible toast.
+- `Player._overlay_lock` (imports.18) — serializes `toggleOverlay`'s read-modify-write of `self.overlay`. Closes the initial-create race where two threads (idle thread + @threadit worker) both saw `self.overlay = None`, both created an Overlay, and one's `channelBug` control got orphaned in `xbmcgui.Window(12005)` — operator-visible as the previous channel's logo sticking on top of the current channel.
+
+**Maintenance posture**: the imports addon does NOT rebase against upstream — it's a one-time fork that diverged from `plugin.video.pseudotv.live` after the `madteevee-on-nightly` rebase. Forward-ports from upstream into imports/ happen manually when needed.
+
+**Eventual replacement plan** (operator-stated, not yet executed): replace `plugin.video.pseudotv.live` with the imports addon. The plan is to deprecate the live sibling once imports has full burn-in confidence. Migration concerns: Kodi addon_data path rename, addon ID change throughout the codebase, M3U URL rewrites for already-emitted Custom channels, pvr.iptvsimple instance config. Deferred for a dedicated session.
+
+**Per-version history**: see [`plugin.video.pseudotv.imports/changelog.txt`](./plugin.video.pseudotv.imports/changelog.txt).
 
 ## Maintenance workflow
 

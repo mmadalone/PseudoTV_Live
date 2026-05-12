@@ -1,0 +1,57 @@
+{
+    "uuid": "",
+    "channels": [
+        {
+            "id": "",
+            "type": "",
+            "number": 0,
+            "name": "",
+            "logo": "",
+            "path": [
+            ],
+            "group": [
+            ],
+            "rules": 
+                {
+                "version": 0.0,
+                "0": {
+                    "values": {
+                        "0": 1,
+                        "1": 1,
+                        "2": 1,
+                        "3": 1
+                    }
+                }
+            },
+            "catchup": "vod",
+            "radio": false,
+            "favorite": false,
+            "changed": false,
+            "enabled": true
+        }
+    ],
+    "imports": [
+        {
+            "vod": [
+                {
+                    "id": "",
+                    "type": "vod",
+                    "name": "",
+                    "description": "",
+                    "icon": "",
+                    "path": ""
+                }
+            ],
+            "live": [
+                {
+                    "id": "",
+                    "type": "live",
+                    "name": "",
+                    "description": "",
+                    "icon": "",
+                    "path": ""
+                }
+            ]
+        }
+    ]
+}

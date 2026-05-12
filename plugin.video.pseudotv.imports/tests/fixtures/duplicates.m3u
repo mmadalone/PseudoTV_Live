@@ -1,0 +1,9 @@
+#EXTM3U
+#EXTINF:-1 tvg-name="First" tvg-id="DUP",First
+http://example.com/first
+
+#EXTINF:-1 tvg-name="Second" tvg-id="DUP",Second
+http://example.com/second
+
+#EXTINF:-1 tvg-name="Unique" tvg-id="UNIQ",Unique
+http://example.com/unique

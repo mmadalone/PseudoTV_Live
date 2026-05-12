@@ -1,0 +1,414 @@
+#   Copyright (C) 2025 Lunatixz
+#
+#
+# This file is part of PseudoTV Live.
+#
+# PseudoTV Live is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# PseudoTV Live is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
+#
+# -*- coding: utf-8 -*-
+from constants   import *
+from logger      import log
+from fileaccess  import FileAccess, FileLock
+
+#variables
+PAGE_LIMIT          = int((REAL_SETTINGS.getSetting('Page_Limit')  or "25"))
+MIN_GUIDEDAYS       = int((REAL_SETTINGS.getSetting('Min_Days')    or "1"))
+MAX_GUIDEDAYS       = int((REAL_SETTINGS.getSetting('Max_Days')    or "3"))
+OSD_TIMER           = int((REAL_SETTINGS.getSetting('OSD_Timer')   or "5"))
+EPG_ARTWORK         = int((REAL_SETTINGS.getSetting('EPG_Artwork') or "0"))
+
+#file paths
+USER_LOC            = REAL_SETTINGS.getSetting('User_Folder')
+LOGO_LOC            = os.path.join(USER_LOC,'logos')
+FILLER_LOC          = os.path.join(USER_LOC,'fillers')
+M3UFLEPATH          = os.path.join(USER_LOC,M3UFLE)
+XMLTVFLEPATH        = os.path.join(USER_LOC,XMLTVFLE)
+GENREFLEPATH        = os.path.join(USER_LOC,GENREFLE)
+PROVIDERFLEPATH     = os.path.join(USER_LOC,PROVIDERFLE)
+CHANNELFLEPATH      = os.path.join(USER_LOC,CHANNELFLE)
+LIBRARYFLEPATH      = os.path.join(USER_LOC,LIBRARYFLE) 
+SERVERFLEPATH       = os.path.join(USER_LOC,SERVERFLE)
+AUTOTUNEFLEPATH     = os.path.join(USER_LOC,AUTOTUNEFLE)
+
+class Globals:
+    @staticmethod
+    def _getProperty(key, default=''):
+        value = (xbmcgui.Window(10000).getProperty('%s.%s'%(ADDON_ID, key)) or default)
+        log(f'Globals: [10000] _getProperty, key = {key}, value = {str(value)[:128]}, type = {type(value).__name__}')
+        return value 
+
+    @staticmethod
+    def _setProperty(key, value):
+        xbmcgui.Window(10000).setProperty('%s.%s'%(ADDON_ID, key), value)
+        log(f'Globals: [10000] _setProperty, key = {key}, value = {str(value)[:128]}, type = {type(value).__name__}')
+        return value
+
+    @staticmethod
+    def _clrProperty(key):
+        return xbmcgui.Window(10000).clearProperty('%s.%s'%(ADDON_ID, key))
+
+    @staticmethod
+    def _encodePlot(plot, text):
+        return '%s [COLOR item="%s"][/COLOR]'%(plot,FileAccess._encodeString(text))
+        
+    @staticmethod
+    def _decodePlot(text: str = '') -> dict:
+        # Decode both encoding formats found in the wild:
+        #   - nightly upstream encodes via pickle (FileAccess._decodeString returns dict).
+        #   - master-era fork encoded via dumpJSON+UTF-8 (returns a JSON string), and
+        #     iptvsimple may still have those plots cached in its EPG database long after
+        #     the addon upgraded to nightly. Without the JSON fallback, matchChannel cannot
+        #     decode broadcastnow.plot from those cached entries — citem.id is missing,
+        #     no PVR item is found, and channel tunes silently no-op.
+        # Returns {} for any decode failure or unrecognised payload.
+        if isinstance(text, str):
+            plot = re.search(r'\[COLOR item=\"(.+?)\"]\[/COLOR]', text)
+            if plot:
+                decoded = FileAccess._decodeString(plot.group(1))
+                if isinstance(decoded, dict): return decoded
+                if isinstance(decoded, str) and decoded:
+                    try:
+                        import json as _json
+                        parsed = _json.loads(decoded)
+                        if isinstance(parsed, dict): return parsed
+                    except Exception:
+                        pass
+        return {}
+        
+    @staticmethod
+    def _escapeString(text, table=HTML_ESCAPE):
+        return escape(text,table)
+    
+    @staticmethod
+    def _unescapeString(text, table=HTML_ESCAPE):
+        return unescape(text,{v:k for k, v in list(table.items())})
+
+    @staticmethod
+    def _quoteString(text):
+        return urllib.parse.quote(text)
+
+    @staticmethod
+    def _unquoteString(text):
+        return urllib.parse.unquote(text)
+    
+    @staticmethod
+    def _getAbbr(text):
+        words = text.split(' ')
+        if len(words) > 1: return '%s.%s.'%(words[0][0].upper(),words[1][0].upper())
+        else:              return words[0][0].upper()
+	   
+    @staticmethod
+    def _slugify(s, lowercase=False):
+        if lowercase: s = s.lower()
+        s = s.strip()
+        s = re.sub(r'[^\w\s-]', '', s)
+        s = re.sub(r'[\s_-]+', '_', s)
+        s = re.sub(r'^-+|-+$', '', s)
+        return s
+            
+    @staticmethod
+    def _notificationDialog(msg, header=ADDON_NAME, time=PROMPT_DELAY, logo=LOGO_COLOR):
+        xbmc.executebuiltin("Notification(%s, %s, %d, %s)" % (header, msg, time*1000, logo))
+        
+    @staticmethod
+    def _getInfoBool(key, param='Library'):
+        return (xbmc.getCondVisibility('%s.%s'%(param,key)) or False)
+        
+    @staticmethod
+    def _getInfoLabel(key, param='ListItem', default=''):
+        return (xbmc.getInfoLabel('%s.%s'%(param,key)) or "")
+        
+    @staticmethod
+    def _openSettings(ctl=(0,1), id=ADDON_ID):
+        xbmc.executebuiltin(f'Addon.OpenSettings({id})')
+        xbmc.sleep(100)
+        xbmc.executebuiltin('SetFocus(%i)'%(ctl[0]-200))
+        xbmc.sleep(50)
+        xbmc.executebuiltin('SetFocus(%i)'%(ctl[1]-180))
+        return True
+
+    @staticmethod
+    def _openGuide(instance=ADDON_NAME):
+        def __match(match):
+            for name in FileAccess.listdir('pvr://channels/tv/')[0]:
+                if name.lower().startswith(Globals._quoteString(match.lower())):
+                    return match, 'pvr://channels/tv/%s'%(name)
+            return match, __match('All channels')
+        if Globals._getInfoBool('HasTVChannels','Pvr'):
+            try:
+                instance, path = __match(instance)
+                xbmc.executebuiltin("ReplaceWindow(TVGuide,%s)"%(path))
+            except Exception: xbmc.executebuiltin("ReplaceWindow(TVGuide)")
+        else: Globals._openSettings()
+          
+    @staticmethod
+    def _toEpgIconURL(image=''):
+        # v.41: convert raw image:// URLs in <programme><icon src="..."> to URLs iptvsimple
+        # accepts. iptvsimple's XMLTV parser silently drops scheme-unknown URLs (image://,
+        # special://, smb://, etc.) in programme <icon> and falls back to channel logo —
+        # verified empirically: 137 unique image:// URLs in pseudotv.xml resulted in 0 entries
+        # with image:// in Epg16.db.epgtags.sIconPath while 424 rows got channel logo path.
+        # Comparison: epg.best/movistarplus channels work because they use http(s):// URLs.
+        #
+        # v.40 attempted Kodi's /image/ proxy via Local_Host but hit a property-race: pseudotv's
+        # service publishes Local_Host briefly but the property reads back empty during
+        # subsequent build calls (Window 10000 property timing/persistence issue). Switched to
+        # using the addon's own HTTP server: Remote_Host is reliably set early (lazy-init via
+        # kodi.py:getRemoteHost), no auth needed, and server.py's /images/ handler already
+        # serves absolute file paths via FileAccess. We just decode the encoded path inside
+        # image://<urlencoded>/, prepend /images/, and emit as
+        # http://<remote_host>/images<absolute path>. Verified end-to-end: addon server returns
+        # HTTP 200 + 129685 bytes of fanart for /images//mnt/DEEPEE/TV/.../fanart.jpg.
+        # Pass-through for non-image:// inputs (existing http/https URLs from upstream sources
+        # and special:// fallbacks pseudotv keeps as channel-logo last-resort).
+        if not image: return image
+        if not image.startswith('image://'): return image
+        remote_host = Globals._getProperty('%s.Remote_Host'%(ADDON_ID))
+        if not remote_host: return image  # service hasn't published yet; next build cycle will wrap
+        # image://<urlencoded path>/ → decode the inner path, re-encode for HTTP URL
+        inner = image[len('image://'):].rstrip('/')
+        path  = Globals._unquoteString(inner)
+        if not path.startswith('/'): path = '/' + path
+        # Re-encode each path segment so the URL is valid (preserve / separators)
+        segments = path.split('/')
+        encoded  = '/'.join([Globals._quoteString(s) if s else s for s in segments])
+        return 'http://%s/images%s'%(remote_host, encoded)
+
+    @staticmethod
+    def _getThumb(item={}, opt=0): #unify thumbnail artwork
+        # v.36: return raw art, do NOT wrap through _buildWebImage. Master fork's getThumb
+        #       (kodi.py in 0.6.1q) returns the art string directly. Nightly's _getThumb
+        #       wrapped it through _buildWebImage, which for image:// URLs produces
+        #       '<local_host>/image/<encoded image://>' — and at XMLTV write time
+        #       local_host is empty (not yet published by service), so the result is the
+        #       host-less '/image/image%3A//...' form. iptvsimple ingests that into PVR
+        #       EPG cache; Kodi treats it as a plain URL string (no recognized scheme),
+        #       and JSON-RPC PVR.GetChannels exposes a thumbnail field that UC Remote 3
+        #       and other external clients can't resolve. Master's raw image://
+        #       URLs flow through Kodi's PVR cache, get exposed as
+        #       '/image/image%3A//<encoded>' (Kodi's native proxy form), and UC3 fetches
+        #       them via Kodi's /image/ proxy successfully.
+        #       Empirically verified: installing 0.6.1q+madteevee.14 (master fork) over
+        #       any post-rebase nightly version immediately restores UC3 logos. The only
+        #       structural difference in art handling between the two is this wrap.
+        # Earlier nightly bugs (already fixed in this version chain): (1) typo
+        # 'keyart,icon' in opt=0 keys was a single comma-containing key Kodi never sets;
+        # (2) no early-return inside loop meant `art` got overwritten to the LAST key's
+        # value instead of the FIRST match. Both kept here.
+        keys = {0:['landscape','fanart','thumb','thumbnail','poster','clearlogo','logo','logos','clearart','keyart','icon'],
+                1:['poster','clearlogo','logo','logos','clearart','keyart','landscape','fanart','thumb','thumbnail','icon']}[opt]
+        for key in keys:
+            art = (item.get('art',{}).get('album.%s'%(key))       or
+                   item.get('art',{}).get('albumartist.%s'%(key)) or
+                   item.get('art',{}).get('artist.%s'%(key))      or
+                   item.get('art',{}).get('season.%s'%(key))      or
+                   item.get('art',{}).get('tvshow.%s'%(key))      or
+                   item.get('art',{}).get(key)                    or
+                   item.get(key))
+            if art: return art
+        return {0:LOGO_LANDSCAPE,1:LOGO_POSTER}[opt]
+
+    @staticmethod
+    def _buildWebImage(image=None, fallback=LOGO):
+        # v.35: restored master fork's narrow scope. Empirically verified:
+        # installing 0.6.1q+madteevee.14 over the broken state immediately
+        # restored UC Remote 3 channel logos. v.14's buildWebImage wraps
+        # exactly two cases — absolute filesystem paths under LOGO_LOC and
+        # bare image:// VFS URLs — and lets everything else pass through.
+        # v.26-v.34 piled on resource://, special://, and an aggressive
+        # http:// branch that re-wrapped any http URL (including external
+        # programme art) into 'http://<our-host>/images/<encoded full URL>',
+        # which UC3 (and our own server) couldn't resolve. The empty-host
+        # symptom v.34 chased was real but secondary; the structural bug
+        # was the over-reaching branches themselves. v.34's host-empty
+        # guards retained as defense in depth.
+        image = Globals._cleanImage(image)
+        if not image: return fallback
+        remote_host = Globals._getProperty('%s.Remote_Host'%(ADDON_ID))
+        local_host  = Globals._getProperty('%s.Local_Host'%(ADDON_ID))
+        # Idempotency: URL already points to our own server, leave it alone.
+        if remote_host and image.startswith('http://%s/'%(remote_host)): return image
+        if image.startswith(LOGO_LOC):
+            # Absolute filesystem path under cache/logos/ — wrap to a clean
+            # http://<host>:50001/images/<basename>.png URL the addon HTTP
+            # server resolves via /images/ → __sendFile(LOGO_LOC + basename).
+            # This is the URL form UC3 fetches successfully.
+            if not remote_host: return image
+            image = 'http://%s/images/%s'%(remote_host,Globals._quoteString(os.path.split(image)[1]))
+        elif image.startswith(('image://','image%3A')) and not ('smb' in image or 'nfs' in image or 'http' in image):
+            # v.31: idempotency — '/image/' already in URL means we wrapped it
+            # before, don't re-wrap (otherwise produces nested image:// URLs).
+            if '/image/' in image: return image
+            if not local_host: return image
+            image = '%s/image/%s'%(local_host,Globals._quoteString(image))
+        # Everything else (http://, https://, resource://, special://, smb://,
+        # nfs://, raw paths outside LOGO_LOC) passes through unchanged. Kodi's
+        # native art layer wraps VFS schemes (resource://, special://) into
+        # image://<scheme>/<encoded>/ when caching, which Kodi's /image/ proxy
+        # can resolve. External http(s) URLs get fetched directly by clients.
+        return image
+
+    @staticmethod
+    def _getDummyIcon(text, background=COLOR_BACKGROUND, color=COLOR_TEXT):
+        if not isinstance(text, (str,bytes)): text = str(text)
+        url  = f'https://dummyimage.com/512x512/{background}/{color}.png&text={Globals._quoteString(text)}'
+        file = os.path.join(TEMP_IMAGE_LOC,f'{FileAccess._getMD5(url)}.png')
+        if   FileAccess.exists(file):   return file
+        elif Globals.setURL(url, file): return file
+        return LOGO_COLOR
+          
+    @staticmethod
+    def _cleanImage(image=''):
+        if image is None: image = ''
+        if not image.startswith(('image://','resource://','special://','smb://','nfs://','https://','http://')):
+            realPath = FileAccess.translatePath('special://home/addons/')
+            if image.startswith(realPath):# convert real path. to vfs
+                image = image.replace(realPath,'special://home/addons/').replace('\\','/')
+            elif image.startswith(realPath.replace('\\','/')):
+                image = image.replace(realPath.replace('\\','/'),'special://home/addons/').replace('\\','/')
+        return image.strip('/')
+
+    @staticmethod  
+    def _findItemsInLST(items, values, item_key='getLabel', val_key='', index=True):
+        if not values: return [-1]
+        if not isinstance(values,list): values = [values]
+        matches = []
+        def _match(fkey,fvalue):
+            if str(fkey).lower() == str(fvalue).lower():
+                matches.append(idx if index else item)
+                        
+        for value in values:
+            if isinstance(value,dict): 
+                value = value.get(val_key,'')
+                
+            for idx, item in enumerate(items): 
+                if isinstance(item,xbmcgui.ListItem): 
+                    if item_key == 'getLabel':  
+                        _match(item.getLabel() ,value)
+                    elif item_key == 'getLabel2': 
+                        _match(item.getLabel2(),value)
+                    elif item_key == 'getPath': 
+                        _match(item.getPath(),value)
+                elif isinstance(item,dict):       
+                    _match(item.get(item_key,''),value)
+                else: _match(item,value)
+        return matches
+        
+    @staticmethod  
+    def _setDictLST(lst=[]): #set lst of dicts then return
+        return [FileAccess.loadJSON(s) for s in list(OrderedDict.fromkeys([FileAccess.dumpJSON(d) for d in lst]))]
+
+    @staticmethod  
+    def _mergeDictLST(dict1={},dict2={}):
+        for k, v in list(dict2.items()):
+            dict1.setdefault(k,[]).extend(v)
+            Globals._setDictLST()
+        return dict1
+        
+    @staticmethod  
+    def _lstSetDictLst(lst=[]):
+        items = dict()
+        for key, dictlst in list(lst.items()):
+            if isinstance(dictlst, list): dictlst = Globals._setDictLST(dictlst)
+            items[key] = dictlst
+        return items
+        
+    @staticmethod  
+    def diffLSTDICT(old, new):
+        set1 = {FileAccess.dumpJSON(d, sortkey=True) for d in old}
+        set2 = {FileAccess.dumpJSON(d, sortkey=True) for d in new}
+        return {"added": [FileAccess.loadJSON(s) for s in set2 - set1], "removed": [FileAccess.loadJSON(s) for s in set1 - set2]}
+            
+    @staticmethod  
+    def _cleanGroups(citem={}):
+        if ADDON_NAME not in citem.get('group'): citem.setdefault('group',[]).append(ADDON_NAME)
+        if REAL_SETTINGS.getSetting('Enable_Grouping') == "true":
+            if citem.get('favorite',False) and not LANGUAGE(32019) in citem['group']: citem['group'].append(LANGUAGE(32019))
+            elif not citem.get('favorite',False) and LANGUAGE(32019) in citem['group']: citem['group'].remove(LANGUAGE(32019))
+        citem['group'] = sorted(set(citem['group']))
+        return citem
+             
+    @staticmethod  
+    def _randomShuffle(items):
+        if isinstance(items,dict):
+            keys = Globals._randomShuffle(list(items.keys()))
+            return {key: Globals._randomShuffle(items[key]) for key in keys}
+        elif isinstance(items,list):
+            if items:
+                tmpItems = items[:]
+                random.shuffle(tmpItems)
+                return [Globals._randomShuffle(item) for item in tmpItems]
+        return items
+
+    @staticmethod  
+    def _randomSamples(items=[], x=-1):
+        if isinstance(items, list):
+            if items and len(items) >= x: return random.sample(items, x)
+            else:               return random.sample(items, len(items))
+        return items
+        
+    @staticmethod
+    def setURL(url, file):
+        with FileLock(file):
+            try:
+                fle = FileAccess.open(file, 'w')
+                fle.write(Globals.requestURL(url))
+            except Exception as e: log('Globals: setURL failed! %s\nurl = %s'%(e,url), xbmc.LOGERROR)
+            finally:
+                if hasattr(fle, 'close'): fle.close()
+        return FileAccess.exists(file)
+        
+    @staticmethod
+    def requestURL(url, params={}, payload={}, header=HEADER, timeout=15, cache=None, file=None):
+        #cache = {"cache":None, "checksum":ADDON_VERSION, "life": datetime.timedelta(minutes=15)}
+        def __error(result={}):                              return result
+        def __getCache(key, cache, checksum):                return (cache.get('requestURL.%s'%(FileAccess._getMD5(key)), checksum) or __error())
+        def __setCache(key, results, cache, checksum, life): return cache.set('requestURL.%s'%(FileAccess._getMD5(key)), results, checksum, life)
+            
+        results = None
+        session = requests.Session()
+        retries = Retry(total=3, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
+        adapter = HTTPAdapter(max_retries=retries)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+
+        try:
+            headers = HEADER.copy()
+            headers.update(header)
+            if payload: response = session.post(url, json=payload, files=file, headers=headers, timeout=timeout)
+            else:       response = session.get(url, params=params, headers=headers, timeout=timeout)
+            response.raise_for_status()  # Raise an exception for HTTP errors
+            content_type = response.headers.get('Content-Type', '').lower()
+            if 'application/json' in content_type: results = response.json()
+            else: results = response.content
+            log("Globals: requestURL\nurl = %s, status = %s\nparams = %s\npayload = %s\nreturn type = %s"%(url,response.status_code,params,payload,type(results)))
+            
+            if results and not cache is None: 
+                return __setCache('.'.join([url,FileAccess.dumpJSON(params),FileAccess.dumpJSON(payload),FileAccess.dumpJSON(header)]), 
+                                  results, cache["cache"], cache.get("checksum",ADDON_VERSION), cache.get("life",datetime.timedelta(minutes=15)))
+            return results 
+        except Exception as e: 
+            log("Globals: requestURL, failed! %s, An error occurred: %s"%('Returning cache' if cache else 'No Response', e))
+            return __getCache('.'.join([url,FileAccess.dumpJSON(params),FileAccess.dumpJSON(payload),FileAccess.dumpJSON(header)]), 
+                              cache["cache"], cache.get("checksum",ADDON_VERSION)) if cache else __error()
+        # finally: #retry failed post
+            # if results is None and payload:
+                # Globals.queuePost(url, params, payload, header, timeout, None, file)
+        
+    # @staticmethod
+    # def queuePost(url, params, payload, header, timeout, None, file):
+        ...
+        # posts = set(SETTINGS.getCacheSetting('postQue', revive=True) or [])
+        # posts.add()
+        # SETTINGS.setCacheSetting('postQue', list(posts), checksum=ADDON_VERSION)

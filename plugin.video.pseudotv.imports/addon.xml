@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<addon id="plugin.video.pseudotv.imports" version="0.8.0+imports.18" name="PseudoTV Live (imports)" provider-name="Lunatixz, mmadalone">
+    <requires>
+        <import addon="xbmc.python" version="3.0.1"/>
+        <import addon="script.module.six" version="1.0.0"/>
+        <import addon="script.module.kodi-six" version="0.1.3.1"/>
+        <import addon="script.module.infotagger" version="0.0.5"/>
+        <import addon="script.module.requests" version="0.0.1"/>
+        <import addon="script.module.pyqrcode" version="1.2.1+matrix.1"/>
+        <import addon="plugin.library.node.editor" version="0.0.1"/>
+        <import addon="resource.images.studios.white" version="0.0.1"/>
+        <import addon="resource.images.studios.coloured" version="0.0.1"/>
+        <import addon="resource.images.musicgenreicons.text" version="0.0.1"/>
+        <import addon="resource.images.moviegenreicons.white" version="0.0.1"/>
+        <import addon="resource.images.moviegenreicons.transparent" version="0.0.1"/>
+        <import addon="resource.images.pseudotv.logos" optional="true" version="0.0.1"/>
+        <import addon="resource.images.overlays.crttv" optional="true" version="0.0.2"/>
+        <import addon="resource.videos.bumpers.pseudotv" optional="true" version="0.0.1"/>
+        <import addon="resource.videos.bumpers.kodi" optional="true" version="0.0.1"/>
+        <import addon="resource.videos.ratings.mpaa.classic" optional="true" version="0.0.4"/>
+        <import addon="script.module.youtube.dl" optional="true" version="23.04.01+matrix.1"/>
+        <import addon="script.module.pil" optional="true" version="5.1.0"/>
+        
+    </requires>
+    <extension point="xbmc.python.pluginsource" library="resources/lib/default.py">
+        <provides>video</provides>
+    </extension>
+    <extension point="xbmc.service" library="resources/lib/service.py"/>
+    <extension point="kodi.context.item">
+        <menu id="kodi.core.main">
+            <menu>
+                <label>PseudoTV Live</label>
+                <item library="resources/lib/context_record.py" args="add">
+                    <label>30115</label>
+                    <visible>[String.Contains(ListItem.Plot,"item=") + ListItem.HasEpg] + [Window.IsVisible(tvguide)|Window.IsVisible(tvsearch)|Window.IsVisible(tvchannels)]</visible>
+                </item>
+                <item library="resources/lib/context_record.py" args="del">
+                    <label>30117</label>
+                    <visible>[String.StartsWith(ListItem.PVRInstanceName, PseudoTV Live) + Window.IsVisible(tvrecordings)]</visible>
+                </item>
+                <item library="resources/lib/default.py" args="?mode=playlist">
+                    <label>30076</label>
+                    <visible>[String.Contains(ListItem.Plot,"item=") + ListItem.HasEpg] + [Window.IsVisible(tvguide)|Window.IsVisible(tvsearch)|Window.IsVisible(tvchannels)]</visible>
+                </item>
+                <item library="resources/lib/context_info.py" args="info">
+                    <label>30075</label>
+                    <visible>[String.Contains(ListItem.Plot,"item=") + ListItem.HasEpg] + [Window.IsVisible(tvguide)|Window.IsVisible(tvsearch)|Window.IsVisible(tvchannels)]</visible>
+                </item>
+                <item library="resources/lib/context_info.py" args="match">
+                    <label>30091</label>
+                    <visible>[String.Contains(ListItem.Plot,"item=") + ListItem.HasEpg] + [Window.IsVisible(tvguide)|Window.IsVisible(tvsearch)|Window.IsVisible(tvchannels)]</visible>
+                </item>
+                <item library="resources/lib/context_info.py" args="browse">
+                    <label>30087</label>
+                    <visible>[String.Contains(ListItem.Plot,"item=") + ListItem.HasEpg] + [Window.IsVisible(tvguide)|Window.IsVisible(tvsearch)|Window.IsVisible(tvchannels)]</visible>
+                </item>
+                <item library="resources/lib/context_create.py" args="add">
+                    <label>30114</label>
+                    <visible>[!ListItem.IsPlayable + ListItem.IsFolder] + [!String.IsEmpty(ListItem.Label)]</visible>
+                </item>
+                <item library="resources/lib/context_create.py" args="open_manager">
+                    <label>32261</label>
+                    <visible>[String.Contains(ListItem.Plot,"item=")]</visible>
+                </item>
+                <item library="resources/lib/context_create.py" args="open_manager">
+                    <label>30107</label>
+                    <visible>[!String.Contains(ListItem.Plot,"item=")]</visible>
+                </item>
+            </menu>
+        </menu>
+    </extension>
+    <extension point="xbmc.addon.metadata">
+        <summary lang="en_GB">PseudoTV Live with M3U/XMLTV live import support.</summary>
+        <description lang="en_GB">Fork variant of PseudoTV Live (madteevee) that adds live channel imports from external M3U + XMLTV sources (local files or HTTP URLs) with conflict-cascade allocation and per-channel operator overrides. Designed for parallel install alongside the standard PseudoTV Live addon.</description>
+        <platform>all</platform>
+        <license>GPL-3.0-or-later</license>
+        <source>https://github.com/PseudoTV/PseudoTV_Live</source>
+        <forum>https://forum.kodi.tv/showthread.php?tid=355549</forum>
+        <disclaimer lang="en_GB">BETA PROJECT; SUBJECT TO BUGS</disclaimer>
+        <reuselanguageinvoker>true</reuselanguageinvoker>
+        <assets>
+            <icon>resources/images/icon.png</icon>
+            <fanart>resources/images/fanart.jpg</fanart>
+            <screenshot>resources/images/screenshot01.png</screenshot>
+            <screenshot>resources/images/screenshot02.png</screenshot>
+            <screenshot>resources/images/screenshot03.png</screenshot>
+            <screenshot>resources/images/screenshot04.png</screenshot>
+        </assets>
+    </extension>
+</addon>

@@ -1,0 +1,239 @@
+{"":{},
+            
+            "newyear"  :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Twilight Zone","Anthology","Anthologies","Outer Limits"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Twilight Zone","Anthology","Anthologies","Outer Limits"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["Twilight Zone","Anthology","Anthologies","Outer Limits"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Twilight Zone","Anthology","Anthologies","Outer Limits"]}]}]}}]},
+            
+            "scifi"    :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"genre"   ,"operator":"contains","value":["Sci-Fi","Science Fiction"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"genre"   ,"operator":"contains","value":["Sci-Fi","Science Fiction"]}]}]}}]},
+                         
+            "lotr"     :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Lord of the rings","LOTR","Hobbit","J.R.R. Tolkien","Tolkien"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Lord of the rings","LOTR","Hobbit","J.R.R. Tolkien","Tolkien"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["Lord of the rings","LOTR","Hobbit","J.R.R. Tolkien","Tolkien"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Lord of the rings","LOTR","Hobbit","J.R.R. Tolkien","Tolkien"]}]}]}}]},
+                         
+            "lego"     :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["LEGO"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["LEGO"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["LEGO"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["LEGO"]}]}]}}]},
+                         
+            "gijoe"    :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["G.I. Joe"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["G.I. Joe"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["G.I. Joe"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["G.I. Joe"]}]}]}}]},
+            
+            "romance"  :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"genre"   ,"operator":"contains","value":["Romance","Romcom"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"genre"   ,"operator":"contains","value":["Romance","Romcom"]}]}]}}]},
+                         
+            "pokemon"  :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Pokemon","Pokémon"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Pokemon","Pokémon"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["Pokemon","Pokémon"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Pokemon","Pokémon"]}]}]}}]},
+                         
+            "superman" :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Superman","Krypton"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Superman","Krypton"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["Superman","Krypton"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Superman","Krypton"]}]}]}}]},
+                                     
+            "pixar"    :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Pixar"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Pixar"]},
+                                                                                                                {"field":"studio"  ,"operator":"contains","value":["Pixar"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["Pixar"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Pixar"]},
+                                                                                                                {"field":"studio"  ,"operator":"contains","value":["Pixar"]}]}]}}]},
+            
+            "seuss"    :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Dr. Seuss","Lorax","Grinch"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Dr. Seuss","Lorax","Grinch"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["Dr. Seuss","Lorax","Grinch"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Dr. Seuss","Lorax","Grinch"]}]}]}}]},
+                                                                                                                
+            "hitchcock":{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Alfred Hitchcock"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Alfred Hitchcock"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"random", "order":"ascending"},"filter":{"and":[{"or" :[{"field":"director","operator":"contains","value":["Alfred Hitchcock"]},
+                                                                                                                {"field":"writers" ,"operator":"contains","value":["Alfred Hitchcock"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Alfred Hitchcock"]}]}]}}]},
+                                                                                                                
+            "patrick"  :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["It's Always Sunny"]}]}]}},
+                                      {"sort":{"method":"random" ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"plot"    ,"operator":"contains","value":["St. Patrick","Leprechaun","Irish","Luck","Lucky","Gold","Shamrock"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"random" ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"plot"    ,"operator":"contains","value":["St. Patrick","Leprechaun","Irish","Luck","Lucky","Gold","Shamrock"]}]}]}}]},
+            
+            "quentin"  :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"director","operator":"contains","value":["Quentin Tarantino"]},
+                                                                                                                {"field":"writers" ,"operator":"contains","value":["Quentin Tarantino"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Quentin Tarantino"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"random" ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"director","operator":"contains","value":["Quentin Tarantino"]},
+                                                                                                                {"field":"writers" ,"operator":"contains","value":["Quentin Tarantino"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Quentin Tarantino"]}]}]}}]},
+                                                                                                                
+            "anderson" :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"director","operator":"contains","value":["Wes Anderson"]},
+                                                                                                                {"field":"writers" ,"operator":"contains","value":["Wes Anderson"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Wes Anderson"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"random" ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"director","operator":"contains","value":["Wes Anderson"]},
+                                                                                                                {"field":"writers" ,"operator":"contains","value":["Wes Anderson"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Wes Anderson"]}]}]}}]},
+                                                                                                                
+            "lucas"    :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"director","operator":"contains","value":["George Lucas","Sofia Coppola"]},
+                                                                                                                {"field":"writers" ,"operator":"contains","value":["George Lucas","Sofia Coppola"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["George Lucas","Sofia Coppola"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"random" ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"director","operator":"contains","value":["George Lucas","Sofia Coppola"]},
+                                                                                                                {"field":"writers" ,"operator":"contains","value":["George Lucas","Sofia Coppola"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["George Lucas","Sofia Coppola"]}]}]}}]},
+                                                                                                                
+            "welles"   :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"director","operator":"contains","value":["Orson Welles"]},
+                                                                                                                {"field":"writers" ,"operator":"contains","value":["Orson Welles"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Orson Welles"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"random" ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"director","operator":"contains","value":["Orson Welles"]},
+                                                                                                                {"field":"writers" ,"operator":"contains","value":["Orson Welles"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Orson Welles"]}]}]}}]},
+                                                                                                                
+            "chukwu"   :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"director","operator":"contains","value":["Chinonye Chukwu"]},
+                                                                                                                {"field":"writers" ,"operator":"contains","value":["Chinonye Chukwu"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Chinonye Chukwu"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"random" ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"director","operator":"contains","value":["Chinonye Chukwu"]},
+                                                                                                                {"field":"writers" ,"operator":"contains","value":["Chinonye Chukwu"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Chinonye Chukwu"]}]}]}}]},
+                                                                                                                
+                                                                                                                
+            "eastwood" :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"director","operator":"contains","value":["Clint Eastwood"]},
+                                                                                                                {"field":"writers" ,"operator":"contains","value":["Clint Eastwood"]},
+                                                                                                                {"field":"cast"    ,"operator":"contains","value":["Clint Eastwood"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Clint Eastwood"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"random" ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"director","operator":"contains","value":["Clint Eastwood"]},
+                                                                                                                {"field":"writers" ,"operator":"contains","value":["Clint Eastwood"]},
+                                                                                                                {"field":"cast"    ,"operator":"contains","value":["Clint Eastwood"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Clint Eastwood"]}]}]}}]},
+                                                                                                                
+            "startrek" :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Star Trek"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Star Trek"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["Star Trek"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Star Trek"]}]}]}}]},
+                                                                                                                
+            "muppets"  :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["The Muppets"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["The Muppets"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["The Muppets"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["The Muppets"]}]}]}}]},
+                                                          
+            "othello"  :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["William Shakespeare","Shakespeare"]},
+                                                                                                                {"field":"writers" ,"operator":"contains","value":["William Shakespeare","Shakespeare"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["William Shakespeare","Shakespeare"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"random" ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["William Shakespeare","Shakespeare"]},
+                                                                                                                {"field":"writers" ,"operator":"contains","value":["William Shakespeare","Shakespeare"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["William Shakespeare","Shakespeare"]}]}]}}]},
+                                                                                                                
+            "super"    :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"studio"  ,"operator":"contains","value":["Marvel","DC"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Superhero"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"studio"  ,"operator":"contains","value":["Marvel","DC"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Superhero"]}]}]}}]},
+                                                                                                                
+            "aliens"   :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"is"      ,"value":["Alien: Earth"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"is"      ,"value":["TED 2023","Prometheus","Alien: Covenant","Alien","Alien: Isolation","Alien: Out of the Shadows","Alien: Romulus","Aliens","Aliens: Colonial Marines","Fire and Stone","Alien3","Alien³","Aliens: Dark Descent","Aliens: Fireteam Elite","Aliens: Phalanx","Alien Resurrection"]},
+                                                                                                                {"field":"title"   ,"operator":"is"      ,"value":["Predator","Predator 2","Predators","The Predator","Prey","Badlands","Alien vs. Predator","Aliens vs. Predator: Requiem","Predator: Dark Ages"]}]}]}}]},
+                                                                                                                
+            "starwars" :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Star Wars"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Star Wars"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["Star Wars"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Star Wars"]}]}]}}]},
+            
+            "twilight" :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Twilight Zone", "Rod Serling"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Twilight Zone", "Rod Serling"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["Twilight Zone", "Rod Serling"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Twilight Zone", "Rod Serling"]}]}]}}]},
+            
+            "mavrick"  :{"movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"is","value":["Top Gun","Top Gun: Maverick"]}]}]}}]},
+            
+            "watson"   :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Enola Holmes", "Sherlock", "Sher-lock", "Sherlock Holmes", "Arthur Conan Doyle", "Watson"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Enola Holmes", "Sherlock", "Sher-lock", "Sherlock Holmes", "Arthur Conan Doyle", "Watson"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["Enola Holmes", "Sherlock", "Sher-lock", "Sherlock Holmes", "Arthur Conan Doyle", "Watson"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Enola Holmes", "Sherlock", "Sher-lock", "Sherlock Holmes", "Arthur Conan Doyle", "Watson"]}]}]}}]},
+            
+            "vampire"  :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Vampire", "Dracula" ,"Nosferatu"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Vampire", "Dracula" ,"Nosferatu", "Vamp", "Bloodsucker", "Vampirism"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["Vampire", "Dracula" ,"Nosferatu"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Vampire", "Dracula" ,"Nosferatu", "Vamp", "Bloodsucker", "Vampirism"]}]}]}}]},
+            
+            "ghosts"   :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Ghostbusters"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Ghostbusters"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["Ghostbusters"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Ghostbusters"]}]}]}}]},
+            
+            "jurassic" :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Jurassic Park"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Jurassic Park"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["Jurassic Park"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Jurassic Park"]}]}]}}]},
+
+            "disney"   :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Disney","Walt Disney"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Disney","Walt Disney"]},
+                                                                                                                {"field":"studio"  ,"operator":"contains","value":["Disney","Walt Disney"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["Disney","Walt Disney"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Disney","Walt Disney"]},
+                                                                                                                {"field":"studio"  ,"operator":"contains","value":["Disney","Walt Disney"]}]}]}}]},
+            
+            "potter"   :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Harry Potter"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Harry Potter"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["Harry Potter","Fantastic beasts"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Harry Potter","Fantastic beasts"]}]}]}}]},
+            
+            "spider"   :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Spider Man","Spider-Man","Spiderman"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Spider Man","Spider-Man","Spiderman"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["Spider Man","Spider-Man","Spiderman"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Spider Man","Spider-Man","Spiderman"]}]}]}}]},
+            
+            "sponge"   :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["SpongeBob"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["SpongeBob"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["SpongeBob"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["SpongeBob"]}]}]}}]},
+            
+            "ranger"   :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Power Rangers"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Power Rangers"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["Power Rangers"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Power Rangers"]}]}]}}]},
+            
+            "batman"   :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Batman"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Batman"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["Batman","Joker"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Batman"]}]}]}}]},
+                                                                                                                
+            "wonka"    :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Willy Wonka","Wonka"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Willy Wonka","Wonka"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["Willy Wonka","Wonka"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Willy Wonka","Wonka"]}]}]}}]},
+            
+            "future"   :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Back to the future","Delorean"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Back to the future","Delorean"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["Back to the future","Delorean"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Back to the future","Delorean"]}]}]}}]},
+            
+            "horror"   :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"genre"   ,"operator":"contains","value":["Horror"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"genre"   ,"operator":"contains","value":["Horror"]}]}]}}]},
+            
+            "heros"    :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Veterans","WWI","WWII","Korean War","Vietnam War","World War I","World War II"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Veterans","WWI","WWII","Korean War","Vietnam War","World War I","World War II"]},
+                                                                                                                {"field":"genre"   ,"operator":"contains","value":["War"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["Veterans","WWI","WWII","Korean War","Vietnam War","World War I","World War II"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Veterans","WWI","WWII","Korean War","Vietnam War","World War I","World War II"]},
+                                                                                                                {"field":"genre"   ,"operator":"contains","value":["War"]}]}]}}]},
+            
+            "tardis"   :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"is"      ,"value":["Dr. Who","Doctor Who","Tardis"]},
+                                                                                                                {"field":"plot"    ,"operator":"is"      ,"value":["Dr. Who","Doctor Who","Tardis"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"is"      ,"value":["Dr. Who","Doctor Who","Tardis"]},
+                                                                                                                {"field":"plot"    ,"operator":"is"      ,"value":["Dr. Who","Doctor Who","Tardis"]}]}]}}]},
+            
+            "turkey"   :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Thanksgiving","Turkey"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Thanksgiving","Turkey"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["Thanksgiving","Turkey"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Thanksgiving","Turkey"]}]}]}}]},
+            
+            "marvel"   :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Marvel"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Marvel"]},
+                                                                                                                {"field":"studio"  ,"operator":"contains","value":["Marvel"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["Marvel"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Marvel"]},
+                                                                                                                {"field":"studio"  ,"operator":"contains","value":["Marvel"]}]}]}}]},
+            
+            "xmas"     :{"episodes": [{"sort":{"method":"episode","order":"ascending"},"filter":{"and":[{"or" :[{"field":"tvshow"  ,"operator":"contains","value":["Christmas","X-Mas","Christmastime","Hanukkah","Kwanzaa"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Christmas","X-Mas","Christmastime","Hanukkah","Kwanzaa"]}]}]}}],
+                         "movies"  : [{"sort":{"method":"year"   ,"order":"ascending"},"filter":{"and":[{"or" :[{"field":"title"   ,"operator":"contains","value":["Christmas","X-Mas","Christmastime","Hanukkah","Kwanzaa"]},
+                                                                                                                {"field":"plot"    ,"operator":"contains","value":["Christmas","X-Mas","Christmastime","Hanukkah","Kwanzaa"]}]}]}}]}}
+                                                                                                                
+                                                                                                                
+                                               

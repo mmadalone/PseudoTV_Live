@@ -1,0 +1,452 @@
+#   Copyright (C) 2026 Lunatixz
+#
+#
+# This file is part of PseudoTV Live.
+#
+# PseudoTV Live is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# PseudoTV Live is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
+
+# -*- coding: utf-8 -*-
+from globals             import *
+from jsonrpc             import JSONRPC
+from rules               import RulesList
+from infotagger.listitem import ListItemInfoTag
+
+class Plugin(object):
+    player  = PLAYER()
+    jsonRPC = JSONRPC()
+    monitor = MONITOR()
+    cache   = SETTINGS.cache
+    
+    def __init__(self, mode='playlist', sysInfo={}):
+        self.sysInfo = sysInfo
+        self.sysInfo['seek'] = (sysInfo.get('seek') or abs(int(sysInfo.get('start',-1)) - int(sysInfo.get('now',-1))) if int(sysInfo.get('start',-1)) > 0 else -1)
+        self.sysInfo["progresspercentage"] = round((self.sysInfo["seek"]/int(self.sysInfo["duration"])) * 100, 2) if self.sysInfo['seek'] > 0 else -1 
+        
+        if not self.sysInfo.get('fitem'): 
+            self._updateSysInfo() #Widgets don't include listitem meta, attempt to find matching meta with jsonrpc
+            
+        # isVOD is a routing flag, not a structural truth — it answers "is this tune
+        # actually a VOD selection (catchup-id / specific programme picked from manager)?",
+        # not "is this content library-derived?". Nightly tied it to fitem.file != vid which
+        # is True for ALL library-derived channels (their fitem.file is the local media path
+        # while vid is the encoded plugin URL — they NEVER match by construction), making
+        # every PseudoTV channel zap look like a VOD selection. Tie to URL mode instead so
+        # 'live' tunes are not VOD, 'vod'/'dvr' tunes are.
+        self.sysInfo['isVOD']      = sysInfo.get('mode') in ('vod', 'dvr')
+        self.sysInfo['isSTRM']     = self.sysInfo.get('fitem').get('file','').endswith('.strm')
+        self.sysInfo['isPlaylist'] = bool(SETTINGS.getSettingInt('Playback_Method'))
+        mode = 'playlist' if any([self.sysInfo['isVOD'],self.sysInfo['isSTRM'],self.sysInfo['isPlaylist']]) else sysInfo.get('mode')
+        self.log(f'__init__, mode = {mode}, sysInfo = {self.sysInfo}')
+        
+        if   mode == 'live':                    self.playLive()
+        elif mode == 'radio':                   self.playRadio()
+        elif mode == 'resume':                  self.playPaused()
+        elif mode in ['vod','dvr']:             self.playVOD()
+        elif mode in ['playlist','broadcast']:  self.playPlaylist()
+        
+        
+    def log(self, msg, level=xbmc.LOGDEBUG):
+        return log('%s: %s'%(self.__class__.__name__,msg),level)
+
+            
+    def _updateSysInfo(self):
+        self.log('[%s] _updateSysInfo'%(self.sysInfo.get('chid')))
+        if not self.player.isPlaying(): DIALOG.notificationDialog(f'{LANGUAGE(32248)} {LANGUAGE(30223)}\n{LANGUAGE(32140)}')
+        with PROPERTIES.suspendActivity():
+            pvritem = self.jsonRPC.matchChannel(self.sysInfo.get('name'),self.sysInfo.get('chid'),self.sysInfo.get('radio',False),extend=False)
+            if pvritem:
+                self.sysInfo['fitem'] = Globals._decodePlot(pvritem.get('broadcastnow',{}).get('plot',''))
+                self.sysInfo['nitem'] = Globals._decodePlot(pvritem.get('broadcastnext',[{}])[0].get('plot',''))
+            else: DIALOG.notificationDialog(LANGUAGE(32000))
+                
+            
+    def _quePlaylist(self, listitems, pltype=xbmc.PLAYLIST_VIDEO, shuffle=None):
+        def __add(listitem):
+            if listitem.getPath():
+                playlist.add(listitem.getPath(),listitem,listitems.index(listitem))
+
+        if listitems:
+            self.sysInfo['isPlaylist'] = True
+            if shuffle is None: shuffle = BUILTIN.isPlaylistRandom()
+            self.log('[%s] _quePlaylist, listitems = %s, shuffle = %s'%(self.sysInfo.get('chid'), len(listitems), shuffle))
+            playlist = xbmc.PlayList(pltype)
+            playlist.clear()
+            xbmc.sleep(100) #give playlist.clear() enough time to clear queue.
+            poolit(__add)(listitems)
+            self.log('[%s] _quePlaylist, Playlist size = %s, shuffle = %s'%(self.sysInfo.get('chid'), playlist.size(),shuffle))
+            if shuffle: playlist.shuffle()
+            else:       playlist.unshuffle()
+            return playlist, listitems[0]
+        # listitems is empty (e.g. _getPVRItems returned [] because matchChannel found no
+        # current broadcast). Return (None, None) so callers can short-circuit cleanly
+        # instead of crashing on `*None` splat — the user already saw the "no items"
+        # notification from _getPVRItems.
+        return None, None
+
+
+    def _getPVRItems(self):
+        def __findCurrent(items, byFile=True, found=-1):
+            for pos, nextitem in enumerate(items):
+                fitem = Globals._decodePlot(nextitem.get('plot',{}))
+                file  = self.sysInfo.get('fitem',{}).get('file')
+                if byFile and file.lower() == fitem.get('file','').lower(): found = pos
+                elif not byFile and ntime >= strpTime(nextitem.get('starttime')) and ntime < strpTime(nextitem.get('endtime')) and self.sysInfo.get('chid') == fitem.get('citem',{}).get('id',str(random.random())): found = pos
+                if found >= 0:
+                    self.log('[%s] __buildPlaylist __findCurrent found match!'%(self.sysInfo.get('chid')))
+                    items = items[found:]
+                    break
+                
+            if len(items) > 0:
+                if self.sysInfo.get('mode',False) == 'playlist':
+                    # Offset start based on user configured tolerances. 
+                    nowitem = items.pop(0)
+                    # content almost concluded, move to next queued item
+                    if round(nowitem['progresspercentage']) > SETTINGS.getSettingInt('Seek_Threshold'):
+                        self.log('[%s] __buildPlaylist, __findCurrent progress past threshold advance to nextitem'%(self.sysInfo.get('chid')))
+                        nowitem = items.pop(0)
+                    # content just started, reset seek and progress to the beginning. 
+                    if round(nowitem['progress']) < SETTINGS.getSettingInt('Seek_Tolerance'):
+                        self.log('[%s] __buildPlaylist, __findCurrent progress start at the beginning'%(self.sysInfo.get('chid')))
+                        nowitem['progress']           = 0
+                        nowitem['progresspercentage'] = 0
+                    self.sysInfo['callback'] = self.jsonRPC.getCallback(self.sysInfo)
+                    items = items[:SETTINGS.getSettingInt('Page_Limit')]# list of upcoming items, truncate for speed
+                    items.insert(0,nowitem)
+                combineDicts(self.sysInfo['fitem'],items[0].get('fitem',{}))
+            self.log('[%s] __buildPlaylist, __findCurrent building nextitems (%s)'%(self.sysInfo.get('chid'),len(items)))
+            return items
+            
+        self.log('[%s] _getPVRItems'%(self.sysInfo.get('chid')))
+        with PROPERTIES.suspendActivity():
+            pvritem = self.jsonRPC.matchChannel(self.sysInfo.get('name'),self.sysInfo.get('chid'),self.sysInfo.get('radio',False),extend=True)
+        
+        if pvritem:
+            pastItems = pvritem.get('broadcastpast',[]) # past items
+            nowitem   = pvritem.get('broadcastnow',{})  # current item
+            nextitems = pvritem.get('broadcastnext',[]) # future items
+            nextitems.insert(0,nowitem)
+            nextitems = pastItems + nextitems
+            # start array at correct position
+            if   self.sysInfo['fitem'].get('file'): nextitems = __findCurrent(nextitems)
+            else:                                   nextitems = __findCurrent(nextitems, byFile=False)
+            if len(nextitems) > 0: return nextitems
+            else: DIALOG.notificationDialog(LANGUAGE(32164))
+        else: DIALOG.notificationDialog(LANGUAGE(32000))
+        return []
+                   
+                   
+    def _setResume(self, listitem):
+        if self.sysInfo.get('seek',0) > SETTINGS.getSettingInt('Seek_Tolerance') and self.sysInfo.get('progresspercentage',100) < 100:
+            self.log('[%s] _setResume, seek = %s, progresspercentage = %s\npath = %s'%(self.sysInfo.get('chid'), self.sysInfo.get('seek',0), self.sysInfo.get('progresspercentage',100), listitem.getPath()))
+            listitem.setProperty('startoffset', str(self.sysInfo['seek'])) #secs
+            infoTag = ListItemInfoTag(listitem,'video')
+            infoTag.set_resume_point({'ResumeTime':self.sysInfo['seek'],'TotalTime':(self.sysInfo['duration'] * 60)})
+        return listitem
+
+        
+    @threadit
+    def playLive(self):
+        self.log('[%s] playLive, name = %s'%(self.sysInfo.get('chid'), self.sysInfo.get('name')))
+        with PROPERTIES.suspendActivity():
+            try:    start = int(self.sysInfo.get('start', -1) or -1)
+            except: start = -1
+            try:    stop  = int(self.sysInfo.get('stop',  -1) or -1)
+            except: stop  = -1
+            try:    now   = int(self.sysInfo.get('now',   -1) or -1)
+            except: now   = -1
+            # madteevee: fitem.start/stop fallback for Custom-channel live tunes.
+            # pvr.iptvsimple LEAVES the catchup tokens {utc}/{utcend}/{duration}
+            # un-substituted on live URLs (they only fill for catchup playback),
+            # and default.py:61-66 then zeroes them to '0' to avoid downstream
+            # int('{utc}') crashes. Result: start/stop reach playLive as -1
+            # (zero falsy → 'or -1'), the join-now check below fails, and the
+            # tune falls through to the VOD branch which plays from frame 0.
+            # The decoded fitem carries REAL epoch start/stop set by Builder's
+            # addScheduling, so use those as the authoritative source when the
+            # URL templates were zeroed.
+            fitem = self.sysInfo.get('fitem') or {}
+            if start <= 0:
+                try:    start = int(fitem.get('start') or -1)
+                except: start = -1
+            if stop <= 0:
+                try:    stop  = int(fitem.get('stop')  or -1)
+                except: stop  = -1
+            if now <= 0:
+                now = int(time.time())
+            # EPG now-cell tune (forward-ported from master fork) — when iptvsimple's PVR EPG
+            # fires a live URL for a programme that is currently on-air (start <= now <= stop),
+            # join that programme at the in-programme offset rather than restarting from frame
+            # 0. Without this, library-derived channels (which are always isVOD=True because
+            # fitem.file is local while vid is the encoded plugin URL) fall into the VOD branch
+            # below, get mode flipped to 'vod', seek reset to -1, the "Now playing VOD" toast
+            # raised, and lose channel-bug / live-timebar UX. seek is computed from now-start;
+            # _setResume honours Seek_Tolerance (≈60s) so an at-the-cusp tune still plays from 0.
+            if self.sysInfo.get('fitem') and start > 0 and stop > 0 and start <= now <= stop:
+                seek = max(0, now - start)
+                duration_seconds = max(1, stop - start)
+                self.sysInfo['seek']               = seek
+                self.sysInfo['progresspercentage'] = int(seek * 100 / duration_seconds)
+                self.log('[%s] playLive, joining now-cell at seek=%s/%ss (%s%%)'%(self.sysInfo.get('chid'), seek, duration_seconds, self.sysInfo['progresspercentage']))
+                listitem = self._setResume(LISTITEMS.buildItemListItem(self.sysInfo.get('fitem')))
+                listitem.setProperty('sysInfo', FileAccess._encodeString(self.sysInfo))
+                self._resolveURL(True, listitem)
+                return
+            #VOD called from Guide not live! / break PVR bind for correct meta.
+            if self.sysInfo['isVOD'] or self.sysInfo['isSTRM']:
+                if self.sysInfo['isVOD']:
+                    self.sysInfo['mode'] = 'vod'
+                    self.sysInfo["seek"] = -1
+                    self.sysInfo["progresspercentage"] = -1
+                    self.sysInfo['name'] = self.sysInfo['fitem'].get('label')
+                    self.sysInfo['vid']  = self.sysInfo['fitem'].get('file')
+                    DIALOG.notificationDialog(f"{LANGUAGE(32185)}: [B]{self.sysInfo['fitem']['label']}[/B]\n{self.sysInfo['fitem']['episodelabel']}")
+                    listitem = LISTITEMS.buildItemListItem(self.sysInfo.get('fitem'))
+                else:
+                    #STRM called from Guide, presumably live; workaround for Kodi bug w/strm handling in setResolvedUrl.
+                    listitem = self._setResume(LISTITEMS.buildItemListItem(self.sysInfo.get('fitem')))
+                listitem.setProperty('sysInfo',Globals._encodeString(self.sysInfo))
+                self._play(listitem.getPath(),listitem)
+            else:#LIVE called from Guide/Channels.
+                listitem = self._setResume(LISTITEMS.buildItemListItem(self.sysInfo.get('fitem')))
+                listitem.setProperty('sysInfo',FileAccess._encodeString(self.sysInfo))
+                self._resolveURL(True, listitem)
+        
+            
+    @threadit
+    def playRadio(self, limit=RADIO_ITEM_LIMIT):
+        def __buildfItem(item: dict={}):
+            sysInfo = self.sysInfo.copy()
+            sysInfo['isPlaylist'] = True
+            listitem = LISTITEMS.buildItemListItem(item,'music')
+            listitem.setProperty('sysInfo',FileAccess._encodeString(sysInfo))
+            return listitem
+            
+        def __buildPlaylist(chid, name):
+            with PROPERTIES.suspendActivity():
+                return Globals._randomShuffle(interleave([self.jsonRPC.requestList({'id':chid}, path, 'music', page=limit, sort={"method":"random"})[0] for path in self.sysInfo.get('vid').split('|')], SETTINGS.getSettingInt('Interleave_Set'), SETTINGS.getSettingBool('Interleave_Repeat')))
+        
+        self.log('[%s] playRadio, name = %s'%(self.sysInfo.get('chid'), self.sysInfo.get('name')))
+        with PROPERTIES.suspendActivity():
+            listitems = poolit(__buildfItem)(__buildPlaylist(self.sysInfo.get('chid'),self.sysInfo.get('name')))
+            self._play(*(self._quePlaylist(listitems, pltype=xbmc.PLAYLIST_MUSIC, shuffle=True)))
+               
+                      
+    @threadit         
+    def playPaused(self):
+        def __buildfItem(item: dict={}):
+            sysInfo = self.sysInfo.copy()
+            sysInfo['isPlaylist'] = True
+            listitem = LISTITEMS.buildItemListItem(item,'video')
+            if FileAccess.exists(listitem.getPath()):  #todo insert missing media placeholder
+                if item.get('file') == item.get('resume',{}).get('file',str(random.random())):
+                    seektime = int(item.get('resume',{}).get('position',0.0))
+                    runtime  = int(item.get('resume',{}).get('total',0.0))
+                    self.log('[%s] __buildfItem, within seek tolerance setting seek totaltime = %s, resumetime = %s'%(chid, runtime, seektime))
+                    listitem.setProperty('startoffset', str(seektime)) #secs
+                    infoTag = ListItemInfoTag(listitem, 'video')
+                    infoTag.set_resume_point({'ResumeTime':seektime, 'TotalTime':runtime * 60})
+                    
+                sysInfo.update({'fitem':item,'resume':{"idx":lizLST.index(item)}})
+                listitem.setProperty('sysInfo',FileAccess._encodeString(sysInfo))
+                return listitem
+            
+        def __buildPlaylist(chid, name):
+            lizLST = RulesList([self.sysInfo.get('fitem',{}).get('citem',{'name':name,'id':chid})]).runActions(RULES_ACTION_PLAYBACK_RESUME, self.sysInfo.get('fitem',{}).get('citem',{'name':name,'id':chid}))
+            if lizLST:
+                lizLST = nextitems[:SETTINGS.getSettingInt('Page_Limit')]
+                self.log('[%s] __buildPlaylist, building lizLST (%s)'%(chid, len(lizLST)))
+                return poolit(__buildfItem)(lizLST)
+            else: DIALOG.notificationDialog(LANGUAGE(32000))
+            return []
+        
+        self.log('[%s] playPaused, name = %s'%(self.sysInfo.get('chid'), self.sysInfo.get('name')))
+        with PROPERTIES.suspendActivity():
+            listitems = self.__buildPlaylist(self.sysInfo.get('chid'), self.sysInfo.get('name'))
+            self._play(*(self._quePlaylist(listitems, pltype=xbmc.PLAYLIST_VIDEO, shuffle=False)))
+            
+            
+    @threadit         
+    def playVOD(self):
+        self.log('[%s] playVOD, vid = %s'%(self.sysInfo.get('chid'), self.sysInfo.get('vid')))
+        with PROPERTIES.suspendActivity():
+            self.sysInfo["seek"] = -1
+            self.sysInfo["progresspercentage"] = -1
+            DIALOG.notificationDialog(f"{LANGUAGE(32185)%('VOD')}: [B]{self.sysInfo['fitem']['label']}[/B]\n{self.sysInfo['fitem']['episodelabel']}")
+            self._resolveURL(True, LISTITEMS.buildItemListItem(self.sysInfo.get('fitem')))
+            
+            
+    @threadit
+    def playPlaylist(self):
+        def __buildfItem(nextitem: dict={}):
+            sysInfo = self.sysInfo.copy()
+            sysInfo['isPlaylist'] = True
+            idx      = nextitems.index(nextitem)
+            fitem    = Globals._decodePlot(nextitem.get('plot',''))
+            listitem = LISTITEMS.buildItemListItem(fitem,'video')
+            if FileAccess.exists(listitem.getPath()): #todo insert missing media placeholder
+                if not self.sysInfo['isVOD']:
+                    # madteevee (imports fork): only the FIRST playlist item
+                    # (the currently-airing show) honors the mid-show seek set
+                    # below by playPlaylist's join-now block. Subsequent
+                    # programmes in the queue are future shows that should
+                    # play from their natural start. Without this idx==0 gate,
+                    # _setResume's seek would apply to every item in the
+                    # queue — the next show would start partway through too.
+                    if idx == 0:
+                        listitem = self._setResume(LISTITEMS.buildItemListItem(self.sysInfo.get('fitem')))
+                    else:
+                        listitem = LISTITEMS.buildItemListItem(self.sysInfo.get('fitem'))
+                sysInfo.update({'fitem':fitem,'resume':{"idx":idx}})
+                listitem.setProperty('sysInfo',FileAccess._encodeString(sysInfo))
+                return listitem
+
+        self.log('[%s] playPlaylist, name = %s'%(self.sysInfo.get('chid'), self.sysInfo.get('name')))
+        # madteevee (imports fork): join-now seek for catchup="vod" Custom
+        # channels. pvr.iptvsimple routes EVERY EPG click on a vod-mode channel
+        # (including the currently-airing event) to catchup-source → mode=
+        # broadcast → this function. catchupPlayEpgAsLive=true does NOT
+        # short-circuit to the live URL for "vod" mode catchup. Without this
+        # block, clicking the currently-airing programme on Cartoon Cartoons /
+        # Saturday Morning TV plays from frame 0 instead of joining mid-show,
+        # and no "restart" affordance appears because pvr.iptvsimple can't
+        # detect the stream is starting mid-event. Compute seek from
+        # fitem.start vs current time and stash on sysInfo so _setResume
+        # (called for idx==0 in __buildfItem above) applies it. Mirrors the
+        # equivalent block in playLive at lines 176-185.
+        try:    fi_start = int((self.sysInfo.get('fitem') or {}).get('start') or 0)
+        except: fi_start = 0
+        try:    fi_stop  = int((self.sysInfo.get('fitem') or {}).get('stop')  or 0)
+        except: fi_stop  = 0
+        # getUTCstamp() comes via `from globals import *` (defined globals.py:128).
+        # Used here instead of an explicit `time.time()` to match the addon's
+        # existing UTC-stamp convention (fitem.start/stop are also UTC-epoch).
+        now_ts = int(getUTCstamp())
+        if fi_start > 0 and fi_stop > 0 and fi_start <= now_ts <= fi_stop:
+            seek = max(0, now_ts - fi_start)
+            duration_seconds = max(1, fi_stop - fi_start)
+            self.sysInfo['seek']               = seek
+            self.sysInfo['progresspercentage'] = int(seek * 100 / duration_seconds)
+            self.log('[%s] playPlaylist, joining current EPG event at seek=%s/%ss (%s%%)'%(self.sysInfo.get('chid'), seek, duration_seconds, self.sysInfo['progresspercentage']))
+        # madteevee (imports fork): FAST PATH for catchup playback. When
+        # iptvsimple invokes us with mode='broadcast' and the catchup URL
+        # carries vid=<resolved file>, default.py's fitem-alignment patch has
+        # ALREADY set sysInfo.fitem.file to the resolved local-fs path. We
+        # don't need _getPVRItems → matchChannel → PVR.GetBroadcasts
+        # (~20s on movistarplus' EPG) to "rediscover" what we already know.
+        # Build a single-item listitem and play directly. Cuts 22s → <5s.
+        # Queue auto-advance is intentionally NOT preserved: catchup
+        # playback is single-shot by design (operator clicked ONE programme).
+        fast_file = (self.sysInfo.get('fitem') or {}).get('file', '')
+        if (self.sysInfo.get('mode') == 'broadcast'
+                and fast_file
+                and (fast_file.startswith('/') or fast_file.startswith('special://'))
+                and FileAccess.exists(fast_file)):
+            self.log('[%s] playPlaylist FAST PATH: skipping _getPVRItems, playing %s directly'%(self.sysInfo.get('chid'), fast_file))
+            with PROPERTIES.suspendActivity():
+                DIALOG.notificationDialog(f"{LANGUAGE(32185)%('Queue')}: [B]{self.sysInfo.get('name','')}[/B]\n{self.sysInfo.get('fitem',{}).get('label','')}")
+                self.sysInfo['isPlaylist'] = False
+                listitem = self._setResume(LISTITEMS.buildItemListItem(self.sysInfo.get('fitem')))
+                listitem.setProperty('sysInfo', FileAccess._encodeString(self.sysInfo))
+                self._play(fast_file, listitem)
+            return
+        with PROPERTIES.suspendActivity():
+            # Defensive .get() — fitem.label can be missing depending on where the tune originates
+            # (PVR guide click vs. catchup vs. channel manager). Letting a KeyError raise here
+            # blocks the actual _play() call below, so the channel never starts. The notification
+            # is decorative and a missing label is not worth aborting playback.
+            DIALOG.notificationDialog(f"{LANGUAGE(32185)%('Queue')}: [B]{self.sysInfo.get('name','')}[/B]\n{self.sysInfo.get('fitem',{}).get('label','')}")
+            nextitems = self._getPVRItems()
+            if not nextitems:
+                # _getPVRItems already showed a notification (LANGUAGE(32164) or 32000) — bail
+                # without crashing on the empty-playlist splat below.
+                self.log('[%s] playPlaylist, no PVR items, aborting'%(self.sysInfo.get('chid')))
+                return
+            listitems = poolit(__buildfItem)(nextitems)
+            playlist, first = self._quePlaylist(listitems, pltype=xbmc.PLAYLIST_VIDEO, shuffle=False)
+            if playlist is None:
+                self.log('[%s] playPlaylist, _quePlaylist returned no playable items'%(self.sysInfo.get('chid')))
+                return
+            self._play(playlist, first)
+            
+            
+    def _playCheck(self, path, found, listitem=None):
+        def __findMissing(listitem):
+            label = (self.sysInfo['fitem'].get('label') or listitem.getLabel())
+            file  = (self.sysInfo['fitem'].get('file')  or listitem.getPath())
+            if file.startswith(tuple(VFS_TYPES)): found = True
+            else:
+                folder, filename  = os.path.split(file)
+                oSeason, oEpisode = parseSE(filename)
+                self.log(f"[{self.sysInfo.get('chid')}] _playCheck, __findMissing searching {label}: {filename} in {folder}")
+                
+                with PROPERTIES.suspendActivity():
+                    DIALOG.notificationDialog(f"Missing: [B]{self.sysInfo['fitem']['label']}[/B]\n{self.sysInfo['fitem']['episodelabel']}")
+                    items, limits, errors = self.jsonRPC.getDirectory({"directory":folder,"media": "video"})
+                    
+                found = False
+                for item in items:
+                    if item.get('file','').endswith(tuple(VIDEO_EXTS)):
+                        season, episode  = parseSE(os.path.split(item.get('file',''))[1])
+                        if item.get('type') == 'movies' and item.get('label','').lower() == label.lower():
+                            found = True
+                            break
+                        elif oSeason and oEpisode and (oSeason == season and oEpisode == episode):
+                            found = True
+                            break
+                if found: 
+                    combineDicts(self.sysInfo['fitem'],item)
+                    listitem.setPath(self.sysInfo['fitem']['file'])
+                    self.log(f"[{self.sysInfo.get('chid')}] _playCheck, __findMissing found {self.sysInfo['fitem']['file']}")
+                    DIALOG.notificationDialog(f"Found: [B]{self.sysInfo['fitem']['label']}[/B]\n{self.sysInfo['fitem']['episodelabel']}")
+                #else: listitem.setPath(insert missing media placeholder)
+            return found, listitem
+            
+        #File Exists
+        if listitem is None: listitem = xbmcgui.ListItem()
+        if not FileAccess.exists(listitem.getPath()): found, listitem = __findMissing(listitem)
+        #TODO ROBOUST ERROR CORRECTION
+        if self.sysInfo['isPlaylist']: return path, found, listitem
+        else:                          return listitem.getPath(), found, listitem
+
+
+    def _play(self, file, listitem=None, wait=30):
+        #PVR Live Channel Detection workaround.
+        if listitem is None: listitem = xbmcgui.ListItem()
+       
+        while not self.monitor.abortRequested() and self.player.isPlaying():
+            if    self.monitor.waitForAbort(0.5): return
+            else: self.player.stop()
+            
+        file, found, listitem = self._playCheck(file, True, listitem)
+        timerit(self.player.play)(1.0,*(file,listitem))
+        self._resolveURL(False, listitem)
+        #Playlist don't always gain screen focus depending on user Kodi configuration. Force fullscreen.
+        self.log(f"[{self.sysInfo.get('chid')}] _play, found = {found}, playlist = {self.sysInfo['isPlaylist']}")
+        
+        while not self.monitor.abortRequested() and not self.player.isPlaying():
+            if self.monitor.waitForAbort(0.5) or wait < 1: return
+            wait -= 1
+            
+        if self.player.isPlayingAudio(): window = 'visualisation'
+        else:                            window = 'fullscreenvideo'
+        timerit(BUILTIN.executewindow)(1.0,*('ActivateWindow(%s)'%(window),True,False,self.player.isPlaying))
+
+
+    def _resolveURL(self, found=False, listitem=None):
+        self.log(f"[{self.sysInfo.get('chid')}] _resolveURL, found = {found}: {listitem.getPath()}")
+        if listitem is None: listitem = xbmcgui.ListItem()
+        else: _, found, listitem = self._playCheck(listitem.getPath(), found, listitem)
+        xbmcplugin.setResolvedUrl(int(self.sysInfo['sysARG'][1]), found, listitem)
+        
+        

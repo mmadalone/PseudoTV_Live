@@ -1,0 +1,2516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PseudoTV Live | Multi-Server Manager</title>
+    <style>
+        :root {
+            --pstv-bg-dark: #002b4d; --pstv-bg-light: #005a92; --pstv-accent: #ffffff;
+            --pstv-input-bg: #1a4a70; --pstv-border: rgba(255, 255, 255, 0.3);
+            --pstv-focus: #5dade2; --pstv-dim: rgba(255, 255, 255, 0.4);
+            --pstv-epg-bg: #001a2d; --pstv-epg-prog: #003d66;
+            --hour-width: 340px; --slot-width: 170px; --channel-col-width: 240px;
+        }
+
+        body {
+            background: radial-gradient(circle, var(--pstv-bg-light) 0%, var(--pstv-bg-dark) 100%);
+            background-attachment: fixed; color: var(--pstv-accent);
+            font-family: 'Segoe UI', sans-serif; margin: 0; display: flex; flex-direction: column; align-items: center;
+        }
+
+        .banner { width: 100%; padding: 20px 0; text-align: center; }
+        .banner img { max-width: 300px; filter: drop-shadow(0px 8px 15px rgba(0,0,0,0.4)); }
+
+        .global-header {
+            width: 95%; max-width: 1200px; background: rgba(0, 0, 0, 0.5);
+            padding: 15px 25px; border-radius: 12px; border: 1px solid var(--pstv-border);
+            margin-bottom: 20px; display: flex; align-items: center; gap: 20px; box-sizing: border-box;
+            backdrop-filter: blur(10px);
+        }
+
+        .tab-bar { display: flex; gap: 5px; width: 95%; max-width: 1200px; flex-wrap: wrap; }
+        .tab {
+            padding: 12px 25px; background: rgba(0, 0, 0, 0.4); border: 1px solid var(--pstv-border);
+            border-bottom: none; border-radius: 8px 8px 0 0; cursor: pointer;
+            font-size: 0.75rem; font-weight: bold; text-transform: uppercase; color: var(--pstv-dim);
+        }
+        .tab.active { background: rgba(0, 0, 0, 0.2); color: var(--pstv-accent); border-top: 2px solid var(--pstv-focus); backdrop-filter: blur(12px); }
+
+        .container {
+            width: 95%; max-width: 1200px; background: rgba(0, 0, 0, 0.35); backdrop-filter: blur(12px);
+            border: 1px solid var(--pstv-border); border-radius: 0 12px 12px 12px;
+            padding: 25px; margin-bottom: 50px; box-shadow: 0 15px 40px rgba(0,0,0,0.6);
+        }
+
+        .tab-content { display: none; min-height: 400px; }
+        .tab-content.active { display: block; }
+
+        /* Universal clickable cursor on buttons + the .tab buttons + any
+           [data-action]-bearing element (rows, list items, etc). Disabled
+           buttons revert to not-allowed. */
+        button, .tab, [data-action], .browser-item[data-path], .browser-item[data-pickfile], details > summary { cursor: pointer; }
+        button:disabled, .inline-save-btn:not(.has-pending) { cursor: not-allowed; }
+
+        select, input, textarea { width: 100%; padding: 12px; background: var(--pstv-input-bg); border: 1px solid var(--pstv-border); border-radius: 4px; color: white; box-sizing: border-box; font-family: inherit; }
+        textarea { font-family: 'Consolas','Monaco',monospace; font-size: 0.85rem; min-height: 90px; resize: vertical; }
+        input[readonly] { background: rgba(0,0,0,0.3); color: #888; border-color: transparent; cursor: not-allowed; }
+        input[type=color] { padding: 2px; height: 38px; cursor: pointer; }
+        input[type=range] { padding: 0; background: transparent; }
+
+        .editor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
+        .editor-field label { display: block; font-size: 0.65rem; text-transform: uppercase; margin-bottom: 6px; opacity: 0.8; color: var(--pstv-focus); }
+
+        .input-with-action { display: flex; gap: 8px; }
+        .btn-action { background: var(--pstv-bg-light); color: white; border: 1px solid var(--pstv-border); padding: 0 18px; border-radius: 4px; cursor: pointer; font-size: 0.7rem; font-weight: bold; transition: all 0.2s; white-space: nowrap; }
+        .btn-action:hover { background: var(--pstv-focus); }
+
+        .toggle-row { grid-column: span 2; display: flex; flex-wrap: wrap; gap: 30px; background: rgba(0,0,0,0.2); padding: 20px; border-radius: 8px; border: 1px solid var(--pstv-border); margin-top: 20px; }
+        .toggle-group { display: flex; align-items: center; gap: 12px; }
+        .toggle-label { font-size: 0.7rem; text-transform: uppercase; color: var(--pstv-accent); font-weight: bold; }
+
+        .switch { position: relative; display: inline-block; width: 44px; height: 22px; flex-shrink: 0; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #333; transition: .4s; border-radius: 22px; }
+        .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--pstv-focus); }
+        input:checked + .slider:before { transform: translateX(22px); }
+
+        .guide-container { width: 100%; overflow-x: auto; background: var(--pstv-epg-bg); border: 1px solid var(--pstv-border); border-radius: 8px; }
+        .guide-table { border-collapse: collapse; min-width: 100%; table-layout: fixed; }
+        .guide-row { border-bottom: 1px solid rgba(255,255,255,0.05); height: 50px; }
+        .guide-channel-col { width: var(--channel-col-width); background: rgba(0,0,0,0.3); padding: 10px; position: sticky; left: 0; z-index: 2; font-weight: bold; font-size: 0.8rem; border-right: 2px solid var(--pstv-focus); }
+        .guide-program { background: var(--pstv-epg-prog); border-right: 1px solid rgba(255,255,255,0.1); padding: 10px; font-size: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+
+        .save-bar { margin-top: 35px; padding-top: 25px; border-top: 1px solid var(--pstv-border); text-align: right; }
+        .btn-save { background: #27ae60; color: white; border: none; padding: 14px 40px; border-radius: 4px; font-weight: bold; cursor: pointer; text-transform: uppercase; }
+        .btn-save:disabled { background: #444; cursor: not-allowed; opacity: 0.6; }
+
+        input[type=number]::-webkit-inner-spin-button { opacity: 1; height: 30px; }
+
+        /* --- Step 6 Phase 2 (settings dashboard) styles ----------------- */
+        .settings-toolbar { display: flex; gap: 20px; align-items: center; margin-bottom: 20px; padding: 15px; background: rgba(0,0,0,0.25); border-radius: 8px; border: 1px solid var(--pstv-border); flex-wrap: wrap; }
+        .settings-toolbar label { font-size: 0.65rem; text-transform: uppercase; opacity: 0.75; margin-right: 6px; }
+        .settings-toolbar select { width: auto; min-width: 160px; padding: 8px 12px; }
+        .settings-search { flex: 1; min-width: 220px; }
+        .settings-search input { padding: 8px 12px; }
+        .save-counter { background: var(--pstv-focus); color: var(--pstv-bg-dark); padding: 6px 12px; border-radius: 14px; font-size: 0.7rem; font-weight: bold; }
+
+        details.settings-category { margin-bottom: 12px; background: rgba(0,0,0,0.2); border: 1px solid var(--pstv-border); border-radius: 8px; overflow: hidden; }
+        details.settings-category > summary { padding: 14px 18px; cursor: pointer; font-size: 0.85rem; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; color: var(--pstv-focus); list-style: none; user-select: none; }
+        details.settings-category > summary::-webkit-details-marker { display: none; }
+        details.settings-category > summary::before { content: '▸ '; opacity: 0.5; display: inline-block; transition: transform 0.2s; }
+        details.settings-category[open] > summary::before { transform: rotate(90deg); }
+        .settings-category-body { padding: 0 18px 18px; }
+
+        .settings-group { margin-top: 14px; padding: 14px 16px; background: rgba(0,0,0,0.18); border-radius: 6px; border-left: 3px solid var(--pstv-focus); }
+        .settings-group-title { font-size: 0.7rem; text-transform: uppercase; opacity: 0.8; margin-bottom: 12px; color: var(--pstv-focus); letter-spacing: 0.5px; }
+
+        .settings-row { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(280px, 1.2fr); gap: 24px; padding: 10px 0; border-bottom: 1px dashed rgba(255,255,255,0.08); align-items: start; }
+        .settings-row:last-child { border-bottom: none; }
+        .settings-row.hidden { display: none; }
+        .settings-row.disabled-block .settings-control > * { pointer-events: none; opacity: 0.45; filter: grayscale(0.6); }
+        .settings-row.parent-indent { padding-left: 18px; border-left: 2px solid rgba(255,255,255,0.08); margin-left: 6px; }
+
+        .settings-label { display: flex; flex-direction: column; gap: 4px; padding-top: 4px; }
+        .settings-label .label-text { font-size: 0.85rem; font-weight: 500; }
+        .settings-label .help-text { font-size: 0.72rem; opacity: 0.65; line-height: 1.4; white-space: pre-wrap; }
+        .settings-label .level-pill { display: inline-block; font-size: 0.55rem; text-transform: uppercase; padding: 2px 6px; border-radius: 8px; opacity: 0.5; background: rgba(255,255,255,0.08); width: fit-content; }
+        .dirty-badge { display: inline-block; margin-left: 8px; opacity: 0; transition: opacity 0.15s; color: #f1c40f; }
+        .settings-row.dirty .dirty-badge { opacity: 1; }
+
+        .settings-control { display: flex; flex-direction: column; gap: 6px; }
+        .settings-control .range-row { display: grid; grid-template-columns: 1fr 70px; gap: 10px; align-items: center; }
+        .settings-control .range-row input[type=number] { padding: 8px; }
+        .settings-control .small-note { font-size: 0.65rem; opacity: 0.55; }
+
+        .action-row { padding: 10px 0; border-bottom: 1px dashed rgba(255,255,255,0.08); display: flex; gap: 16px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+        .action-row .help-text { font-size: 0.72rem; opacity: 0.6; flex: 1; min-width: 220px; }
+
+        #settings-status { padding: 40px; text-align: center; opacity: 0.6; }
+
+        /* Toast lives in the top-right corner — same area as the inline Save
+           button. pointer-events:none lets clicks pass through so the Save
+           button stays clickable while the toast is fading out. */
+        .toast { position: fixed; top: 16px; right: 16px; max-width: 360px; background: rgba(0,0,0,0.86); border: 1px solid var(--pstv-border); border-left: 4px solid var(--pstv-focus); padding: 10px 14px; border-radius: 6px; font-size: 0.78rem; box-shadow: 0 6px 20px rgba(0,0,0,0.6); z-index: 9999; white-space: pre-wrap; pointer-events: none; }
+        .toast.err { border-left-color: #e74c3c; }
+        .toast.ok  { border-left-color: #27ae60; }
+
+        /* --- Step 6 Phase 4 (madteevee): confirm modal for action settings ---
+             Overlay is JUST the dimming + click-outside-to-close target. The
+             modal card itself is pinned to viewport top via position:fixed so
+             it's guaranteed visible regardless of where the page is scrolled
+             or how tall the card's content is. The 40px top inset gives a
+             small margin from the viewport edge. */
+        /* CSS gotcha (madteevee): backdrop-filter on the overlay creates a
+           containing block for fixed-positioned descendants — i.e. .modal-card's
+           `position: fixed` gets resolved against the overlay rather than the
+           viewport. Even when the overlay IS at viewport position, some Chromium
+           builds (notably the Pi5 ARM Chromium) end up rendering the fixed card
+           at unexpected positions. Strip backdrop-filter; the rgba(0,0,0,0.7)
+           background already provides dimming. */
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: none; z-index: 9000; }
+        .modal-overlay.open { display: block; }
+        .modal-card { position: fixed; top: 40px; left: 50%; transform: translateX(-50%); max-height: calc(100vh - 80px); overflow-y: auto; background: var(--pstv-bg-dark); border: 1px solid var(--pstv-border); border-radius: 10px; padding: 24px 28px; max-width: 480px; box-shadow: 0 20px 60px rgba(0,0,0,0.6); z-index: 9001; box-sizing: border-box; }
+        /* The .modal-card has its own position:fixed, so the overlay no longer
+           needs flex centering. The card is rendered at viewport-top regardless
+           of the overlay's layout. */
+        .modal-card h3 { margin: 0 0 12px; font-size: 1rem; color: var(--pstv-focus); }
+        .modal-card p { font-size: 0.85rem; line-height: 1.4; opacity: 0.9; }
+        .modal-card .modal-data { display: block; margin-top: 12px; padding: 10px 12px; background: rgba(0,0,0,0.4); border-radius: 4px; font-family: 'Consolas','Monaco',monospace; font-size: 0.72rem; word-break: break-all; }
+        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 22px; }
+        .modal-actions .btn-action { padding: 10px 20px; }
+        .modal-actions .btn-confirm { background: #27ae60; }
+
+        /* --- Step 6 Phase 5 (madteevee): System Info live grid --- */
+        .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 8px; }
+        .info-card { background: rgba(0,0,0,0.22); border: 1px solid var(--pstv-border); border-left: 3px solid var(--pstv-focus); padding: 12px 14px; border-radius: 6px; }
+        .info-card .info-label { font-size: 0.6rem; text-transform: uppercase; opacity: 0.65; letter-spacing: 0.5px; margin-bottom: 4px; }
+        .info-card .info-value { font-size: 0.95rem; font-family: 'Consolas','Monaco',monospace; word-break: break-word; }
+        .info-card.bool-true .info-value  { color: #2ecc71; }
+        .info-card.bool-false .info-value { color: #e74c3c; }
+
+        /* --- Step 6 Phase 7 (madteevee): EPG grid --- */
+        .epg-wrap { display: flex; flex-direction: column; gap: 10px; }
+        .epg-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .epg-toolbar select { width: auto; padding: 8px 12px; }
+        .epg-grid { position: relative; overflow: auto; border: 1px solid var(--pstv-border); border-radius: 6px; background: var(--pstv-epg-bg); max-height: 70vh; }
+        .epg-header { display: grid; position: sticky; top: 0; z-index: 3; background: var(--pstv-bg-dark); border-bottom: 1px solid var(--pstv-border); }
+        .epg-header .epg-time { padding: 6px 8px; font-size: 0.65rem; opacity: 0.7; border-right: 1px dashed rgba(255,255,255,0.08); }
+        .epg-header .epg-corner { background: rgba(0,0,0,0.4); }
+        .epg-row { display: grid; border-bottom: 1px solid rgba(255,255,255,0.05); height: 40px; position: relative; }
+        .epg-channel { position: sticky; left: 0; z-index: 2; background: rgba(0,0,0,0.55); padding: 8px 10px; font-size: 0.75rem; font-weight: bold; border-right: 2px solid var(--pstv-focus); display: flex; align-items: center; gap: 8px; }
+        .epg-channel .epg-num { color: var(--pstv-focus); min-width: 38px; }
+        .epg-prog-track { position: relative; height: 40px; }
+        .epg-prog { position: absolute; top: 4px; bottom: 4px; background: var(--pstv-epg-prog); border: 1px solid rgba(255,255,255,0.08); border-radius: 3px; padding: 4px 8px; font-size: 0.72rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; box-sizing: border-box; }
+        .epg-prog:hover { background: var(--pstv-focus); color: var(--pstv-bg-dark); }
+        .epg-prog.now { border-left: 3px solid #f1c40f; }
+        .epg-now-line { position: absolute; top: 0; bottom: 0; width: 2px; background: #e74c3c; box-shadow: 0 0 6px #e74c3c; z-index: 1; pointer-events: none; }
+        .epg-empty { padding: 40px; text-align: center; opacity: 0.5; }
+
+        /* --- Path browser: INLINE panel anchored beneath whatever triggered it.
+             Replaces the previously-centered modal. Lives in-flow so it always
+             appears exactly where the operator clicked. ---------------------- */
+        .inline-browser { background: rgba(0,0,0,0.45); border: 1px solid var(--pstv-focus); border-radius: 6px; padding: 12px; margin: 8px 0; }
+        .inline-browser .browser-path { padding: 6px 10px; background: rgba(0,0,0,0.4); border-radius: 4px; font-family: 'Consolas','Monaco',monospace; font-size: 0.78rem; word-break: break-all; margin-bottom: 8px; }
+        .inline-browser .browser-quickjumps { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+        .inline-browser .browser-quickjumps button { padding: 4px 10px; font-size: 0.72rem; background: var(--pstv-bg-light); color: white; border: 1px solid var(--pstv-border); border-radius: 4px; cursor: pointer; }
+        .inline-browser .browser-quickjumps button:hover { background: var(--pstv-focus); color: var(--pstv-bg-dark); }
+        .inline-browser .browser-list { max-height: 360px; overflow-y: auto; background: rgba(0,0,0,0.25); border: 1px solid var(--pstv-border); border-radius: 4px; }
+        .inline-browser .browser-item { padding: 6px 12px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.06); display: flex; gap: 10px; align-items: center; font-size: 0.82rem; min-height: 40px; }
+        .inline-browser .browser-item:hover { background: var(--pstv-bg-light); }
+        .inline-browser .browser-item .icon { font-size: 0.9rem; min-width: 36px; text-align: center; flex-shrink: 0; }
+        .inline-browser .browser-item img.thumb { width: 36px; height: 36px; object-fit: contain; background: rgba(0,0,0,0.4); border-radius: 3px; flex-shrink: 0; }
+        .inline-browser .browser-item img.thumb.broken { display: none; }
+        .inline-browser .browser-item img.thumb.broken + .icon-fallback { display: inline; }
+        .inline-browser .browser-item .icon-fallback { display: none; font-size: 0.9rem; min-width: 36px; text-align: center; }
+        .inline-browser .browser-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
+        .inline-browser .browser-actions button { padding: 4px 14px; font-size: 0.78rem; }
+
+        /* --- Step 6 Phase 6 (madteevee): Manager tab CTA (retired by consolidation) --- */
+        .manager-cta { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 60px 20px; text-align: center; }
+        .manager-cta h2 { margin: 0; font-size: 1.4rem; color: var(--pstv-focus); }
+        .manager-cta p  { margin: 0; opacity: 0.75; max-width: 520px; line-height: 1.5; font-size: 0.88rem; }
+        .manager-cta .btn-cta { background: var(--pstv-bg-light); color: white; border: 1px solid var(--pstv-border); padding: 14px 36px; border-radius: 6px; font-size: 0.9rem; font-weight: bold; cursor: pointer; text-transform: uppercase; text-decoration: none; }
+        .manager-cta .btn-cta:hover { background: var(--pstv-focus); }
+
+        /* --- Consolidation (madteevee): Imports + Custom-channel editor styles
+             ported from imports.html. Namespaced under #tab-channels and
+             #tab-imports to avoid colliding with Settings-tab styles above.
+             ---------------------------------------------------------------- */
+        :root {
+            --pstv-card-bg: rgba(0, 0, 0, 0.35);
+            --pstv-ok: #6fcf6f; --pstv-warn: #ffb84d; --pstv-err: #ff6b6b;
+        }
+        .ph-section { background: rgba(0,0,0,0.2); padding: 18px; border-radius: 8px; border: 1px solid var(--pstv-border); margin-bottom: 16px; }
+        .ph-section .header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+        .ph-section .header h2 { margin: 0; font-size: 1rem; color: var(--pstv-focus); flex: 0 0 auto; }
+        .ph-section .header .actions { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+        .ph-section .header .actions button { padding: 6px 12px; font-size: 0.78rem; }
+        .ph-section .header .actions button.primary { background: var(--pstv-focus); color: #002b4d; border-color: var(--pstv-focus); font-weight: bold; }
+        .ph-section .header .actions button.danger  { background: var(--pstv-err);   color: #fff; border-color: var(--pstv-err); }
+
+        .imp-row { background: rgba(0,0,0,0.25); border: 1px solid var(--pstv-border); border-radius: 6px; padding: 12px; margin-bottom: 10px; display: grid; grid-template-columns: 1fr auto; gap: 12px; }
+        .imp-row .meta { line-height: 1.4; }
+        .imp-row .meta .name { font-size: 1rem; font-weight: bold; }
+        .imp-row .meta .id   { color: var(--pstv-dim); font-size: 0.75rem; font-family: monospace; }
+        .imp-row .meta .src  { color: var(--pstv-dim); font-size: 0.78rem; word-break: break-all; }
+        .imp-row .meta .status { font-size: 0.78rem; margin-top: 4px; }
+        .imp-row .meta .status .ok   { color: var(--pstv-ok); }
+        .imp-row .meta .status .warn { color: var(--pstv-warn); }
+        .imp-row .meta .status .err  { color: var(--pstv-err); }
+        .imp-row.disabled { opacity: 0.55; }
+        .imp-row .controls { display: flex; flex-direction: column; gap: 4px; min-width: 110px; }
+        .imp-row .controls button { padding: 4px 10px; font-size: 0.75rem; }
+        .imp-row .channels-toggle { color: var(--pstv-focus); cursor: pointer; user-select: none; margin-top: 6px; font-size: 0.78rem; }
+
+        .channels-list { display: none; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--pstv-border); max-height: 360px; overflow-y: auto; }
+        .channels-list.open { display: block; }
+        .channels-help { color: var(--pstv-dim); font-size: 0.72rem; margin: 4px 0; padding: 2px 4px; }
+        .channel-row { display: flex; align-items: center; gap: 6px; padding: 2px 4px; font-size: 0.8rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .channel-row.disabled { opacity: 0.45; }
+        .channel-row.row-hidden { display: none; }
+        .channel-row .row-logo { width: 26px; height: 26px; object-fit: contain; background: rgba(0,0,0,0.35); border-radius: 3px; flex-shrink: 0; }
+        .channel-row .row-logo.broken { display: none; }
+        .channel-row .row-logo-slot { width: 26px; height: 26px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+        /* Drag-to-reorder (single-import). The grip is the actual draggable
+           element so the inputs inside the row stay clickable. */
+        .channel-row .row-drag { cursor: grab; user-select: none; padding: 0 4px; opacity: 0.4; font-size: 0.85rem; flex-shrink: 0; }
+        .channel-row .row-drag:hover { opacity: 1; }
+        .channel-row .row-drag:active { cursor: grabbing; }
+        .channel-row.dragging { opacity: 0.45; }
+        .channel-row.drop-above { box-shadow: inset 0 3px 0 0 var(--pstv-focus); }
+        .channel-row.drop-below { box-shadow: inset 0 -3px 0 0 var(--pstv-focus); }
+        .channel-row .num { flex: 0 0 70px; }
+        .channel-row .num input { width: 56px; padding: 2px 4px; font-family: monospace; text-align: right; background: var(--pstv-input-bg); color: var(--pstv-focus); border: 1px solid var(--pstv-border); border-radius: 3px; font-size: 0.8rem; }
+        .channel-row .name { flex: 0 1 auto; max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .channel-row .name input { width: 100%; padding: 2px 6px; background: transparent; color: var(--pstv-accent); border: 1px solid transparent; border-radius: 3px; font-size: 0.8rem; font-family: inherit; }
+        .channel-row .name input:hover { border-color: var(--pstv-border); background: var(--pstv-input-bg); }
+        .channel-row .name input:focus { background: var(--pstv-input-bg); outline: 1px solid var(--pstv-focus); }
+        .channel-row .num input:focus { outline: 1px solid var(--pstv-focus); }
+        .channel-row .marker { flex: 0 0 auto; }
+        .channel-row label { display: flex; align-items: center; gap: 4px; cursor: pointer; flex: 0 0 auto; margin-left: 4px; }
+        .channel-row .badge { font-size: 0.65rem; padding: 1px 5px; border-radius: 3px; background: var(--pstv-warn); color: #002b4d; }
+        .channel-row .row-actions { display: flex; gap: 4px; }
+        .channel-row .row-actions button { padding: 1px 6px; font-size: 0.7rem; }
+
+        .empty { text-align: center; padding: 30px 20px; color: var(--pstv-dim); border: 2px dashed var(--pstv-border); border-radius: 8px; }
+
+        /* Imports/PseudoTV modal styling (separate from Settings-tab modal-card).
+           Same viewport-pinned positioning as .modal-card so all modals render
+           at viewport top regardless of page scroll position. */
+        .imp-modal { position: fixed; top: 40px; left: 50%; transform: translateX(-50%); max-height: calc(100vh - 80px); overflow-y: auto; z-index: 9001; box-sizing: border-box; background: linear-gradient(135deg, var(--pstv-bg-dark), var(--pstv-bg-light)); border: 1px solid var(--pstv-border); border-radius: 10px; padding: 22px; min-width: 540px; max-width: 90vw; }
+        .imp-modal h2 { margin: 0 0 12px; font-size: 1rem; color: var(--pstv-focus); }
+        .imp-modal label { display: block; margin: 10px 0 4px; font-size: 0.78rem; color: var(--pstv-dim); }
+        .imp-modal input[type=text], .imp-modal input[type=number], .imp-modal select { width: 100%; padding: 8px 10px; border-radius: 4px; border: 1px solid var(--pstv-border); background: var(--pstv-input-bg); color: var(--pstv-accent); font-family: inherit; font-size: 0.85rem; }
+        .imp-modal .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .imp-modal .checkboxes { display: flex; gap: 14px; margin-top: 10px; flex-wrap: wrap; }
+        .imp-modal .checkboxes label { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--pstv-accent); }
+        .imp-modal .actions { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
+        .imp-modal .help { font-size: 0.7rem; color: var(--pstv-dim); margin-top: 4px; }
+        .imp-modal .source-group { border: 1px solid var(--pstv-border); padding: 12px; border-radius: 6px; margin-top: 8px; }
+        .imp-modal .source-group legend { padding: 0 8px; color: var(--pstv-focus); font-size: 0.75rem; }
+        .imp-modal button { background: var(--pstv-input-bg); color: var(--pstv-accent); border: 1px solid var(--pstv-border); border-radius: 6px; padding: 7px 14px; font-size: 0.82rem; cursor: pointer; font-family: inherit; }
+        .imp-modal button:hover { background: var(--pstv-bg-light); border-color: var(--pstv-focus); }
+        .imp-modal button.primary { background: var(--pstv-focus); color: #002b4d; border-color: var(--pstv-focus); font-weight: bold; }
+        .imp-modal button.subtle { background: transparent; }
+
+        /* Step 6 Phase 11 rules editor (ported) */
+        .rule-card { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+        .rule-card:last-child { border-bottom: none; }
+        .rule-header { display: flex; align-items: center; gap: 10px; }
+        .rule-header h4 { margin: 0; flex: 1; font-size: 0.85rem; color: var(--pstv-focus); }
+        .rule-card .rule-desc { font-size: 0.7rem; opacity: 0.6; margin: 3px 0 6px; }
+        .rule-card .rule-options { display: none; padding: 6px 0 0; }
+        .rule-card.enabled .rule-options { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .rule-card.enabled { background: rgba(93,173,226,0.08); }
+        .rule-option label { font-size: 0.7rem; margin-bottom: 2px; }
+        .rule-option .rule-opt-desc { font-size: 0.62rem; opacity: 0.55; margin-top: 2px; }
+
+        /* Step 6 Phase 9 pending-channels indicator (ported) */
+        .pending-strip { background: rgba(241,196,15,0.16); border: 1px solid #f1c40f; border-radius: 4px; padding: 8px 10px; margin: 6px 0; font-size: 0.75rem; }
+        .pending-strip .pending-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+        .pending-strip .pending-row button { padding: 1px 6px; }
+
+        /* Inline-logo editor (post-consolidation) — expands the row in place
+           instead of a centered modal. Visible exactly where the operator clicked. */
+        .inline-logo-editor { background: rgba(93,173,226,0.10); border-left: 3px solid var(--pstv-focus); border-bottom: 1px solid rgba(255,255,255,0.05); padding: 10px 14px; }
+        .inline-logo-editor .ile-row label { font-size: 0.65rem; text-transform: uppercase; opacity: 0.75; display: block; margin-bottom: 4px; }
+        .inline-logo-editor .ile-input-row { display: flex; gap: 6px; align-items: center; }
+        .inline-logo-editor .ile-input { flex: 1; padding: 6px 8px; font-size: 0.82rem; background: var(--pstv-input-bg); color: var(--pstv-accent); border: 1px solid var(--pstv-border); border-radius: 4px; font-family: inherit; }
+        .inline-logo-editor .ile-input:focus { outline: 1px solid var(--pstv-focus); }
+        .inline-logo-editor .ile-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px; }
+        .inline-logo-editor .ile-actions button { padding: 4px 14px; font-size: 0.78rem; }
+
+        /* Inline Save button (in each tab's section header). Dimmed by default;
+           lights up when there's something pending. */
+        .inline-save-btn { background: rgba(0,0,0,0.4) !important; color: var(--pstv-dim) !important; border: 1px solid var(--pstv-border) !important; }
+        .inline-save-btn.has-pending { background: var(--pstv-focus) !important; color: var(--pstv-bg-dark) !important; border-color: var(--pstv-focus) !important; font-weight: bold; }
+        .inline-save-btn.saving { opacity: 0.6; cursor: progress; }
+        .inline-save-btn .save-count:empty { display: none; }
+
+        /* Floating Save FAB — only shown on tabs without their own inline Save
+           (Live Guide / System Info / Settings). Hidden by default; toggled
+           via .has-pending which is added when pending > 0 AND no inline-save
+           is visible in the active tab. */
+        .global-save { position: fixed; bottom: 22px; right: 22px; background: var(--pstv-focus); color: #002b4d; border: none; padding: 14px 22px; border-radius: 28px; font-weight: bold; cursor: pointer; box-shadow: 0 8px 22px rgba(0,0,0,0.55); z-index: 8000; font-size: 0.85rem; display: none; }
+        .global-save.has-pending { display: inline-block; }
+        .global-save.saving { opacity: 0.6; cursor: progress; }
+
+        /* Custom-edit modal grid (Phase 10) */
+        .cf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .cf-grid .cf-row-wide { grid-column: 1 / -1; }
+        .cf-grid .cf-toggles { display: flex; align-items: center; gap: 14px; padding-top: 16px; }
+    </style>
+</head>
+<body>
+
+    <div class="banner"><img src="/images/{{ media_loc }}/splashtext.png"></div>
+
+    <div class="global-header">
+        <div style="width: 300px;">
+            <label style="display:block; font-size: 0.65rem; margin-bottom: 5px; opacity: 0.7; text-transform: uppercase;">Source Server</label>
+            <select id="serverSelector" onchange="onServerChange()"></select>
+        </div>
+    </div>
+
+    <!-- Consolidation (madteevee): channels.html + imports.html folded into this
+         single dashboard. External CTA tab retired in favor of a real Imports tab. -->
+    <div class="tab-bar">
+        <div id="btn-channels" class="tab active" onclick="navigateTab('channels')">Manager</div>
+        <div id="btn-imports"  class="tab"        onclick="navigateTab('imports')">Imports</div>
+        <div id="btn-guide"    class="tab"        onclick="navigateTab('guide')">Live Guide</div>
+        <div id="btn-info"     class="tab"        onclick="navigateTab('info')">System Info</div>
+        <div id="btn-settings" class="tab"        onclick="navigateTab('settings')">Settings</div>
+    </div>
+
+    <div class="container">
+        <!-- Consolidation (madteevee): Manager tab is now the real PseudoTV-channel
+             editor. Lists every type='Custom' channel; inline edit + rules modal
+             ported from imports.html. + Add staged via the same pending pool. -->
+        <div id="tab-channels" class="tab-content active">
+            <div class="ph-section">
+                <div class="header">
+                    <h2>PseudoTV channels</h2>
+                    <input type="search" id="pseudo-filter" placeholder="🔎 filter channels…"
+                           style="flex:1;max-width:340px;padding:6px 10px;background:var(--pstv-input-bg);border:1px solid var(--pstv-border);color:white;border-radius:4px;font-size:0.78rem;"
+                           oninput="filterChannelRows(this.value)">
+                    <div class="actions">
+                        <button class="primary inline-save-btn" data-save-anchor title="Commit all pending changes across tabs">Save <span class="save-count"></span></button>
+                        <button class="primary" id="add-pseudo-btn">+ Add channel</button>
+                        <button id="rebuild-all-pseudo-btn" title="Mark every PseudoTV channel as changed and trigger a full Builder rebuild.">🔨 Rebuild all</button>
+                    </div>
+                </div>
+                <div id="pseudo-list">
+                    <div class="empty">Loading PseudoTV channels…</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Consolidation (madteevee): Imports tab — ported from imports.html. -->
+        <div id="tab-imports" class="tab-content">
+            <div class="ph-section">
+                <div class="header">
+                    <h2>Live imports</h2>
+                    <input type="search" id="imports-filter" placeholder="🔎 filter channels by name / number / id…"
+                           style="flex:1;max-width:340px;padding:6px 10px;background:var(--pstv-input-bg);border:1px solid var(--pstv-border);color:white;border-radius:4px;font-size:0.78rem;"
+                           oninput="filterChannelRows(this.value)">
+                    <div class="actions">
+                        <button class="primary inline-save-btn" data-save-anchor title="Commit all pending changes across tabs">Save <span class="save-count"></span></button>
+                        <button class="primary" id="add-import-btn">+ Add import</button>
+                        <button id="refresh-all-btn" title="Trigger immediate sync of all imports">↻ Refresh all</button>
+                        <button id="cleanup-stranded-btn" title="Purge channel records whose import_source no longer matches any registered import.">🧹 Cleanup stranded</button>
+                        <button id="pvr-refresh-btn" title="Nudges IPTV Simple to re-read M3U+XML and fires PVR.Scan.">↻ Refresh EPG</button>
+                        <button class="danger" id="pvr-hard-reset-btn" title="DESTRUCTIVE: wipes Kodi's entire EPG database.">⚠ Hard reset EPG DB</button>
+                    </div>
+                </div>
+                <div id="imports-list">
+                    <div class="empty">Loading imports…</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 6 Phase 7 (madteevee): Live Guide grid backed by /api/epg/grid.json -->
+        <div id="tab-guide" class="tab-content">
+            <div class="epg-wrap">
+                <div class="epg-toolbar">
+                    <label style="font-size:0.65rem;opacity:0.7;text-transform:uppercase;">Window</label>
+                    <select id="epg-window" onchange="loadEpg()">
+                        <option value="2">2 hours</option>
+                        <option value="4" selected>4 hours</option>
+                        <option value="6">6 hours</option>
+                        <option value="12">12 hours</option>
+                    </select>
+                    <button class="btn-action" onclick="loadEpg()">↻ Reload</button>
+                    <span id="epg-status" style="font-size:0.7rem;opacity:0.6;"></span>
+                </div>
+                <div class="epg-grid" id="epg-grid">
+                    <div class="epg-empty">Loading EPG…</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 6 Phase 5 (madteevee): System Info live data populated by /api/system/info.json -->
+        <div id="tab-info" class="tab-content">
+            <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+                <button class="btn-action" onclick="loadSystemInfo()" title="Force a fresh fetch (bypass 35s cache)">↻ Refresh</button>
+            </div>
+            <div id="info-status" style="padding:20px;text-align:center;opacity:0.5;">Loading system info…</div>
+            <div id="info-body" class="info-grid"></div>
+        </div>
+
+        <!-- (Path browser is fully inline — no modal markup.) -->
+
+        <!-- Consolidation (madteevee): sticky global Save button -->
+        <button id="global-save-btn" class="global-save">Save <span id="global-save-count">0</span></button>
+
+        <!-- Step 6 Phase 7 (madteevee): EPG programme details modal -->
+        <div id="epg-modal-overlay" class="modal-overlay" onclick="if(event.target===this) closeEpgModal()">
+            <div class="modal-card">
+                <h3 id="epg-modal-title"></h3>
+                <p id="epg-modal-meta" style="font-family:'Consolas','Monaco',monospace;font-size:0.78rem;opacity:0.7;"></p>
+                <p id="epg-modal-desc" style="white-space:pre-wrap;"></p>
+                <div class="modal-actions"><button class="btn-action" onclick="closeEpgModal()">Close</button></div>
+            </div>
+        </div>
+
+        <!-- Consolidation (madteevee): import add/edit modal — ported from imports.html -->
+        <div id="import-modal-overlay" class="modal-overlay" onclick="if(event.target===this) closeImportModal()">
+            <div class="imp-modal">
+                <h2 id="import-modal-title">Add import</h2>
+                <input type="hidden" id="f-orig-id" />
+                <label>Identifier <span class="help">(unique slug, lowercase a-z/0-9/_-)</span></label>
+                <input type="text" id="f-id" placeholder="movistarplus" />
+                <label>Display name</label>
+                <input type="text" id="f-name" placeholder="MovistarPlus" />
+                <fieldset class="source-group">
+                    <legend>M3U source</legend>
+                    <label>Local file path <span class="help">(<code>special://...</code> or absolute)</span></label>
+                    <input type="text" id="f-m3u-path" placeholder="special://userdata/addon_data/.../channels.m3u8" />
+                    <label>OR remote URL</label>
+                    <input type="text" id="f-m3u-url" placeholder="https://example.com/playlist.m3u" />
+                    <p class="help">Leave both blank for an EPG-only import.</p>
+                </fieldset>
+                <fieldset class="source-group">
+                    <legend>EPG source (optional)</legend>
+                    <label>Local file path</label>
+                    <input type="text" id="f-epg-path" placeholder="" />
+                    <label>OR remote URL <span class="help">(.xml or .xml.gz)</span></label>
+                    <input type="text" id="f-epg-url" placeholder="https://example.com/epg.xml.gz" />
+                </fieldset>
+                <div class="row">
+                    <div><label>Start channel number</label><input type="number" id="f-start-num" value="800" min="1" max="9999" /></div>
+                    <div><label>Refresh interval (minutes)</label><input type="number" id="f-refresh" value="60" min="1" max="1440" /></div>
+                </div>
+                <div class="checkboxes">
+                    <label><input type="checkbox" id="f-respect" /> Respect source channel numbers</label>
+                    <label><input type="checkbox" id="f-rediscover" /> Re-discover deleted channels</label>
+                    <label><input type="checkbox" id="f-enabled" checked /> Enabled</label>
+                </div>
+                <div class="actions">
+                    <button class="subtle" id="import-cancel-btn">Cancel</button>
+                    <button class="primary" id="import-save-btn">Save</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Consolidation (madteevee): + Add PseudoTV channel modal — staged into PENDING_NEW_CHANNELS -->
+        <div id="pseudo-modal-overlay" class="modal-overlay" onclick="if(event.target===this) closePseudoModal()">
+            <div class="imp-modal">
+                <h2>Add PseudoTV channel</h2>
+                <p class="help">Creates a new operator-curated channel. Builder will populate its programme schedule on the next build cycle.</p>
+                <label>Display name</label>
+                <input type="text" id="pf-name" placeholder="My Movies Channel" />
+                <label>Channel number <span class="help">(if taken, the existing channel bumps to next free slot)</span></label>
+                <input type="number" id="pf-number" min="1" max="9999" value="600" />
+                <label>Source path <span class="help">required</span></label>
+                <input type="text" id="pf-path" placeholder="special://profile/playlists/video/MyShow.xsp" />
+                <p class="help">Examples: smart playlist .xsp, <code>plugin://...</code>, <code>library://...</code>, or <code>{Seasonal}</code>.</p>
+                <div class="actions">
+                    <button class="subtle" id="pseudo-cancel-btn">Cancel</button>
+                    <button class="primary" id="pseudo-save-btn">Stage</button>
+                </div>
+                <p class="help" style="margin-top:6px;font-size:0.65rem;">Adds are staged. Click <b>Save</b> (sticky button bottom-right) to commit all pending in one batch.</p>
+            </div>
+        </div>
+
+        <!-- Consolidation (madteevee): Custom-channel field editor modal -->
+        <div id="chfields-modal-overlay" class="modal-overlay" onclick="if(event.target===this) closeCustomEditModal()">
+            <div class="imp-modal" style="max-width:600px;">
+                <h2 id="chfields-modal-title">Edit channel</h2>
+                <p class="help">Stages edits locally. Click the sticky <b>Save</b> to commit.</p>
+                <div class="cf-grid">
+                    <div><label>Name</label><input type="text" id="cf-name"></div>
+                    <div><label>Number</label><input type="number" id="cf-number" min="1" max="9999"></div>
+                    <div><label>Group <span class="help">(pipe-separated)</span></label><input type="text" id="cf-group"></div>
+                    <div><label>Logo URL</label>
+                        <div style="display:flex;gap:6px;">
+                            <input type="text" id="cf-logo">
+                            <button class="btn-action" data-action="browse-for" data-target="cf-logo" title="Browse Kodi VFS">📁</button>
+                        </div>
+                    </div>
+                    <div class="cf-row-wide"><label>Source path</label>
+                        <div style="display:flex;gap:6px;">
+                            <input type="text" id="cf-path">
+                            <button class="btn-action" data-action="browse-for" data-target="cf-path" title="Browse Kodi VFS">📁</button>
+                        </div>
+                    </div>
+                    <div><label>Catchup mode</label><select id="cf-catchup">
+                        <option value="">(none)</option>
+                        <option value="default">default</option>
+                        <option value="vod">vod</option>
+                        <option value="timeshift">timeshift</option>
+                    </select></div>
+                    <div class="cf-toggles">
+                        <label><input type="checkbox" id="cf-radio"> radio</label>
+                        <label><input type="checkbox" id="cf-favorite"> favorite</label>
+                        <label><input type="checkbox" id="cf-enabled"> enabled</label>
+                    </div>
+                </div>
+                <div class="actions">
+                    <button class="subtle" id="cf-cancel-btn">Cancel</button>
+                    <button class="primary" id="cf-save-btn">Stage</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- (Implogo editor is fully inline per row — no modal markup.) -->
+
+        <!-- Consolidation (madteevee): per-channel rules editor — 24 rule classes -->
+        <div id="rules-modal-overlay" class="modal-overlay" onclick="if(event.target===this) closeRulesModal()">
+            <div class="imp-modal" style="max-width:780px;">
+                <h2 id="rules-modal-title">Channel rules</h2>
+                <p class="help">Each rule is independent. Toggle to enable channel-scoped overrides; leave disabled to use channel defaults. Stages locally — commit via the sticky Save.</p>
+                <div id="rules-list" style="max-height:60vh;overflow-y:auto;border:1px solid var(--pstv-border);border-radius:4px;background:rgba(0,0,0,0.2);"></div>
+                <div class="actions">
+                    <button class="subtle" id="rules-cancel-btn">Cancel</button>
+                    <button class="primary" id="rules-save-btn">Stage</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 6 Phase 4 (madteevee): action-confirmation modal -->
+        <div id="action-modal-overlay" class="modal-overlay" onclick="if(event.target===this) closeActionModal()">
+            <div class="modal-card">
+                <h3 id="action-modal-title">Run on Kodi TV?</h3>
+                <p id="action-modal-body">This will open <strong><span id="action-modal-label"></span></strong> on the Kodi TV (not in your browser). Continue?</p>
+                <code class="modal-data" id="action-modal-data"></code>
+                <div class="modal-actions">
+                    <button class="btn-action" onclick="closeActionModal()">Cancel</button>
+                    <button class="btn-action btn-confirm" id="action-modal-confirm">Run on TV</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 6 Phase 2 (madteevee): Settings tab -->
+        <div id="tab-settings" class="tab-content">
+            <div class="settings-toolbar">
+                <div>
+                    <label>Level</label>
+                    <select id="settings-level" onchange="onLevelChange()">
+                        <option value="0">Basic</option>
+                        <option value="1" selected>Standard</option>
+                        <option value="2">Advanced</option>
+                        <option value="3">Expert</option>
+                    </select>
+                </div>
+                <div class="settings-search">
+                    <input id="settings-search" type="text" placeholder="Filter by label, help, or id…" oninput="onSearchChange()">
+                </div>
+                <button class="btn-action" onclick="loadSettings()">↻ Reload</button>
+                <!-- Consolidated Save: same class + behavior as the inline Save in
+                     Manager/Imports tabs. Delegated body-click handler routes to
+                     globalSave(); updateGlobalSave() styles + counts across all tabs. -->
+                <button id="btn-settings-save" class="primary inline-save-btn" title="Commit all pending changes across tabs">Save <span class="save-count"></span></button>
+            </div>
+            <div id="settings-status">Loading settings schema…</div>
+            <div id="settings-body"></div>
+        </div>
+    </div>
+
+<script>
+    // Step 6 Phase 6 (madteevee): Manager tab is now a CTA pointing at
+    // /channels.html. The old server-selector + per-channel form was the
+    // upstream `alert("Channel Staged.")` stub — replaced by the real editor.
+
+    const CHANNEL_LIMIT = parseInt("{{ channel_limit }}") || 999;
+    // Use the host the browser actually loaded the page from — so
+    // http://<kodi-hostname>:50002/..., http://<kodi-lan-ip>:50002/..., or any other
+    // reachable hostname all work without CORS-failing JS fetches. Mirrors the
+    // pattern already in imports.html.
+    const REMOTE_HOST   = window.location.host || "{{ remote_host }}";
+    const UUID          = "{{ uuid }}";
+
+    async function init() {
+        // Server selector — kept around so multi-room manager.html instances can
+        // still pick a peer (informational only post-Phase 6; the channels-editor
+        // CTA links to the LOCAL /channels.html).
+        try {
+            const res = await fetch(`http://${REMOTE_HOST}/api/servers.json`);
+            const json = await res.json();
+            const sSelect = document.getElementById('serverSelector');
+            sSelect.innerHTML = '<option value="">-- Local server --</option>';
+            Object.keys(json.servers || {}).forEach(k => sSelect.add(new Option(k, k)));
+        } catch (e) { /* multiroom optional; ignore */ }
+    }
+    function onServerChange() { /* no-op for now; placeholder for future multi-room edits */ }
+
+    function navigateTab(t) {
+        document.querySelectorAll('.tab, .tab-content').forEach(el => el.classList.remove('active'));
+        const btn = document.getElementById('btn-'+t);
+        const con = document.getElementById('tab-'+t);
+        if (!btn || !con) return;   // hash routing safeguard
+        btn.classList.add('active');
+        con.classList.add('active');
+        if (t === 'settings' && !SETTINGS_SCHEMA) loadSettings();
+        if (t === 'info')                         loadSystemInfo();
+        if (t === 'guide')                        loadEpg();
+        if (t === 'channels' && !IMPORTS_DATA.imports.length && !IMPORTS_DATA.channels.length) loadImports();
+        if (t === 'imports'  && !IMPORTS_DATA.imports.length && !IMPORTS_DATA.channels.length) loadImports();
+        // Update URL hash so reload / bookmarks land on the same tab.
+        if (location.hash !== '#tab-' + t) {
+            history.replaceState(null, '', '#tab-' + t);
+        }
+        // Recompute Save-button visibility (FAB shows only on tabs without inline Save).
+        if (typeof updateGlobalSave === 'function') updateGlobalSave();
+    }
+
+    // ============================================================
+    // Step 6 Phase 2 + Phase 3 (madteevee): settings dashboard
+    // ============================================================
+    //
+    // Phase 2 = form generator + level filter + deferred Save.
+    // Phase 3 = client-side dependency engine — recursively evaluates
+    //          <visible>/<enable> trees against live form state.
+    //
+    // Schema source: GET /api/settings/schema.json (settings_schema.py).
+    // Save destination: POST /api/settings/save.json (batch, dispatches per
+    // setting type using the same schema as source of truth for constraints).
+
+    let SETTINGS_SCHEMA = null;          // last fetched schema
+    let SETTINGS_INDEX  = {};            // setting_id -> setting object (flat map)
+    let PENDING_SETTINGS         = {};            // setting_id -> staged new value
+    const HEX_COLOR_RE  = /^#?[0-9a-f]{6,8}$/i;
+
+    // Consolidation (madteevee): top-level helpers shared with the ported imports JS.
+    function $(id) { return document.getElementById(id); }
+
+    // Consolidation (madteevee): ported state from imports.html. IMPORTS_DATA
+    // replaces imports.html's `CURRENT` to avoid colliding with future additions.
+    let IMPORTS_DATA = { imports: [], channels: [] };
+    let IMP_EDITING_INDEX = -1;        // -1 = adding new
+    let LAST_TOGGLED = null;
+    const PENDING_TOGGLES      = {};   // {cid: bool}                 — Imports tab
+    const PENDING_NUMBERS      = {};   // {cid: int}                  — Imports tab
+    const PENDING_NEW_CHANNELS = [];   // [{name, number, path}]      — Manager tab
+    const PENDING_CUSTOM_EDITS = {};   // {cid: {field: val}}         — Manager tab
+    const PENDING_RULES        = {};   // {cid: {ruleId:{values:...}}} — Manager + Imports tabs
+    const PENDING_IMP_EDITS    = {};   // {cid: {field: val}}         — Imports tab (logo)
+    let CF_CURRENT_CID    = null;
+    let RULES_CURRENT_CID = null;
+    let RULES_CATALOG_CACHE = null;    // [{id,name,description,options:[...]}, ...]
+
+    function escapeHtml(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function toast(msg, kind) {
+        const t = document.createElement('div');
+        t.className = 'toast ' + (kind || '');
+        t.textContent = msg;
+        document.body.appendChild(t);
+        setTimeout(() => t.remove(), 3800);
+    }
+
+    async function loadSettings() {
+        const status = document.getElementById('settings-status');
+        const body   = document.getElementById('settings-body');
+        status.textContent = 'Loading settings schema…';
+        status.style.display = 'block';
+        body.innerHTML = '';
+        // Preserve which categories were expanded.
+        const openCats = new Set();
+        document.querySelectorAll('details.settings-category[open]').forEach(d => openCats.add(d.dataset.cid));
+        try {
+            const res = await fetch(`http://${REMOTE_HOST}/api/settings/schema.json?_=${Date.now()}`);
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            SETTINGS_SCHEMA = await res.json();
+            if (SETTINGS_SCHEMA.error) throw new Error(SETTINGS_SCHEMA.error);
+            indexSchema();
+            renderSettings(openCats);
+            PENDING_SETTINGS = {};
+            updateSaveCounter();
+            status.style.display = 'none';
+        } catch (e) {
+            status.textContent = 'Failed to load schema: ' + e.message;
+        }
+    }
+
+    function indexSchema() {
+        SETTINGS_INDEX = {};
+        (SETTINGS_SCHEMA.categories || []).forEach(cat => {
+            (cat.groups || []).forEach(grp => {
+                (grp.settings || []).forEach(s => { if (s.id) SETTINGS_INDEX[s.id] = s; });
+            });
+        });
+    }
+
+    function renderSettings(openCats) {
+        const body = document.getElementById('settings-body');
+        const lvl  = parseInt(document.getElementById('settings-level').value, 10);
+        const q    = (document.getElementById('settings-search').value || '').trim().toLowerCase();
+        const parts = [];
+        (SETTINGS_SCHEMA.categories || []).forEach(cat => {
+            // Only emit a category if it has at least one setting passing the level + search filter.
+            const groupsHtml = [];
+            (cat.groups || []).forEach(grp => {
+                const rowsHtml = (grp.settings || [])
+                    .filter(s => s.level == null || s.level <= lvl)
+                    .filter(s => !q || matchesSearch(s, q))
+                    .map(renderSettingRow)
+                    .join('');
+                if (rowsHtml) {
+                    groupsHtml.push(`<div class="settings-group">
+                        ${grp.label ? `<div class="settings-group-title">${escapeHtml(grp.label)}</div>` : ''}
+                        ${rowsHtml}
+                    </div>`);
+                }
+            });
+            if (groupsHtml.length) {
+                const wantOpen = openCats ? openCats.has(cat.id) : true;
+                parts.push(`<details class="settings-category" data-cid="${escapeHtml(cat.id)}" ${wantOpen ? 'open' : ''}>
+                    <summary>${escapeHtml(cat.label || cat.id)}</summary>
+                    <div class="settings-category-body">${groupsHtml.join('')}</div>
+                </details>`);
+            }
+        });
+        body.innerHTML = parts.length
+            ? parts.join('')
+            : '<div style="padding:40px;text-align:center;opacity:0.5;">No settings match the current filter.</div>';
+        bindRowEvents();
+        evaluateAllDependencies();
+    }
+
+    function matchesSearch(setting, q) {
+        const hay = [setting.id, setting.label, setting.help].filter(Boolean).join(' ').toLowerCase();
+        return hay.indexOf(q) !== -1;
+    }
+
+    function renderSettingRow(s) {
+        const levelPill = `<span class="level-pill">L${s.level == null ? '?' : s.level}</span>`;
+        const help      = s.help ? `<div class="help-text">${escapeHtml(s.help)}</div>` : '';
+        const labelHtml = `<div class="settings-label">
+            <span class="label-text">${escapeHtml(s.label || s.id)}<span class="dirty-badge" title="unsaved change">✏️</span></span>
+            ${help}
+            ${levelPill}
+        </div>`;
+
+        // Action settings get a button row instead of a control + save flow.
+        if (s.type === 'action') {
+            const dataAttr = s.data ? ` data-action-data="${escapeHtml(s.data)}"` : '';
+            return `<div class="action-row" data-setting-id="${escapeHtml(s.id)}">
+                <div class="settings-label">
+                    <span class="label-text">${escapeHtml(s.label || s.id)}</span>
+                    ${help}
+                    ${levelPill}
+                </div>
+                <button class="btn-action" data-action="run-action"${dataAttr}>Run on TV</button>
+            </div>`;
+        }
+
+        const controlHtml = renderControl(s);
+        const parentClass = s.parent ? ' parent-indent' : '';
+        return `<div class="settings-row${parentClass}" data-setting-id="${escapeHtml(s.id)}" data-setting-type="${escapeHtml(s.type)}" data-parent="${escapeHtml(s.parent || '')}">
+            ${labelHtml}
+            <div class="settings-control">${controlHtml}</div>
+        </div>`;
+    }
+
+    function renderControl(s) {
+        const id  = s.id;
+        const ctl = s.control || {};
+        const c   = s.constraints || {};
+        const orig = s.current;
+        const origJson = encodeAttr(orig);
+
+        if (s.type === 'boolean') {
+            return `<label class="switch">
+                <input type="checkbox" data-setting-id="${escapeHtml(id)}" data-original="${origJson}" ${orig ? 'checked' : ''}>
+                <span class="slider"></span>
+            </label>`;
+        }
+
+        if (s.type === 'integer') {
+            if (Array.isArray(c.options) && c.options.length) {
+                return renderSelect(id, c.options, orig, origJson);
+            }
+            if (c.minimum != null && c.maximum != null) {
+                const step = c.step || 1;
+                return `<div class="range-row">
+                    <input type="range" data-setting-id="${escapeHtml(id)}" data-original="${origJson}" data-companion="num-${escapeHtml(id)}" min="${c.minimum}" max="${c.maximum}" step="${step}" value="${orig == null ? c.minimum : orig}">
+                    <input type="number" id="num-${escapeHtml(id)}" data-setting-id="${escapeHtml(id)}" data-original="${origJson}" data-companion="" min="${c.minimum}" max="${c.maximum}" step="${step}" value="${orig == null ? c.minimum : orig}">
+                </div>`;
+            }
+            return `<input type="number" data-setting-id="${escapeHtml(id)}" data-original="${origJson}" value="${orig == null ? '' : orig}">`;
+        }
+
+        if (s.type === 'string') {
+            if (Array.isArray(c.options) && c.options.length) {
+                return renderSelect(id, c.options, orig, origJson);
+            }
+            // colorbutton control on a string setting → web color picker
+            if (ctl.type === 'colorbutton') {
+                const hex = kodiColorToHex(orig);
+                return `<input type="color" data-setting-id="${escapeHtml(id)}" data-original="${origJson}" data-color-mode="kodi" value="${hex}">
+                        <div class="small-note">Kodi color: <code>${escapeHtml(orig || '')}</code></div>`;
+            }
+            return `<input type="text" data-setting-id="${escapeHtml(id)}" data-original="${origJson}" value="${escapeHtml(orig || '')}">`;
+        }
+
+        if (s.type === 'path') {
+            return `<div class="input-with-action">
+                        <input type="text" data-setting-id="${escapeHtml(id)}" data-original="${origJson}" value="${escapeHtml(orig || '')}">
+                        <button class="btn-action" data-action="path-browse" data-setting-id="${escapeHtml(id)}">📁 Browse</button>
+                    </div>`;
+        }
+
+        if (s.type && s.type.indexOf('list') === 0) {
+            const arr = Array.isArray(orig) ? orig : [];
+            return `<textarea data-setting-id="${escapeHtml(id)}" data-original="${origJson}" data-list-input="1" placeholder="one addon id per line">${escapeHtml(arr.join('\n'))}</textarea>
+                    <div class="small-note">One addon id per line. <code>${escapeHtml(c.addontype || '')}</code> picker arrives in a later phase.</div>`;
+        }
+
+        return `<input type="text" data-setting-id="${escapeHtml(id)}" data-original="${origJson}" value="${escapeHtml(orig == null ? '' : String(orig))}">
+                <div class="small-note">Unknown setting type: ${escapeHtml(s.type)}</div>`;
+    }
+
+    function renderSelect(id, options, orig, origJson) {
+        const opts = options.map(opt => {
+            const val = opt.value;
+            const sel = (String(orig) === String(val)) ? ' selected' : '';
+            return `<option value="${escapeHtml(val)}"${sel}>${escapeHtml(opt.label || val)}</option>`;
+        }).join('');
+        return `<select data-setting-id="${escapeHtml(id)}" data-original="${origJson}">${opts}</select>`;
+    }
+
+    function encodeAttr(v) {
+        return escapeHtml(JSON.stringify(v == null ? null : v));
+    }
+
+    function kodiColorToHex(kodi) {
+        // Kodi color is FFRRGGBB (alpha-first). Web color input expects #RRGGBB.
+        if (!kodi || !HEX_COLOR_RE.test(kodi)) return '#ffffff';
+        const stripped = kodi.replace(/^#/, '');
+        const rgb = (stripped.length === 8) ? stripped.slice(2) : stripped.slice(0, 6);
+        return '#' + rgb.toLowerCase();
+    }
+    function hexToKodiColor(hex, original) {
+        // Preserve original alpha (default FF) when rebuilding the Kodi-format string.
+        const stripped = (hex || '').replace(/^#/, '').toLowerCase();
+        if (!stripped) return original || 'FFFFFFFF';
+        const origStripped = (original || '').replace(/^#/, '');
+        const alpha = (origStripped && origStripped.length === 8) ? origStripped.slice(0, 2) : 'FF';
+        return (alpha + stripped.slice(0, 6)).toUpperCase();
+    }
+
+    function bindRowEvents() {
+        // Generic change handler on every editable control.
+        document.querySelectorAll('#settings-body [data-setting-id]').forEach(el => {
+            if (el.dataset.bound) return;
+            el.dataset.bound = '1';
+            const evt = (el.tagName === 'TEXTAREA' || el.type === 'text' || el.type === 'number' || el.type === 'color') ? 'input' : 'change';
+            el.addEventListener(evt, onControlChange);
+            if (el.type === 'text' || el.type === 'number' || el.tagName === 'TEXTAREA') {
+                el.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') revertField(el); });
+            }
+        });
+        // Action buttons.
+        document.querySelectorAll('#settings-body [data-action="run-action"]').forEach(btn => {
+            if (btn.dataset.bound) return;
+            btn.dataset.bound = '1';
+            btn.addEventListener('click', () => triggerActionStub(btn));
+        });
+        // Range/number companions stay in sync.
+        document.querySelectorAll('#settings-body input[type=range][data-companion]').forEach(r => {
+            r.addEventListener('input', () => {
+                const num = document.getElementById(r.dataset.companion);
+                if (num) num.value = r.value;
+            });
+        });
+        document.querySelectorAll('#settings-body input[type=number][data-setting-id]').forEach(n => {
+            n.addEventListener('input', () => {
+                const range = document.querySelector(`#settings-body input[type=range][data-companion="${n.id}"]`);
+                if (range) range.value = n.value;
+            });
+        });
+    }
+
+    function readControlValue(el) {
+        const sid = el.dataset.settingId;
+        const setting = SETTINGS_INDEX[sid];
+        if (!setting) return null;
+        if (setting.type === 'boolean')     return el.checked;
+        if (setting.type === 'integer') {
+            const n = parseInt(el.value, 10);
+            return isNaN(n) ? null : n;
+        }
+        if (setting.type === 'string' && (setting.control || {}).type === 'colorbutton') {
+            return hexToKodiColor(el.value, JSON.parse(el.dataset.original || '""'));
+        }
+        if (setting.type && setting.type.indexOf('list') === 0) {
+            return el.value.split(/[\r\n,|]+/).map(s => s.trim()).filter(Boolean);
+        }
+        return el.value;
+    }
+
+    function originalValueOf(el) {
+        try { return JSON.parse(el.dataset.original || 'null'); } catch (e) { return null; }
+    }
+
+    function isSameValue(a, b) {
+        if (a === b) return true;
+        if (Array.isArray(a) && Array.isArray(b)) {
+            if (a.length !== b.length) return false;
+            for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+            return true;
+        }
+        return String(a == null ? '' : a) === String(b == null ? '' : b);
+    }
+
+    function onControlChange(ev) {
+        const el  = ev.currentTarget;
+        const sid = el.dataset.settingId;
+        if (!sid) return;
+        const cur  = readControlValue(el);
+        const orig = originalValueOf(el);
+        if (isSameValue(cur, orig)) delete PENDING_SETTINGS[sid];
+        else                        PENDING_SETTINGS[sid] = cur;
+        const row = el.closest('.settings-row');
+        if (row) row.classList.toggle('dirty', PENDING_SETTINGS.hasOwnProperty(sid));
+        updateSaveCounter();
+        evaluateAllDependencies();
+    }
+
+    function revertField(el) {
+        const sid = el.dataset.settingId;
+        const orig = originalValueOf(el);
+        if (el.type === 'color') el.value = kodiColorToHex(orig);
+        else if (el.tagName === 'TEXTAREA' && el.dataset.listInput) el.value = (Array.isArray(orig) ? orig.join('\n') : '');
+        else if (el.type === 'checkbox') el.checked = !!orig;
+        else el.value = orig == null ? '' : orig;
+        // Mirror over to number<->range companions.
+        if (el.dataset.companion) {
+            const c = document.getElementById(el.dataset.companion);
+            if (c) c.value = el.value;
+        }
+        delete PENDING_SETTINGS[sid];
+        const row = el.closest('.settings-row');
+        if (row) row.classList.remove('dirty');
+        updateSaveCounter();
+        evaluateAllDependencies();
+    }
+
+    // Settings-tab Save button is now an .inline-save-btn (same class as the
+    // Manager/Imports inline buttons). updateSaveCounter is just an alias for
+    // updateGlobalSave so existing call sites (loadSettings, onControlChange,
+    // revertField) keep working without per-call-site edits.
+    function updateSaveCounter() { updateGlobalSave(); }
+    // (saveSettings retired — globalSave() flushes everything including settings.)
+
+    // Step 6 Phase 4 (madteevee): action-setting dispatch with confirmation modal.
+    // Server-side endpoint /api/settings/action.json looks up the <data> payload
+    // by setting_id (defense against client-injected RunScript strings).
+    let PENDING_ACTION_ID = null;
+    function triggerActionStub(btn) {
+        const row = btn.closest('.action-row');
+        if (!row) return;
+        const sid = row.dataset.settingId;
+        const setting = SETTINGS_INDEX[sid];
+        if (!setting) { toast('No schema entry for ' + sid, 'err'); return; }
+        if (!setting.data) { toast('Setting has no action payload', 'err'); return; }
+        PENDING_ACTION_ID = sid;
+        document.getElementById('action-modal-label').textContent = setting.label || sid;
+        document.getElementById('action-modal-data').textContent  = setting.data;
+        document.getElementById('action-modal-overlay').classList.add('open');
+    }
+    function closeActionModal() {
+        PENDING_ACTION_ID = null;
+        document.getElementById('action-modal-overlay').classList.remove('open');
+    }
+    async function confirmAction() {
+        const sid = PENDING_ACTION_ID;
+        closeActionModal();
+        if (!sid) return;
+        try {
+            const res = await fetch(`http://${REMOTE_HOST}/api/settings/action.json`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({uuid: UUID, setting_id: sid})
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+            toast('Triggered on TV: ' + sid, 'ok');
+        } catch (e) {
+            toast('Action failed: ' + e.message, 'err');
+        }
+    }
+
+    function onLevelChange() { if (SETTINGS_SCHEMA) renderSettings(); }
+    function onSearchChange() { if (SETTINGS_SCHEMA) renderSettings(getOpenCategoryIds()); }
+    function getOpenCategoryIds() {
+        const s = new Set();
+        document.querySelectorAll('details.settings-category[open]').forEach(d => s.add(d.dataset.cid));
+        return s;
+    }
+
+    // -------------------------------------------------------- Phase 3
+    // Dependency engine. Each visible/enable block ships as a normalized
+    // tree (and/or/setting/infobool). We walk the tree against the live
+    // form state (including unsaved staged edits) and apply .hidden /
+    // .disabled-block accordingly. Multiple <dependency> blocks on one
+    // setting AND together (the schema models them as independent blocks).
+
+    function liveValueOf(setting_id) {
+        // Look in PENDING_SETTINGS first; otherwise the input's current value;
+        // otherwise the setting's `current` field from the schema.
+        if (PENDING_SETTINGS.hasOwnProperty(setting_id)) return PENDING_SETTINGS[setting_id];
+        const el = document.querySelector(`#settings-body [data-setting-id="${cssEscape(setting_id)}"]`);
+        if (el) return readControlValue(el);
+        const s = SETTINGS_INDEX[setting_id];
+        return s ? s.current : null;
+    }
+
+    function cssEscape(s) {
+        return String(s).replace(/(["\\\]\[\(\)\:\.\#\>\+\~\*])/g, '\\$1');
+    }
+
+    function compareCondition(cond) {
+        if (cond.kind === 'infobool') return cond.value === true;
+        if (cond.kind === 'setting') {
+            const lv = liveValueOf(cond.setting);
+            const want = cond.value;
+            // Coerce: setting condition values are strings in the XML. Compare as strings.
+            const lvStr = (typeof lv === 'boolean') ? (lv ? 'true' : 'false') : String(lv == null ? '' : lv);
+            const wantStr = String(want == null ? '' : want);
+            switch (cond.operator) {
+                case 'is':  return lvStr === wantStr;
+                case '!is': return lvStr !== wantStr;
+                case 'gt':  return parseFloat(lvStr) >  parseFloat(wantStr);
+                case 'lt':  return parseFloat(lvStr) <  parseFloat(wantStr);
+                default:    return false;
+            }
+        }
+        if (cond.kind === 'and') return (cond.children || []).every(compareCondition);
+        if (cond.kind === 'or')  return (cond.children || []).some(compareCondition);
+        return true;
+    }
+
+    function evaluateAllDependencies() {
+        if (!SETTINGS_SCHEMA) return;
+        Object.values(SETTINGS_INDEX).forEach(s => {
+            const row = document.querySelector(`#settings-body [data-setting-id="${cssEscape(s.id)}"]`);
+            if (!row) return;
+            const block = row.closest('.settings-row, .action-row');
+            if (!block) return;
+            let visible = true, enabled = true;
+            (s.dependencies || []).forEach(dep => {
+                const ok = compareCondition(dep.tree);
+                if (dep.kind === 'visible' && !ok) visible = false;
+                if (dep.kind === 'enable'  && !ok) enabled = false;
+            });
+            block.classList.toggle('hidden', !visible);
+            block.classList.toggle('disabled-block', visible && !enabled);
+        });
+    }
+
+    // -------------------------------------------------------- Phase 5
+    // System Info tab — live data from /api/system/info.json.
+    let SYSINFO_POLL = null;
+    async function loadSystemInfo() {
+        const status = document.getElementById('info-status');
+        const body   = document.getElementById('info-body');
+        try {
+            const res = await fetch(`http://${REMOTE_HOST}/api/system/info.json?_=${Date.now()}`);
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const info = await res.json();
+            if (info.error) throw new Error(info.error);
+            body.innerHTML = renderSystemInfo(info);
+            status.style.display = 'none';
+            body.style.display   = 'grid';
+            // Refresh every 30s while the tab is active.
+            if (!SYSINFO_POLL) SYSINFO_POLL = setInterval(() => {
+                if (document.getElementById('tab-info').classList.contains('active')) loadSystemInfo();
+            }, 30000);
+        } catch (e) {
+            status.textContent = 'Failed to load system info: ' + e.message;
+            status.style.display = 'block';
+            body.style.display   = 'none';
+        }
+    }
+    function renderSystemInfo(info) {
+        const fields = [
+            ['Addon',           info.addon_name + ' ' + info.addon_version],
+            ['Uptime',          formatUptime(info.uptime_seconds)],
+            ['Remote host',     info.remote_host],
+            ['UUID',            info.uuid],
+            ['TCP port',        info.tcp_port],
+            ['Channels',        info.channel_count],
+            ['Imports',         info.imports_count],
+            ['Machine',         info.machine],
+            ['Python',          info.python_version],
+            ['Kodi build',      info.kodi_build_version],
+            ['Kodi OS',         info.kodi_os_version],
+        ];
+        const bools = [
+            ['IPTV Simple installed', info.iptv_simple_installed],
+            ['IPTV Simple enabled',   info.iptv_simple_enabled],
+            ['PVR has TV channels',   info.pvr_has_tv_channels],
+            ['PVR playing TV',        info.pvr_playing_tv],
+            ['PVR recording',         info.pvr_recording],
+        ];
+        const fieldHtml = fields.map(([k, v]) =>
+            `<div class="info-card"><div class="info-label">${escapeHtml(k)}</div><div class="info-value">${escapeHtml(v == null ? '—' : String(v))}</div></div>`
+        ).join('');
+        const boolHtml = bools.map(([k, v]) =>
+            `<div class="info-card bool-${v ? 'true' : 'false'}"><div class="info-label">${escapeHtml(k)}</div><div class="info-value">${v ? '✓ yes' : '✗ no'}</div></div>`
+        ).join('');
+        return fieldHtml + boolHtml;
+    }
+    function formatUptime(s) {
+        if (s == null || s < 0) return '—';
+        const days = Math.floor(s / 86400);
+        const hrs  = Math.floor((s % 86400) / 3600);
+        const mins = Math.floor((s % 3600) / 60);
+        const secs = s % 60;
+        if (days) return `${days}d ${hrs}h ${mins}m`;
+        if (hrs)  return `${hrs}h ${mins}m ${secs}s`;
+        if (mins) return `${mins}m ${secs}s`;
+        return `${secs}s`;
+    }
+
+    // ============================================================
+    // Step 6 Phase 7 (madteevee): Live Guide EPG grid
+    // ============================================================
+    const EPG_CHANNEL_COL_PX = 200;
+    const EPG_PX_PER_HOUR    = 220;
+    let EPG_REFRESH_TIMER = null;
+
+    async function loadEpg() {
+        const wrap   = document.getElementById('epg-grid');
+        const status = document.getElementById('epg-status');
+        const win    = document.getElementById('epg-window').value || '4';
+        wrap.innerHTML = '<div class="epg-empty">Loading EPG…</div>';
+        try {
+            const res = await fetch(`http://${REMOTE_HOST}/api/epg/grid.json?window=${encodeURIComponent(win)}&_=${Date.now()}`);
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const grid = await res.json();
+            if (grid.error) throw new Error(grid.error);
+            renderEpg(grid);
+            status.textContent = `${grid.channels.length} channels · ${grid.programmes.length} programmes · ${win}h window`;
+            // Re-render the "now" line every 60s so it tracks time.
+            if (EPG_REFRESH_TIMER) clearInterval(EPG_REFRESH_TIMER);
+            EPG_REFRESH_TIMER = setInterval(() => {
+                if (document.getElementById('tab-guide').classList.contains('active')) repositionNowLine();
+            }, 60000);
+        } catch (e) {
+            wrap.innerHTML = '<div class="epg-empty">Failed to load EPG: ' + escapeHtml(e.message) + '</div>';
+            status.textContent = '';
+        }
+    }
+
+    function renderEpg(grid) {
+        const wrap = document.getElementById('epg-grid');
+        if (!grid.channels.length) { wrap.innerHTML = '<div class="epg-empty">No programmes in window. Try a wider window or wait for the next Builder cycle.</div>'; return; }
+        const win  = grid.window;
+        const dur  = win.end - win.start;   // seconds
+        const hrs  = dur / 3600;
+        const trackPx = Math.round(hrs * EPG_PX_PER_HOUR);
+        const cols = `${EPG_CHANNEL_COL_PX}px ${trackPx}px`;
+
+        // Header: time labels at 30-min increments.
+        const ticks = [];
+        const tickStep = 1800;             // 30 minutes
+        for (let t = Math.ceil(win.start / tickStep) * tickStep; t < win.end; t += tickStep) {
+            const x = ((t - win.start) / dur) * trackPx;
+            const label = new Date(t * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', hour12: false});
+            ticks.push(`<div class="epg-time" style="position:absolute;left:${EPG_CHANNEL_COL_PX + x}px;top:0;padding:6px 4px;">${escapeHtml(label)}</div>`);
+        }
+        const headerHtml = `<div class="epg-header" style="grid-template-columns:${cols}; position:relative; height:28px;">
+            <div class="epg-corner epg-time" style="padding:6px 8px;">Channel</div>
+            <div style="position:relative;height:28px;"></div>
+            ${ticks.join('')}
+        </div>`;
+
+        // Index programmes by channel.
+        const progsByChannel = {};
+        grid.programmes.forEach(p => {
+            if (!progsByChannel[p.channel_id]) progsByChannel[p.channel_id] = [];
+            progsByChannel[p.channel_id].push(p);
+        });
+
+        const rows = grid.channels.map(c => {
+            const progs = progsByChannel[c.id] || [];
+            const blocks = progs.map(p => {
+                const startClamp = Math.max(p.start, win.start);
+                const stopClamp  = Math.min(p.stop,  win.end);
+                if (stopClamp <= startClamp) return '';
+                const leftPx  = ((startClamp - win.start) / dur) * trackPx;
+                const widthPx = ((stopClamp - startClamp) / dur) * trackPx;
+                const isNow   = (p.start <= win.now && p.stop > win.now);
+                return `<div class="epg-prog${isNow ? ' now' : ''}" style="left:${leftPx}px;width:${widthPx}px;" data-ch="${escapeHtml(c.id)}" data-start="${p.start}" title="${escapeHtml(p.title)} • ${epgFmtRange(p.start, p.stop)}">${escapeHtml(p.title)}</div>`;
+            }).join('');
+            const numHtml = (c.number != null) ? `<span class="epg-num">${c.number}</span>` : '';
+            return `<div class="epg-row" style="grid-template-columns:${cols};">
+                <div class="epg-channel">${numHtml}<span>${escapeHtml(c.name)}</span></div>
+                <div class="epg-prog-track">${blocks}</div>
+            </div>`;
+        }).join('');
+
+        wrap.innerHTML = headerHtml + rows;
+        // Inject the "now" red line, positioned over the prog tracks.
+        const nowX = Math.max(0, ((win.now - win.start) / dur) * trackPx);
+        const line = document.createElement('div');
+        line.className = 'epg-now-line';
+        line.id = 'epg-now-line';
+        line.style.left = (EPG_CHANNEL_COL_PX + nowX) + 'px';
+        wrap.appendChild(line);
+
+        // Click → details modal.
+        wrap.querySelectorAll('.epg-prog').forEach(el => {
+            el.addEventListener('click', () => {
+                const cid = el.dataset.ch;
+                const st  = parseInt(el.dataset.start, 10);
+                const prog = (progsByChannel[cid] || []).find(p => p.start === st);
+                if (!prog) return;
+                const ch = grid.channels.find(c => c.id === cid) || {};
+                document.getElementById('epg-modal-title').textContent = prog.title || '(no title)';
+                document.getElementById('epg-modal-meta').textContent  =
+                    `${ch.number != null ? '#' + ch.number + '  ' : ''}${ch.name || cid}\n${epgFmtRange(prog.start, prog.stop)}`;
+                document.getElementById('epg-modal-desc').textContent = prog.desc || '(no description)';
+                document.getElementById('epg-modal-overlay').classList.add('open');
+            });
+        });
+    }
+
+    function repositionNowLine() {
+        const grid = document.getElementById('epg-grid');
+        const line = document.getElementById('epg-now-line');
+        if (!grid || !line) return;
+        // Recompute against the original window we stored when rendering; if
+        // missing, just re-fetch to get a fresh `now`.
+        loadEpg();
+    }
+    function epgFmtRange(start, stop) {
+        const fmt = ts => new Date(ts * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', hour12: false});
+        return `${fmt(start)} – ${fmt(stop)}`;
+    }
+    function closeEpgModal() { document.getElementById('epg-modal-overlay').classList.remove('open'); }
+
+    // ============================================================
+    // Path browser — INLINE panel anchored beneath the trigger button.
+    // Replaces the previously-centered modal. The panel is appended to a
+    // host element (the closest row/container) so the operator's eye never
+    // has to leave the area they clicked. One panel at a time site-wide.
+    // ============================================================
+    const PATH_BROWSER_IMG_EXTS = ['.png','.jpg','.jpeg','.gif','.svg','.bmp','.webp'];
+
+    function openPathBrowser(inputEl, startPath, triggerEl) {
+        // Remove any open inline browser.
+        document.querySelectorAll('.inline-browser').forEach(el => el.remove());
+        let initial = startPath || (inputEl && inputEl.value) || 'special://home/';
+        // If the path looks like a file (last segment has a dot extension), back
+        // up to parent dir — listing a file path as a directory returns empty.
+        if (initial && !initial.endsWith('/')) {
+            const stripped = initial.split(/[?#]/, 1)[0];
+            const lastSlash = stripped.lastIndexOf('/');
+            const lastSegment = lastSlash >= 0 ? stripped.slice(lastSlash + 1) : stripped;
+            if (lastSegment.includes('.')) {
+                initial = stripped.slice(0, lastSlash + 1);
+            }
+        }
+        // Find host: the closest sensible ancestor of the trigger button or input
+        // — a channel-row / settings-row / inline-logo-editor / editor-field /
+        // imp-modal — and append the panel right after it.
+        const anchor = (triggerEl || inputEl);
+        const host = anchor?.closest('.inline-logo-editor, .channel-row, .settings-row, .editor-field, .cf-grid > div, .imp-modal, .container');
+        if (!host) { toast('Cannot anchor browser — no host element', 'err'); return; }
+        const panel = document.createElement('div');
+        panel.className = 'inline-browser';
+        panel.dataset.targetInputId = (inputEl && inputEl.id) || '';
+        panel.innerHTML = `
+            <div class="browser-quickjumps">
+                <button type="button" data-jump="special://home/" title="Kodi installation root (~/.kodi/)">🏠 Home</button>
+                <button type="button" data-jump="special://profile/" title="Kodi userdata (~/.kodi/userdata/)">👤 Profile</button>
+                <button type="button" data-jump="special://home/addons/" title="Installed addons">📦 Addons</button>
+                <button type="button" data-jump="special://userdata/addon_data/" title="Per-addon data folders">📂 addon_data</button>
+                <button type="button" data-jump="/" title="Filesystem root">💾 /</button>
+                <button type="button" data-jump="/home/" title="/home/">🗂 /home/</button>
+            </div>
+            <div class="browser-path"></div>
+            <div class="browser-list"></div>
+        `;
+        host.parentNode.insertBefore(panel, host.nextSibling);
+        // Quick-jumps wired per-panel. No Cancel button on the panel itself —
+        // the parent editor's (e.g. inline-logo) Cancel closes the panel too.
+        panel.querySelectorAll('.browser-quickjumps button[data-jump]').forEach(btn => {
+            btn.addEventListener('click', () => loadBrowseInto(panel, btn.dataset.jump));
+        });
+        loadBrowseInto(panel, initial);
+    }
+
+    async function loadBrowseInto(panel, path) {
+        const pathDisp = panel.querySelector('.browser-path');
+        const list     = panel.querySelector('.browser-list');
+        pathDisp.textContent = path;
+        list.innerHTML = '<div class="browser-item" style="opacity:0.6;cursor:default;">Loading…</div>';
+        try {
+            const res = await fetch(`http://${REMOTE_HOST}/api/browse.json?path=${encodeURIComponent(path)}&_=${Date.now()}`);
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            pathDisp.textContent = data.path;
+            const isImage = (label) => {
+                const lc = (label || '').toLowerCase();
+                return PATH_BROWSER_IMG_EXTS.some(e => lc.endsWith(e));
+            };
+            const rows = [];
+            if (data.parent) rows.push(`<div class="browser-item" data-path="${escapeHtml(data.parent)}"><span class="icon">↰</span><span>.. (parent)</span></div>`);
+            (data.items || []).forEach(it => {
+                if (it.filetype === 'directory') {
+                    rows.push(`<div class="browser-item" data-path="${escapeHtml(it.file)}"><span class="icon">📁</span><span>${escapeHtml(it.label)}</span></div>`);
+                } else if (isImage(it.label)) {
+                    const thumbUrl = `http://${REMOTE_HOST}/images/${encodeURIComponent(it.file)}`;
+                    rows.push(`<div class="browser-item" data-pickfile="${escapeHtml(it.file)}"><img class="thumb" loading="lazy" src="${escapeHtml(thumbUrl)}" alt="" onerror="this.classList.add('broken')"><span class="icon-fallback">📄</span><span>${escapeHtml(it.label)}</span></div>`);
+                } else {
+                    rows.push(`<div class="browser-item" data-pickfile="${escapeHtml(it.file)}"><span class="icon">📄</span><span>${escapeHtml(it.label)}</span></div>`);
+                }
+            });
+            list.innerHTML = rows.join('') || '<div class="browser-item" style="opacity:0.5;cursor:default;">(empty)</div>';
+            list.querySelectorAll('.browser-item[data-path]').forEach(el => {
+                el.addEventListener('click', () => loadBrowseInto(panel, el.dataset.path));
+            });
+            list.querySelectorAll('.browser-item[data-pickfile]').forEach(el => {
+                el.addEventListener('click', () => {
+                    const targetId = panel.dataset.targetInputId;
+                    const inp = targetId ? document.getElementById(targetId) : null;
+                    if (inp) {
+                        inp.value = el.dataset.pickfile;
+                        inp.dispatchEvent(new Event('input', {bubbles: true}));
+                    }
+                    panel.remove();
+                });
+            });
+        } catch (e) {
+            list.innerHTML = '<div class="browser-item" style="opacity:0.6;">Error: ' + escapeHtml(e.message) + '</div>';
+        }
+    }
+
+    // (closeBrowserModal / confirmBrowseSelect retired — inline browser handles
+    //  its own lifecycle. Escape handler removes any open .inline-browser directly.)
+
+    // ============================================================
+    // Consolidation (madteevee): IMPORTS + MANAGER tab JS
+    // Ported from imports.html with minimal renames. CURRENT → IMPORTS_DATA,
+    // EDITING_INDEX → IMP_EDITING_INDEX, render() → renderImports(),
+    // openModal/save → openImportModal/saveImport. Everything else is verbatim
+    // behavior with the same shape as imports.html.
+    // ============================================================
+
+    function fmtAge(epoch) {
+        if (!epoch) return '—';
+        const secs = Math.floor(Date.now()/1000 - epoch);
+        if (secs < 60)    return secs + 's ago';
+        if (secs < 3600)  return Math.floor(secs/60)   + 'm ago';
+        if (secs < 86400) return Math.floor(secs/3600) + 'h ago';
+        return Math.floor(secs/86400) + 'd ago';
+    }
+
+    function statusBadge(imp) {
+        if (imp.enabled === false) return '<span class="warn">disabled</span>';
+        const e = imp.last_error;
+        if (e) return `<span class="err">error: ${escapeHtml(e)}</span>`;
+        const synced = imp.last_synced;
+        return synced ? `<span class="ok">last sync ${fmtAge(synced)}</span>` : '<span class="warn">never synced</span>';
+    }
+
+    function renderImportRow(imp, idx) {
+        const channelsForImport = (IMPORTS_DATA.channels || []).filter(c =>
+            (c.type === 'import') && (c.import_source === imp.id)
+        );
+        const enabledCh = channelsForImport.filter(c => c.enabled !== false);
+        const orphanCount = (IMPORTS_DATA.channels || []).filter(c =>
+            (c.import_source === imp.id) && c.is_orphan
+        ).length;
+        return `
+        <div class="imp-row ${imp.enabled === false ? 'disabled' : ''}">
+            <div class="meta">
+                <div class="name">${escapeHtml(imp.name || imp.id)}</div>
+                <div class="id">${escapeHtml(imp.id)}</div>
+                <div class="src">${escapeHtml(imp.m3u_url || imp.m3u_path || '(no M3U)')}</div>
+                <div class="status">${statusBadge(imp)} · ${enabledCh.length}/${channelsForImport.length} channels enabled${orphanCount ? ` · <span class="warn">${orphanCount} orphan${orphanCount===1?'':'s'}</span>` : ''}</div>
+                <div class="channels-toggle" data-action="togglech" data-id="${escapeHtml(imp.id)}">
+                    <span class="arrow">▸</span> ${channelsForImport.length} channels
+                </div>
+                <div class="channels-list" id="channels-${escapeHtml(imp.id)}">
+                    <div class="channels-help">Edit channel numbers and toggle enable/disable inline. Shift+click an enabled checkbox to set/unset a range. All changes stage locally — click the sticky <b>Save</b> at bottom-right to commit. Press Escape to revert a single field.</div>
+                    ${channelsForImport.sort((a,b) => {
+                        const ae = a.enabled === false ? 1 : 0;
+                        const be = b.enabled === false ? 1 : 0;
+                        if (ae !== be) return ae - be;
+                        return (a.number||0) - (b.number||0);
+                    }).map(c => `
+                        <div class="channel-row ${c.enabled === false ? 'disabled' : ''}" data-row-name="${escapeHtml((c.name || '').toLowerCase())}" data-row-num="${c.number || ''}" data-row-cid="${escapeHtml((c.id || '').toLowerCase())}" data-cid-exact="${escapeHtml(c.id || '')}">
+                            <div class="row-drag" draggable="true" title="Drag to reorder within this import">⋮⋮</div>
+                            <div class="row-logo-slot">${c.logo ? `<img class="row-logo" loading="lazy" src="http://${REMOTE_HOST}/images/${encodeURIComponent(c.logo)}" alt="" onerror="this.classList.add('broken')">` : ''}</div>
+                            <div class="num"><input type="number" min="1" max="9999" value="${c.number || ''}" data-action="setnumber" data-cid="${escapeHtml(c.id)}" data-original="${c.number || ''}" /></div>
+                            <div class="name"><input type="text" value="${escapeHtml(c.name || '')}" data-action="setname" data-cid="${escapeHtml(c.id)}" data-original="${escapeHtml(c.name || '')}" placeholder="(unnamed)" /></div>
+                            <label><input type="checkbox" ${c.enabled === false ? '' : 'checked'} data-action="togglech-enable" data-cid="${escapeHtml(c.id)}"> enabled</label>
+                            <button class="btn-action" data-action="edit-imp-logo" data-cid="${escapeHtml(c.id)}" style="padding:1px 6px;font-size:0.7rem;" title="Edit logo (browse Kodi VFS)">🖼 Logo</button>
+                            <div class="marker" title="${(c.operator_overrides||[]).length ? 'Edited: ' + (c.operator_overrides||[]).join(', ') : ''}">${(c.operator_overrides||[]).length ? '✏️' : ''}</div>
+                            ${c.is_orphan ? '<span class="badge">orphan</span>' : ''}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+            <div class="controls">
+                <button data-action="edit-import" data-idx="${idx}">Edit</button>
+                <button data-action="refresh" data-id="${escapeHtml(imp.id)}">↻ Refresh</button>
+                <button data-action="renumber" data-id="${escapeHtml(imp.id)}" title="Fill gaps from start_num. Hand-pinned channel numbers preserved.">⟳ Renumber</button>
+                <button data-action="renumber-hard" data-id="${escapeHtml(imp.id)}" class="danger" title="DESTRUCTIVE: wipes every hand-pinned channel number for this import.">⟳⟳ Reset pins</button>
+                <button data-action="remove-orphans" data-id="${escapeHtml(imp.id)}" title="Delete channels no longer in the source M3U.">🗑 Orphans</button>
+                <button data-action="delete-import" data-idx="${idx}" class="danger">Delete</button>
+            </div>
+        </div>`;
+    }
+
+    function renderPseudoChannel(c) {
+        return `
+        <div class="channel-row ${c.enabled === false ? 'disabled' : ''}" data-row-name="${escapeHtml((c.name || '').toLowerCase())}" data-row-num="${c.number || ''}" data-row-cid="${escapeHtml((c.id || '').toLowerCase())}" data-cid-exact="${escapeHtml(c.id || '')}">
+            <div class="row-drag" draggable="true" title="Drag to reorder within PseudoTV channels">⋮⋮</div>
+            <div class="row-logo-slot">${c.logo ? `<img class="row-logo" loading="lazy" src="http://${REMOTE_HOST}/images/${encodeURIComponent(c.logo)}" alt="" onerror="this.classList.add('broken')">` : ''}</div>
+            <div class="num"><input type="number" min="1" max="9999" value="${c.number || ''}" data-action="setnumber" data-cid="${escapeHtml(c.id)}" data-original="${c.number || ''}" /></div>
+            <div class="name"><input type="text" value="${escapeHtml(c.name || '')}" data-action="setname" data-cid="${escapeHtml(c.id)}" data-original="${escapeHtml(c.name || '')}" placeholder="(unnamed)" /></div>
+            <label><input type="checkbox" ${c.enabled === false ? '' : 'checked'} data-action="togglech-enable" data-cid="${escapeHtml(c.id)}"> enabled</label>
+            <div class="marker">${(c.operator_overrides||[]).length ? '✏️' : ''}</div>
+            <div class="row-actions">
+                <button data-action="edit-pseudo" data-cid="${escapeHtml(c.id)}" title="Edit fields (name, group, logo, path, catchup, radio, favorite).">✏ Edit</button>
+                <button data-action="rules-pseudo" data-cid="${escapeHtml(c.id)}" title="Per-channel rules editor (24 rule classes).">⚙ Rules</button>
+                <button data-action="rebuild-pseudo" data-cid="${escapeHtml(c.id)}" title="Mark changed and trigger Builder rebuild.">🔨 Rebuild</button>
+                <button class="danger" data-action="delete-pseudo" data-cid="${escapeHtml(c.id)}">×</button>
+            </div>
+        </div>`;
+    }
+
+    function renderPseudo() {
+        const list = $('pseudo-list');
+        if (!list) return;
+        const ps = (IMPORTS_DATA.channels || []).filter(c => c.type !== 'import')
+            .sort((a,b) => (a.number||0) - (b.number||0));
+        let pendingHtml = '';
+        if (PENDING_NEW_CHANNELS.length) {
+            const rows = PENDING_NEW_CHANNELS.map((p, i) => `
+                <div class="pending-row">
+                    <span style="color:#f1c40f;">⏳</span>
+                    <span style="min-width:50px;">#${p.number}</span>
+                    <span style="flex:1;">${escapeHtml(p.name)} <span style="opacity:0.5;font-size:0.7rem;">— ${escapeHtml(p.path)}</span></span>
+                    <button class="danger" data-action="discard-pending-add" data-idx="${i}">×</button>
+                </div>`).join('');
+            pendingHtml = `<div class="pending-strip"><b>${PENDING_NEW_CHANNELS.length} pending add${PENDING_NEW_CHANNELS.length===1?'':'s'}</b> — click Save to commit:${rows}</div>`;
+        }
+        if (ps.length === 0 && !PENDING_NEW_CHANNELS.length) {
+            list.innerHTML = '<div class="empty">No PseudoTV channels yet. Click <b>+ Add channel</b>.</div>';
+            return;
+        }
+        list.innerHTML = pendingHtml + ps.map(renderPseudoChannel).join('');
+    }
+
+    function renderImports() {
+        renderPseudo();
+        const list = $('imports-list');
+        if (!list) return;
+        if (!IMPORTS_DATA.imports || IMPORTS_DATA.imports.length === 0) {
+            list.innerHTML = '<div class="empty">No imports yet. Click <b>+ Add import</b> to register one.</div>';
+        } else {
+            list.innerHTML = IMPORTS_DATA.imports.map(renderImportRow).join('');
+        }
+        // Re-apply staged toggle/number state.
+        Object.keys(PENDING_TOGGLES).forEach(cid => {
+            const target = PENDING_TOGGLES[cid];
+            const cb = document.querySelector(`input[data-action="togglech-enable"][data-cid="${cid}"]`);
+            if (cb) {
+                cb.checked = target;
+                const row = cb.closest('.channel-row');
+                if (row) row.classList.toggle('disabled', !target);
+            }
+        });
+        Object.keys(PENDING_NUMBERS).forEach(cid => {
+            const inp = document.querySelector(`input[data-action="setnumber"][data-cid="${cid}"]`);
+            if (inp) inp.value = PENDING_NUMBERS[cid];
+        });
+        // Staged name + logo edits also survive re-renders.
+        Object.keys(PENDING_IMP_EDITS).forEach(cid => {
+            const edits = PENDING_IMP_EDITS[cid] || {};
+            if ('name' in edits) {
+                const inp = document.querySelector(`input[data-action="setname"][data-cid="${cid}"]`);
+                if (inp) inp.value = edits.name;
+            }
+            // Note: logo is opened via inline editor, no inline UI to update.
+        });
+        // Reapply active search filter to the freshly rendered rows.
+        const filterInput = document.getElementById('imports-filter') || document.getElementById('pseudo-filter');
+        if (filterInput && filterInput.value) filterChannelRows(filterInput.value);
+        updateGlobalSave();
+    }
+
+    // Filter channel rows by name/number/id. Triggered by the 🔎 search inputs
+    // in the Manager (#pseudo-filter) and Imports (#imports-filter) section
+    // headers. Both inputs share the same filter so the operator can switch
+    // tabs and have a consistent view.
+    function filterChannelRows(query) {
+        const q = (query || '').trim().toLowerCase();
+        // Keep both search inputs in sync.
+        const a = document.getElementById('imports-filter');
+        const b = document.getElementById('pseudo-filter');
+        if (a && a.value !== query) a.value = query;
+        if (b && b.value !== query) b.value = query;
+        document.querySelectorAll('.channel-row').forEach(row => {
+            if (!q) { row.classList.remove('row-hidden'); return; }
+            const name = row.dataset.rowName || '';
+            const num  = row.dataset.rowNum  || '';
+            const cid  = row.dataset.rowCid  || '';
+            const hit = name.includes(q) || num.includes(q) || cid.includes(q);
+            row.classList.toggle('row-hidden', !hit);
+        });
+    }
+
+    async function loadImports() {
+        // Preserve which channel-lists were expanded
+        const openIds = new Set();
+        document.querySelectorAll('.channels-list.open').forEach(el => {
+            const id = el.id.replace(/^channels-/, '');
+            if (id) openIds.add(id);
+        });
+        try {
+            const res = await fetch(`http://${REMOTE_HOST}/imports.json?_=${Date.now()}`);
+            const data = await res.json();
+            IMPORTS_DATA = data;
+            renderImports();
+            openIds.forEach(id => {
+                const list = document.getElementById('channels-' + id);
+                if (list) list.classList.add('open');
+                const tog = document.querySelector(`[data-action="togglech"][data-id="${id}"]`);
+                if (tog) {
+                    const arrow = tog.querySelector('.arrow');
+                    if (arrow) arrow.textContent = '▾';
+                }
+            });
+        } catch (e) {
+            const list = $('imports-list');
+            if (list) list.innerHTML = `<div class="empty">Failed to load imports: ${escapeHtml(e.message)}</div>`;
+        }
+    }
+
+    // -------- Import-add/edit modal helpers
+    function openImportModal(idx) {
+        IMP_EDITING_INDEX = idx;
+        const imp = idx >= 0 ? IMPORTS_DATA.imports[idx] : null;
+        $('import-modal-title').textContent = imp ? 'Edit import' : 'Add import';
+        $('f-orig-id').value     = imp ? imp.id : '';
+        $('f-id').value          = imp ? imp.id : '';
+        $('f-name').value        = imp ? (imp.name || '') : '';
+        $('f-m3u-path').value    = imp ? (imp.m3u_path || '') : '';
+        $('f-m3u-url').value     = imp ? (imp.m3u_url  || '') : '';
+        $('f-epg-path').value    = imp ? (imp.epg_path || '') : '';
+        $('f-epg-url').value     = imp ? (imp.epg_url  || '') : '';
+        $('f-start-num').value   = imp ? (imp.start_num || 800) : 800;
+        $('f-refresh').value     = imp ? (imp.refresh_interval_min || 60) : 60;
+        $('f-respect').checked   = imp ? !!imp.respect_source_numbers : false;
+        $('f-rediscover').checked= imp ? !!imp.rediscover_deleted : false;
+        $('f-enabled').checked   = imp ? imp.enabled !== false : true;
+        $('import-modal-overlay').classList.add('open');
+    }
+    function closeImportModal() { $('import-modal-overlay').classList.remove('open'); }
+    function gatherImportForm() {
+        const id = $('f-id').value.trim();
+        if (!/^[a-z0-9_-]+$/.test(id)) { toast('Identifier must be lowercase a-z/0-9/_-', 'err'); return null; }
+        const name = $('f-name').value.trim() || id;
+        const m3u_path = $('f-m3u-path').value.trim();
+        const m3u_url  = $('f-m3u-url').value.trim();
+        const epg_path = $('f-epg-path').value.trim();
+        const epg_url  = $('f-epg-url').value.trim();
+        const start_num = parseInt($('f-start-num').value, 10) || 800;
+        const refresh = parseInt($('f-refresh').value, 10) || 60;
+        return {
+            id, name, m3u_path, m3u_url, epg_path, epg_url, start_num,
+            refresh_interval_min: refresh,
+            respect_source_numbers: $('f-respect').checked,
+            rediscover_deleted: $('f-rediscover').checked,
+            enabled: $('f-enabled').checked,
+        };
+    }
+    async function saveImport() {
+        const item = gatherImportForm();
+        if (!item) return;
+        const list = (IMPORTS_DATA.imports || []).slice();
+        if (IMP_EDITING_INDEX >= 0) list[IMP_EDITING_INDEX] = item;
+        else                        list.push(item);
+        await postImports(list);
+    }
+    async function postImports(list) {
+        try {
+            const res = await fetch(`http://${REMOTE_HOST}/imports.json`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({uuid: UUID, payload: list}),
+            });
+            if (!res.ok) {
+                const t = await res.text();
+                const msg = (t.match(/<p>Message: ([^<]+)/) || [, 'HTTP ' + res.status])[1];
+                toast('Save failed: ' + msg, 'err');
+                return;
+            }
+            toast('Imports saved', 'ok');
+            closeImportModal();
+            setTimeout(loadImports, 400);
+        } catch (e) {
+            toast('Network error: ' + e.message, 'err');
+        }
+    }
+
+    async function refreshOne(id) {
+        try {
+            const res = await fetch(`http://${REMOTE_HOST}/imports/refresh.json`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({uuid: UUID, id: id, target: id || 'all'}),
+            });
+            if (!res.ok) { toast('Refresh failed: HTTP ' + res.status, 'err'); return; }
+            toast(id ? `Refresh queued for ${id}` : 'Refresh queued for all imports', 'ok');
+        } catch (e) { toast('Network error: ' + e.message, 'err'); }
+    }
+    async function renumberOne(id, resetPins) {
+        if (!confirm(resetPins
+            ? `Reset ALL channel number pins for import "${id}"?\n\nDestructive — wipes every hand-pinned number, then re-allocates from start_num.`
+            : `Renumber import "${id}"?\n\nFills gaps from start_num. Hand-pinned channel numbers (✏️) are PRESERVED.`)) return;
+        try {
+            const res = await fetch(`http://${REMOTE_HOST}/imports/renumber.json`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({uuid: UUID, id, reset_pins: !!resetPins}),
+            });
+            if (!res.ok) { toast('Renumber failed: HTTP ' + res.status, 'err'); return; }
+            const r = await res.json();
+            toast(`Renumbered ${r.changed||0} channel${(r.changed||0)===1?'':'s'}`, 'ok');
+            setTimeout(loadImports, 400);
+        } catch (e) { toast('Network error: ' + e.message, 'err'); }
+    }
+    async function removeOrphans(id) {
+        if (!confirm(`Delete all orphan channels for import "${id}"?\n\nTombstoned so they won't reappear on next sync.`)) return;
+        try {
+            const res = await fetch(`http://${REMOTE_HOST}/imports/orphans/remove.json`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({uuid: UUID, id}),
+            });
+            if (!res.ok) { toast('Orphan delete failed: HTTP ' + res.status, 'err'); return; }
+            const r = await res.json();
+            toast(`Removed ${r.removed||0} orphan${(r.removed||0)===1?'':'s'}`, 'ok');
+            setTimeout(loadImports, 400);
+        } catch (e) { toast('Network error: ' + e.message, 'err'); }
+    }
+
+    // -------- Pseudo modal helpers (Phase 9: stage to PENDING_NEW_CHANNELS)
+    function openPseudoModal() {
+        $('pf-name').value = '';
+        const usedNums = new Set((IMPORTS_DATA.channels || []).map(c => c.number).filter(n => typeof n === 'number'));
+        let n = 600;
+        while (usedNums.has(n)) n++;
+        $('pf-number').value = n;
+        $('pf-path').value = '';
+        $('pseudo-modal-overlay').classList.add('open');
+    }
+    function closePseudoModal() { $('pseudo-modal-overlay').classList.remove('open'); }
+    async function addPseudoChannel() {
+        const name   = $('pf-name').value.trim();
+        const number = parseInt($('pf-number').value, 10);
+        const path   = $('pf-path').value.trim();
+        if (!name)         { toast('Name required', 'err'); return; }
+        if (!path)         { toast('Source path required', 'err'); return; }
+        if (isNaN(number)) { toast('Number must be int', 'err'); return; }
+        if (PENDING_NEW_CHANNELS.some(p => p.number === number)) { toast(`Already staged a channel at #${number}`, 'err'); return; }
+        PENDING_NEW_CHANNELS.push({name, number, path});
+        toast(`Staged "${name}" at #${number} — click Save to commit`, 'ok');
+        closePseudoModal();
+        renderPseudo();
+        updateGlobalSave();
+    }
+    async function rebuildPseudoChannel(cid) {
+        const c = (IMPORTS_DATA.channels || []).find(x => x.id === cid);
+        if (!c) return;
+        if (!confirm(`Rebuild "${c.name}" (#${c.number})?\n\nMarks the channel as changed and triggers Builder to regenerate its EPG.`)) return;
+        try {
+            const res = await fetch(`http://${REMOTE_HOST}/channels/rebuild.json`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({uuid: UUID, channel_id: cid}),
+            });
+            if (!res.ok) { toast('Rebuild failed: HTTP ' + res.status, 'err'); return; }
+            toast(`Rebuild queued for "${c.name}"`, 'ok');
+        } catch (e) { toast('Network error: ' + e.message, 'err'); }
+    }
+    async function deletePseudoChannel(cid) {
+        const c = (IMPORTS_DATA.channels || []).find(x => x.id === cid);
+        if (!c) return;
+        if (!confirm(`Delete channel "${c.name}" (#${c.number})?`)) return;
+        try {
+            const res = await fetch(`http://${REMOTE_HOST}/channels/delete.json`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({uuid: UUID, channel_id: cid}),
+            });
+            if (!res.ok) { toast('Delete failed: HTTP ' + res.status, 'err'); return; }
+            toast('Channel deleted', 'ok');
+            setTimeout(loadImports, 400);
+        } catch (e) { toast('Network error: ' + e.message, 'err'); }
+    }
+
+    // -------- Custom-edit modal (Phase 10)
+    function openCustomEditModal(cid) {
+        const c = (IMPORTS_DATA.channels || []).find(x => x.id === cid);
+        if (!c) { toast('Channel not found', 'err'); return; }
+        if (c.type === 'import') { toast('Use the import editor for imported channels', 'err'); return; }
+        CF_CURRENT_CID = cid;
+        $('chfields-modal-title').textContent = `Edit "${c.name || '(unnamed)'}" (#${c.number || '?'})`;
+        $('cf-name').value     = c.name || '';
+        $('cf-number').value   = c.number || '';
+        $('cf-group').value    = Array.isArray(c.group) ? c.group.join('|') : (c.group || '');
+        $('cf-logo').value     = c.logo || '';
+        $('cf-path').value     = Array.isArray(c.path) ? (c.path[0] || '') : (c.path || '');
+        $('cf-catchup').value  = c.catchup || '';
+        $('cf-radio').checked    = !!c.radio;
+        $('cf-favorite').checked = !!c.favorite;
+        $('cf-enabled').checked  = (c.enabled !== false);
+        const staged = PENDING_CUSTOM_EDITS[cid] || {};
+        if ('name'     in staged) $('cf-name').value     = staged.name;
+        if ('number'   in staged) $('cf-number').value   = staged.number;
+        if ('group'    in staged) $('cf-group').value    = Array.isArray(staged.group) ? staged.group.join('|') : staged.group;
+        if ('logo'     in staged) $('cf-logo').value     = staged.logo;
+        if ('path'     in staged) $('cf-path').value     = Array.isArray(staged.path) ? staged.path[0] : staged.path;
+        if ('catchup'  in staged) $('cf-catchup').value  = staged.catchup;
+        if ('radio'    in staged) $('cf-radio').checked    = !!staged.radio;
+        if ('favorite' in staged) $('cf-favorite').checked = !!staged.favorite;
+        if ('enabled'  in staged) $('cf-enabled').checked  = !!staged.enabled;
+        $('chfields-modal-overlay').classList.add('open');
+    }
+    function closeCustomEditModal() {
+        CF_CURRENT_CID = null;
+        $('chfields-modal-overlay').classList.remove('open');
+        // If a browser panel was open within the modal, drop it too.
+        document.querySelectorAll('.inline-browser').forEach(el => el.remove());
+    }
+    function stageCustomEdit() {
+        if (!CF_CURRENT_CID) return;
+        const fields = {};
+        fields.name = $('cf-name').value.trim();
+        const num = parseInt($('cf-number').value, 10);
+        if (!isNaN(num)) fields.number = num;
+        const grp = $('cf-group').value.trim();
+        if (grp) fields.group = grp;
+        fields.logo     = $('cf-logo').value.trim();
+        fields.path     = $('cf-path').value.trim();
+        fields.catchup  = $('cf-catchup').value;
+        fields.radio    = $('cf-radio').checked;
+        fields.favorite = $('cf-favorite').checked;
+        fields.enabled  = $('cf-enabled').checked;
+        PENDING_CUSTOM_EDITS[CF_CURRENT_CID] = fields;
+        toast(`Staged edit for "${fields.name || CF_CURRENT_CID}" — click Save to commit`, 'ok');
+        closeCustomEditModal();
+        updateGlobalSave();
+    }
+
+    // -------- Imports-channel Logo edit — INLINE per-row editor.
+    // (Previously a centered modal; the modal was hard to keep in viewport when
+    // the row was scrolled far down the page. Inline expansion keeps focus
+    // exactly where the operator clicked.)
+    function openImpLogoModal(cid) {
+        const c = (IMPORTS_DATA.channels || []).find(x => x.id === cid);
+        if (!c) { toast('Channel not found', 'err'); return; }
+        const trigger = document.querySelector(`[data-action="edit-imp-logo"][data-cid="${CSS.escape(cid)}"]`);
+        const row = trigger?.closest('.channel-row');
+        if (!row) { toast('Row not found', 'err'); return; }
+        // Toggle off if already open for this row (also close any browser panel).
+        const existing = row.nextElementSibling;
+        if (existing && existing.classList.contains('inline-logo-editor')) {
+            existing.remove();
+            document.querySelectorAll('.inline-browser').forEach(el => el.remove());
+            return;
+        }
+        // Close any other inline editor + any open browser panel (one at a time).
+        document.querySelectorAll('.inline-logo-editor').forEach(el => el.remove());
+        document.querySelectorAll('.inline-browser').forEach(el => el.remove());
+        const staged = (PENDING_IMP_EDITS[cid] || {}).logo;
+        const value  = (staged !== undefined) ? staged : (c.logo || '');
+        const editor = document.createElement('div');
+        editor.className = 'inline-logo-editor';
+        editor.dataset.cid = cid;
+        editor.innerHTML = `
+            <div class="ile-row">
+                <label>Logo URL / path</label>
+                <div class="ile-input-row">
+                    <input type="text" class="ile-input" value="${escapeHtml(value)}" placeholder="https://… or special://…">
+                    <button class="btn-action" data-action="browse-for" data-target="ile-input-${escapeHtml(cid)}" title="Browse Kodi VFS">📁</button>
+                </div>
+                <div class="ile-actions">
+                    <button class="btn-action ile-cancel">Cancel</button>
+                    <button class="btn-action ile-stage" style="background:var(--pstv-focus);color:var(--pstv-bg-dark);">Stage</button>
+                </div>
+            </div>
+        `;
+        // Give the input a unique id so data-target browse-for can find it.
+        const inp = editor.querySelector('.ile-input');
+        inp.id = 'ile-input-' + cid;
+        editor.querySelector('.ile-cancel').addEventListener('click', () => {
+            // Close any browser panel that this editor opened, then close the editor.
+            document.querySelectorAll('.inline-browser').forEach(el => el.remove());
+            editor.remove();
+        });
+        editor.querySelector('.ile-stage').addEventListener('click', () => {
+            const newLogo = inp.value.trim();
+            const existingFields = PENDING_IMP_EDITS[cid] || {};
+            if (newLogo === (c.logo || '')) {
+                // Reverting to on-disk → drop the logo entry; keep other staged fields if any.
+                delete existingFields.logo;
+                if (Object.keys(existingFields).length === 0) delete PENDING_IMP_EDITS[cid];
+                else PENDING_IMP_EDITS[cid] = existingFields;
+            } else {
+                PENDING_IMP_EDITS[cid] = Object.assign(existingFields, {logo: newLogo});
+            }
+            toast(`Staged logo for "${c.name || cid}"`, 'ok');
+            document.querySelectorAll('.inline-browser').forEach(el => el.remove());
+            editor.remove();
+            updateGlobalSave();
+        });
+        // Insert AFTER the row so it doesn't disrupt row layout.
+        row.parentNode.insertBefore(editor, row.nextSibling);
+        // Focus the input without forcing a scroll — preventScroll keeps the
+        // operator's viewport stable instead of jumping the page.
+        inp.focus({preventScroll: true});
+        inp.select();
+    }
+    // (closeImpLogoModal / stageImpLogoEdit retired — implogo editor is fully
+    //  inline. Escape handler removes .inline-logo-editor directly.)
+
+    // -------- Rules modal (Phase 11)
+    async function openRulesModal(cid) {
+        const c = (IMPORTS_DATA.channels || []).find(x => x.id === cid);
+        if (!c) { toast('Channel not found', 'err'); return; }
+        if (c.type === 'import') { toast('Rules editor is for PseudoTV channels only', 'err'); return; }
+        RULES_CURRENT_CID = cid;
+        $('rules-modal-title').textContent = `Rules — ${c.name || '(unnamed)'} (#${c.number || '?'})`;
+        $('rules-list').innerHTML = '<div style="padding:20px;text-align:center;opacity:0.6;">Loading rules…</div>';
+        $('rules-modal-overlay').classList.add('open');
+        try {
+            if (!RULES_CATALOG_CACHE) {
+                const catRes = await fetch(`http://${REMOTE_HOST}/api/channels/rules/catalog.json?_=${Date.now()}`);
+                const cat = await catRes.json();
+                if (cat.error) throw new Error(cat.error);
+                RULES_CATALOG_CACHE = cat.rules || [];
+            }
+            const chRes = await fetch(`http://${REMOTE_HOST}/api/channels/rules.json?channel_id=${encodeURIComponent(cid)}&_=${Date.now()}`);
+            const chRules = await chRes.json();
+            if (chRules.error) throw new Error(chRules.error);
+            renderRulesList(chRules.rules || {}, PENDING_RULES[cid] || {});
+        } catch (e) {
+            $('rules-list').innerHTML = `<div style="padding:20px;text-align:center;color:#e74c3c;">Failed: ${escapeHtml(e.message)}</div>`;
+        }
+    }
+    function closeRulesModal() { RULES_CURRENT_CID = null; $('rules-modal-overlay').classList.remove('open'); }
+    function renderRulesList(persisted, staged) {
+        const effective = {...persisted, ...staged};
+        const cards = (RULES_CATALOG_CACHE || []).map(rule => {
+            const enabled = Object.prototype.hasOwnProperty.call(effective, rule.id);
+            const values  = (enabled && effective[rule.id] && effective[rule.id].values) || {};
+            const optsHtml = rule.options.map(opt => {
+                const cur = values[opt.idx] != null ? values[opt.idx] : opt.default;
+                let inputHtml = '';
+                if (opt.type === 'bool') {
+                    inputHtml = `<input type="checkbox" data-ridx="${opt.idx}" ${cur ? 'checked' : ''}>`;
+                } else if (opt.type === 'select' && opt.selectBox && typeof opt.selectBox === 'object' && opt.selectBox.kind === 'dict' && Array.isArray(opt.selectBox.items)) {
+                    // madteevee: dict-form select (label->value). Used by ForceSubtitles for language dropdowns.
+                    const opts = opt.selectBox.items.map(it => {
+                        const v = String(it.value != null ? it.value : '');
+                        return `<option value="${escapeHtml(v)}"${v===String(cur==null?'':cur)?' selected':''}>${escapeHtml(String(it.label||v))}</option>`;
+                    }).join('');
+                    inputHtml = `<select data-ridx="${opt.idx}">${opts}</select>`;
+                } else if (opt.type === 'select' && Array.isArray(opt.selectBox)) {
+                    const opts = opt.selectBox.map(v => `<option value="${escapeHtml(String(v))}"${String(v)===String(cur)?' selected':''}>${escapeHtml(String(v))}</option>`).join('');
+                    inputHtml = `<select data-ridx="${opt.idx}">${opts}</select>`;
+                } else if (opt.type === 'int') {
+                    inputHtml = `<input type="number" data-ridx="${opt.idx}" value="${cur == null ? '' : cur}">`;
+                } else {
+                    inputHtml = `<input type="text" data-ridx="${opt.idx}" value="${escapeHtml(cur == null ? '' : String(cur))}">`;
+                }
+                return `<div class="rule-option">
+                    <label>${escapeHtml(opt.label || '(option ' + opt.idx + ')')}</label>
+                    ${inputHtml}
+                    ${opt.description ? `<div class="rule-opt-desc">${escapeHtml(opt.description)}</div>` : ''}
+                </div>`;
+            }).join('');
+            return `<div class="rule-card${enabled ? ' enabled' : ''}" data-rid="${rule.id}">
+                <div class="rule-header">
+                    <label class="rule-toggle"><input type="checkbox" data-action="rule-enable" ${enabled ? 'checked' : ''}> Enable</label>
+                    <h4>${escapeHtml(rule.name || ('Rule ' + rule.id))}</h4>
+                    <span style="opacity:0.5;font-size:0.7rem;">#${rule.id}</span>
+                </div>
+                ${rule.description ? `<div class="rule-desc">${escapeHtml(rule.description)}</div>` : ''}
+                <div class="rule-options">${optsHtml}</div>
+            </div>`;
+        }).join('');
+        $('rules-list').innerHTML = cards;
+        $('rules-list').addEventListener('change', _onRuleChange);
+    }
+    function _onRuleChange(ev) {
+        const tog = ev.target.closest('input[data-action="rule-enable"]');
+        if (tog) tog.closest('.rule-card').classList.toggle('enabled', tog.checked);
+    }
+    function stageRulesEdit() {
+        if (!RULES_CURRENT_CID) return;
+        const out = {};
+        document.querySelectorAll('#rules-list .rule-card').forEach(card => {
+            const rid = parseInt(card.dataset.rid, 10);
+            const tog = card.querySelector('input[data-action="rule-enable"]');
+            if (!tog || !tog.checked) return;
+            const values = {};
+            card.querySelectorAll('.rule-options [data-ridx]').forEach(el => {
+                const idx = parseInt(el.dataset.ridx, 10);
+                if (isNaN(idx)) return;
+                if (el.type === 'checkbox')    values[idx] = el.checked;
+                else if (el.type === 'number') values[idx] = parseInt(el.value, 10);
+                else                            values[idx] = el.value;
+            });
+            out[rid] = {values};
+        });
+        PENDING_RULES[RULES_CURRENT_CID] = out;
+        toast('Staged rules for channel — click Save to commit', 'ok');
+        closeRulesModal();
+        updateGlobalSave();
+    }
+
+    // -------- Pending toggle/number helpers
+    function _stagePendingToggle(cid, target) {
+        // dataset.original is the on-disk value; if target matches, no pending change.
+        const c = (IMPORTS_DATA.channels || []).find(x => x.id === cid);
+        const orig = c ? (c.enabled !== false) : true;
+        if (target === orig) delete PENDING_TOGGLES[cid];
+        else                 PENDING_TOGGLES[cid] = target;
+        updateGlobalSave();
+    }
+    function _stagePendingNumber(cid, target) {
+        const c = (IMPORTS_DATA.channels || []).find(x => x.id === cid);
+        const orig = c ? c.number : null;
+        if (target === orig) delete PENDING_NUMBERS[cid];
+        else                 PENDING_NUMBERS[cid] = target;
+        updateGlobalSave();
+    }
+
+    // (setChannelName retired — name edits stage into PENDING_IMP_EDITS and
+    //  flush via globalSave alongside toggles/numbers.)
+
+
+    // -------- Delegated click handlers (Manager + Imports tabs)
+    function _onImportsClick(e) {
+        const editBtn = e.target.closest('button[data-action="edit-import"]');
+        if (editBtn) { openImportModal(parseInt(editBtn.dataset.idx, 10)); return; }
+        const delBtn = e.target.closest('button[data-action="delete-import"]');
+        if (delBtn) {
+            const idx = parseInt(delBtn.dataset.idx, 10);
+            const imp = IMPORTS_DATA.imports[idx];
+            if (!imp) return;
+            if (!confirm(`Delete import "${imp.name || imp.id}"?\n\nChannels stay on disk until you run Cleanup stranded.`)) return;
+            const list = IMPORTS_DATA.imports.slice();
+            list.splice(idx, 1);
+            postImports(list);
+            return;
+        }
+        const refBtn = e.target.closest('button[data-action="refresh"]');
+        if (refBtn) { refreshOne(refBtn.dataset.id); return; }
+        const rnBtn = e.target.closest('button[data-action="renumber"]');
+        if (rnBtn) { renumberOne(rnBtn.dataset.id, false); return; }
+        const rnHard = e.target.closest('button[data-action="renumber-hard"]');
+        if (rnHard) { renumberOne(rnHard.dataset.id, true); return; }
+        const orphBtn = e.target.closest('button[data-action="remove-orphans"]');
+        if (orphBtn) { removeOrphans(orphBtn.dataset.id); return; }
+        // Imports-channel logo editor
+        const impLogoBtn = e.target.closest('button[data-action="edit-imp-logo"]');
+        if (impLogoBtn) { openImpLogoModal(impLogoBtn.dataset.cid); return; }
+        // channels-list expand/collapse
+        const tog = e.target.closest('[data-action="togglech"]');
+        if (tog) {
+            const id = tog.dataset.id;
+            const list = document.getElementById('channels-' + id);
+            if (list) {
+                list.classList.toggle('open');
+                const arrow = tog.querySelector('.arrow');
+                if (arrow) arrow.textContent = list.classList.contains('open') ? '▾' : '▸';
+            }
+            return;
+        }
+    }
+
+    function _onCustomChannelClick(e) {
+        // Discard a staged add
+        const discardBtn = e.target.closest('button[data-action="discard-pending-add"]');
+        if (discardBtn) {
+            const idx = parseInt(discardBtn.dataset.idx, 10);
+            if (!isNaN(idx)) {
+                PENDING_NEW_CHANNELS.splice(idx, 1);
+                renderPseudo();
+                updateGlobalSave();
+            }
+            return;
+        }
+        const editBtn = e.target.closest('button[data-action="edit-pseudo"]');
+        if (editBtn) { openCustomEditModal(editBtn.dataset.cid); return; }
+        const rulesBtn = e.target.closest('button[data-action="rules-pseudo"]');
+        if (rulesBtn) { openRulesModal(rulesBtn.dataset.cid); return; }
+        const rebuildBtn = e.target.closest('button[data-action="rebuild-pseudo"]');
+        if (rebuildBtn) { rebuildPseudoChannel(rebuildBtn.dataset.cid); return; }
+        const delBtn = e.target.closest('button[data-action="delete-pseudo"]');
+        if (delBtn) { deletePseudoChannel(delBtn.dataset.cid); return; }
+    }
+
+    function _onChannelEnableToggle(e) {
+        const cb = e.target.closest('input[type="checkbox"][data-action="togglech-enable"]');
+        if (!cb) return;
+        const newEnabled = cb.checked;
+        // Shift+click sets/unsets range from LAST_TOGGLED to current.
+        if (e.shiftKey && LAST_TOGGLED && LAST_TOGGLED.list === cb.closest('.channels-list, #pseudo-list')) {
+            const boxes = Array.from(cb.closest('.channels-list, #pseudo-list').querySelectorAll('input[data-action="togglech-enable"]'));
+            const a = boxes.indexOf(LAST_TOGGLED.checkbox);
+            const b = boxes.indexOf(cb);
+            const targetState = newEnabled;
+            const range = boxes.slice(Math.min(a,b), Math.max(a,b)+1);
+            for (const box of range) {
+                box.checked = targetState;
+                box.closest('.channel-row').classList.toggle('disabled', !targetState);
+                _stagePendingToggle(box.dataset.cid, targetState);
+            }
+            toast(`Staged ${range.length} channel${range.length===1?'':'s'} → ${targetState?'enabled':'disabled'}.`, 'ok');
+            LAST_TOGGLED = {checkbox: cb, cid: cb.dataset.cid, list: cb.closest('.channels-list, #pseudo-list')};
+            return;
+        }
+        LAST_TOGGLED = {checkbox: cb, cid: cb.dataset.cid, list: cb.closest('.channels-list, #pseudo-list')};
+        cb.closest('.channel-row').classList.toggle('disabled', !newEnabled);
+        _stagePendingToggle(cb.dataset.cid, newEnabled);
+    }
+
+    // -------- Inline name/number blur + Escape revert (Imports + Manager tabs)
+    function _onChannelKeydown(e) {
+        const inp = e.target.closest('input[data-action="setnumber"], input[data-action="setname"]');
+        if (!inp) return;
+        if (e.key === 'Enter')  inp.blur();
+        if (e.key === 'Escape') { inp.value = inp.dataset.original; inp.blur(); }
+    }
+    function _onChannelBlur(e) {
+        const inp = e.target.closest('input[data-action="setnumber"], input[data-action="setname"]');
+        if (!inp) return;
+        if (inp.dataset.action === 'setnumber') {
+            const newNum = parseInt(inp.value, 10);
+            const oldNum = parseInt(inp.dataset.original, 10);
+            if (isNaN(newNum)) { inp.value = inp.dataset.original; return; }
+            if (newNum === oldNum) { delete PENDING_NUMBERS[inp.dataset.cid]; updateGlobalSave(); return; }
+            _stagePendingNumber(inp.dataset.cid, newNum);
+        } else if (inp.dataset.action === 'setname') {
+            // Name was originally committed-on-blur; operator wants it staged like
+            // the other inline edits. Routes through PENDING_IMP_EDITS so the
+            // global Save flushes via /imports/channel/edit.json (works for both
+            // type=import and type=Custom channels).
+            const cid = inp.dataset.cid;
+            const newName = inp.value.trim();
+            const oldName = inp.dataset.original;
+            const existing = PENDING_IMP_EDITS[cid] || {};
+            if (newName === oldName) {
+                // No change → drop any previously-staged name. Other staged fields
+                // for this cid (e.g. logo) survive.
+                if ('name' in existing) {
+                    delete existing.name;
+                    if (Object.keys(existing).length === 0) delete PENDING_IMP_EDITS[cid];
+                    else PENDING_IMP_EDITS[cid] = existing;
+                }
+            } else {
+                PENDING_IMP_EDITS[cid] = Object.assign(existing, {name: newName});
+            }
+            updateGlobalSave();
+        }
+    }
+
+    // ============================================================
+    // Drag-to-reorder (single-import) — drag the ⋮⋮ handle of any channel
+    // row to rearrange the order within its containing list. Reassigns the
+    // pool of existing numbers to the new visual order and stages them into
+    // PENDING_NUMBERS. Cross-list drops are rejected.
+    // ============================================================
+    function _onChannelDragStart(e) {
+        const handle = e.target.closest('.row-drag');
+        if (!handle) return;
+        const row = handle.closest('.channel-row');
+        if (!row) return;
+        const cid = row.dataset.cidExact || '';
+        if (!cid) return;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', cid);
+        row.classList.add('dragging');
+    }
+    function _onChannelDragEnd(_e) {
+        document.querySelectorAll('.channel-row.dragging').forEach(r => r.classList.remove('dragging'));
+        document.querySelectorAll('.channel-row.drop-above, .channel-row.drop-below').forEach(r => {
+            r.classList.remove('drop-above', 'drop-below');
+        });
+    }
+    function _onChannelDragOver(e) {
+        const target = e.target.closest('.channel-row');
+        if (!target) return;
+        const dragged = document.querySelector('.channel-row.dragging');
+        if (!dragged || target === dragged) return;
+        // Single-import only: reject cross-list drops.
+        const srcList = dragged.closest('.channels-list, #pseudo-list');
+        const dstList = target.closest('.channels-list, #pseudo-list');
+        if (!srcList || !dstList || srcList !== dstList) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const rect = target.getBoundingClientRect();
+        const isAbove = (e.clientY - rect.top) < rect.height / 2;
+        // Clear all indicators, then mark this one.
+        document.querySelectorAll('.channel-row.drop-above, .channel-row.drop-below').forEach(r => {
+            r.classList.remove('drop-above', 'drop-below');
+        });
+        target.classList.add(isAbove ? 'drop-above' : 'drop-below');
+    }
+    function _onChannelDrop(e) {
+        const target = e.target.closest('.channel-row');
+        const draggedCid = e.dataTransfer.getData('text/plain');
+        const dragged = draggedCid ? document.querySelector(`.channel-row[data-cid-exact="${CSS.escape(draggedCid)}"]`) : null;
+        if (!target || !dragged || target === dragged) { _onChannelDragEnd(e); return; }
+        const srcList = dragged.closest('.channels-list, #pseudo-list');
+        const dstList = target.closest('.channels-list, #pseudo-list');
+        if (!srcList || !dstList || srcList !== dstList) { _onChannelDragEnd(e); return; }
+        e.preventDefault();
+        const rect = target.getBoundingClientRect();
+        const isAbove = (e.clientY - rect.top) < rect.height / 2;
+        if (isAbove) target.parentNode.insertBefore(dragged, target);
+        else         target.parentNode.insertBefore(dragged, target.nextSibling);
+        _onChannelDragEnd(e);
+        _renumberList(srcList);
+    }
+    function _renumberList(list) {
+        // Iterate rows in current visual order. The number POOL is the set
+        // of CURRENT on-disk numbers (or staged number where applicable);
+        // we redistribute those numbers in the new visual order. This way
+        // moving channel A from #5 to #2 makes A become #2 and B/C/D shift up.
+        const rows = Array.from(list.querySelectorAll('.channel-row'));
+        const cids = rows.map(r => r.dataset.cidExact).filter(Boolean);
+        const channels = cids.map(c => (IMPORTS_DATA.channels || []).find(ch => ch.id === c)).filter(Boolean);
+        if (!channels.length) return;
+        // Current effective number per channel = staged number if any, else on-disk.
+        const effectiveNum = (c) => (PENDING_NUMBERS[c.id] != null ? PENDING_NUMBERS[c.id] : c.number);
+        // Pool of numbers, sorted ascending.
+        const pool = channels.map(effectiveNum).filter(n => typeof n === 'number').sort((a, b) => a - b);
+        // Assign pool[i] to channels[i] (the visual order).
+        let changes = 0;
+        channels.forEach((c, i) => {
+            const newNum = pool[i];
+            if (newNum == null) return;
+            if (newNum !== effectiveNum(c)) {
+                _stagePendingNumber(c.id, newNum);
+                // Update the visible input value too.
+                const inp = list.querySelector(`input[data-action="setnumber"][data-cid="${CSS.escape(c.id)}"]`);
+                if (inp) inp.value = newNum;
+                changes++;
+            }
+        });
+        if (changes) {
+            toast(`Reordered — ${changes} channel number${changes === 1 ? '' : 's'} staged`, 'ok');
+            updateGlobalSave();
+        }
+    }
+
+    // ============================================================
+    // Global Save — flushes all 6 PENDING pools in dependency order
+    // ============================================================
+
+    function pendingTotalCount() {
+        return Object.keys(PENDING_SETTINGS).length
+             + Object.keys(PENDING_TOGGLES).length
+             + Object.keys(PENDING_NUMBERS).length
+             + PENDING_NEW_CHANNELS.length
+             + Object.keys(PENDING_CUSTOM_EDITS).length
+             + Object.keys(PENDING_RULES).length
+             + Object.keys(PENDING_IMP_EDITS).length;
+    }
+    function updateGlobalSave() {
+        const n = pendingTotalCount();
+        // Inline per-tab Save buttons (Imports + Manager).
+        document.querySelectorAll('.inline-save-btn').forEach(btn => {
+            const span = btn.querySelector('.save-count');
+            if (n > 0) {
+                btn.classList.add('has-pending');
+                if (span) span.textContent = `(${n})`;
+            } else {
+                btn.classList.remove('has-pending');
+                if (span) span.textContent = '';
+            }
+        });
+        // Floating FAB — only meaningful on tabs WITHOUT an inline Save in view.
+        // (Imports + Manager tabs both have inline buttons; Settings / Live Guide /
+        // System Info don't, so the FAB serves those.)
+        const fab = $('global-save-btn');
+        const fabSpan = $('global-save-count');
+        if (fab) {
+            const activeTab = document.querySelector('.tab-content.active');
+            const tabHasInline = activeTab && activeTab.querySelector('.inline-save-btn');
+            if (n > 0 && !tabHasInline) {
+                fab.classList.add('has-pending');
+                if (fabSpan) fabSpan.textContent = `(${n})`;
+            } else {
+                fab.classList.remove('has-pending');
+                if (fabSpan) fabSpan.textContent = '';
+            }
+        }
+        // (Previously called updateSaveCounter() here; that function is now an
+        // alias for THIS function — calling it caused infinite recursion. The
+        // Settings-tab Save button is already an .inline-save-btn, so it's
+        // updated by the loop above.)
+    }
+
+    async function globalSave() {
+        // Guard: nothing to save → no-op. Previously this checked the FAB's
+        // class, which broke when the FAB was hidden (Imports/Manager tabs
+        // surface their inline Save instead). Check the pending total directly.
+        if (pendingTotalCount() === 0) return;
+        const fab = $('global-save-btn');
+        const inlineBtns = document.querySelectorAll('.inline-save-btn');
+        // Set saving state on whichever button(s) are visible.
+        if (fab) fab.classList.add('saving');
+        inlineBtns.forEach(b => b.classList.add('saving'));
+        const _resetSaving = () => {
+            if (fab) fab.classList.remove('saving');
+            inlineBtns.forEach(b => b.classList.remove('saving'));
+        };
+        let ok = 0, fail = 0;
+        // 1. Settings changes
+        if (Object.keys(PENDING_SETTINGS).length) {
+            try {
+                const res = await fetch(`http://${REMOTE_HOST}/api/settings/save.json`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({uuid: UUID, changes: {...PENDING_SETTINGS}}),
+                });
+                const data = await res.json();
+                if (res.ok && data.ok) {
+                    ok += (data.applied || []).length;
+                    fail += (data.rejected || []).length;
+                    if ((data.rejected || []).length) {
+                        const detail = data.rejected.map(r => `${r.key}: ${r.reason}`).join('\n');
+                        toast(`Settings: ${data.rejected.length} rejected:\n${detail}`, 'err');
+                    }
+                } else { fail++; toast('Settings save failed', 'err'); }
+            } catch (e) { fail++; toast('Settings network error: ' + e.message, 'err'); }
+        }
+        // 2. Imports toggles + numbers (defer_kick true except no terminal — we use refresh.json below)
+        async function _editImport(cid, fields) {
+            try {
+                const res = await fetch(`http://${REMOTE_HOST}/imports/channel/edit.json`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({uuid: UUID, channel_id: cid, fields, defer_kick: true}),
+                });
+                return res.ok;
+            } catch (e) { return false; }
+        }
+        for (const cid of Object.keys(PENDING_TOGGLES)) {
+            const r = await _editImport(cid, {enabled: PENDING_TOGGLES[cid]});
+            if (r) ok++; else fail++;
+        }
+        for (const cid of Object.keys(PENDING_NUMBERS)) {
+            const r = await _editImport(cid, {number: PENDING_NUMBERS[cid]});
+            if (r) ok++; else fail++;
+        }
+        // Imports-channel field edits (currently only logo). Same endpoint
+        // as toggles/numbers; defer_kick=true; trailing /imports/refresh.json
+        // below bounces the syncAll for M3U/XMLTV regen.
+        for (const cid of Object.keys(PENDING_IMP_EDITS)) {
+            const r = await _editImport(cid, PENDING_IMP_EDITS[cid]);
+            if (r) ok++; else fail++;
+        }
+        // 3. Custom field edits
+        async function _editCustom(cid, fields, deferKick) {
+            try {
+                const res = await fetch(`http://${REMOTE_HOST}/channels/edit.json`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({uuid: UUID, channel_id: cid, fields, defer_kick: deferKick}),
+                });
+                return res.ok;
+            } catch (e) { return false; }
+        }
+        for (const cid of Object.keys(PENDING_CUSTOM_EDITS)) {
+            const r = await _editCustom(cid, PENDING_CUSTOM_EDITS[cid], true);
+            if (r) ok++; else fail++;
+        }
+        // 4. Rules edits
+        for (const cid of Object.keys(PENDING_RULES)) {
+            try {
+                const res = await fetch(`http://${REMOTE_HOST}/api/channels/rules.json`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({uuid: UUID, channel_id: cid, rules: PENDING_RULES[cid], defer_kick: true}),
+                });
+                if (res.ok) ok++; else fail++;
+            } catch (e) { fail++; }
+        }
+        // 5. New adds — last one fires the kick
+        for (let i = 0; i < PENDING_NEW_CHANNELS.length; i++) {
+            const isLast = (i === PENDING_NEW_CHANNELS.length - 1);
+            try {
+                const res = await fetch(`http://${REMOTE_HOST}/channels/add.json`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({uuid: UUID, ...PENDING_NEW_CHANNELS[i], defer_kick: !isLast}),
+                });
+                if (res.ok) ok++; else fail++;
+            } catch (e) { fail++; }
+        }
+        // If we did Custom edits / Rules but NO new adds, we need to fire a terminal kick.
+        if (PENDING_NEW_CHANNELS.length === 0 && (Object.keys(PENDING_CUSTOM_EDITS).length || Object.keys(PENDING_RULES).length)) {
+            // Re-POST the last touched Custom channel with defer_kick=false + empty fields={}
+            // to issue one chkChanged. /channels/edit.json sets target.changed=true regardless.
+            const allCids = Object.keys(PENDING_CUSTOM_EDITS).concat(Object.keys(PENDING_RULES));
+            const lastCid = allCids[allCids.length - 1];
+            if (lastCid) await _editCustom(lastCid, {}, false);
+        }
+        // 6. End-of-batch imports refresh (covers imports edits + import-side EPG/M3U regen)
+        if (Object.keys(PENDING_TOGGLES).length || Object.keys(PENDING_NUMBERS).length || Object.keys(PENDING_IMP_EDITS).length) {
+            try {
+                await fetch(`http://${REMOTE_HOST}/imports/refresh.json`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({uuid: UUID, target: 'all'}),
+                });
+            } catch (e) {}
+        }
+
+        // Clear all pools.
+        Object.keys(PENDING_SETTINGS).forEach(k => delete PENDING_SETTINGS[k]);
+        Object.keys(PENDING_TOGGLES).forEach(k => delete PENDING_TOGGLES[k]);
+        Object.keys(PENDING_NUMBERS).forEach(k => delete PENDING_NUMBERS[k]);
+        Object.keys(PENDING_CUSTOM_EDITS).forEach(k => delete PENDING_CUSTOM_EDITS[k]);
+        Object.keys(PENDING_RULES).forEach(k => delete PENDING_RULES[k]);
+        Object.keys(PENDING_IMP_EDITS).forEach(k => delete PENDING_IMP_EDITS[k]);
+        PENDING_NEW_CHANNELS.length = 0;
+
+        toast(`Saved ${ok}${fail ? ` (${fail} failed)` : ''}`, fail ? 'err' : 'ok');
+        _resetSaving();
+        // Reload visible tabs.
+        if (SETTINGS_SCHEMA) loadSettings();
+        loadImports();
+        updateGlobalSave();
+    }
+
+    window.onload = () => {
+        init();
+        document.getElementById('action-modal-confirm').addEventListener('click', confirmAction);
+        // browser-select-btn retired (inline browser; no select button)
+        // Imports + Manager tab buttons
+        $('add-import-btn')?.addEventListener('click', () => openImportModal(-1));
+        $('import-cancel-btn')?.addEventListener('click', closeImportModal);
+        $('import-save-btn')?.addEventListener('click', saveImport);
+        $('refresh-all-btn')?.addEventListener('click', () => refreshOne(''));
+        $('cleanup-stranded-btn')?.addEventListener('click', async () => {
+            const activeIds = new Set((IMPORTS_DATA.imports || []).map(i => i.id));
+            const stranded = (IMPORTS_DATA.channels || []).filter(c =>
+                (c.type === 'import') && (!c.import_source || !activeIds.has(c.import_source))
+            );
+            if (!stranded.length) { toast('No stranded channels.', 'ok'); return; }
+            if (!confirm(`Delete ${stranded.length} stranded channel${stranded.length===1?'':'s'}?`)) return;
+            try {
+                await fetch(`http://${REMOTE_HOST}/imports/cleanup_stranded.json`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({uuid: UUID}),
+                });
+                toast('Cleanup queued', 'ok');
+                setTimeout(loadImports, 400);
+            } catch (e) { toast('Network error: ' + e.message, 'err'); }
+        });
+        $('pvr-refresh-btn')?.addEventListener('click', async () => {
+            try {
+                await fetch(`http://${REMOTE_HOST}/pvr/reset.json`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({uuid: UUID, hard: false}),
+                });
+                toast('EPG refresh queued', 'ok');
+            } catch (e) { toast('Network error: ' + e.message, 'err'); }
+        });
+        $('pvr-hard-reset-btn')?.addEventListener('click', async () => {
+            if (!confirm('Wipe Kodi EPG database? DESTRUCTIVE. Live EPG goes dark until Kodi re-pulls.')) return;
+            try {
+                await fetch(`http://${REMOTE_HOST}/pvr/reset.json`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({uuid: UUID, hard: true}),
+                });
+                toast('Hard reset queued', 'ok');
+            } catch (e) { toast('Network error: ' + e.message, 'err'); }
+        });
+        $('add-pseudo-btn')?.addEventListener('click', openPseudoModal);
+        $('pseudo-cancel-btn')?.addEventListener('click', closePseudoModal);
+        $('pseudo-save-btn')?.addEventListener('click', addPseudoChannel);
+        $('rebuild-all-pseudo-btn')?.addEventListener('click', async () => {
+            if (!confirm('Rebuild ALL PseudoTV channels? Triggers a full Builder pass.')) return;
+            try {
+                await fetch(`http://${REMOTE_HOST}/channels/rebuild.json`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({uuid: UUID, all: true}),
+                });
+                toast('Rebuild all queued', 'ok');
+            } catch (e) { toast('Network error: ' + e.message, 'err'); }
+        });
+        $('cf-cancel-btn')?.addEventListener('click', closeCustomEditModal);
+        $('cf-save-btn')?.addEventListener('click', stageCustomEdit);
+        $('rules-cancel-btn')?.addEventListener('click', closeRulesModal);
+        $('rules-save-btn')?.addEventListener('click', stageRulesEdit);
+        // (implogo modal buttons retired — inline editor handles its own Cancel/Stage.)
+        $('global-save-btn')?.addEventListener('click', globalSave);
+        // Inline Save buttons in Imports + Manager tab headers. Delegated so
+        // they survive renderImports() innerHTML rewrites.
+        document.body.addEventListener('click', (ev) => {
+            const btn = ev.target.closest('.inline-save-btn');
+            if (btn) globalSave();
+        });
+        // (Path browser quick-jumps are wired per-panel inside openPathBrowser
+        //  since each inline panel has its own buttons.)
+
+        // Delegated click handlers — wired once.
+        $('imports-list')?.addEventListener('click', _onImportsClick);
+        $('pseudo-list')?.addEventListener('click', _onCustomChannelClick);
+        $('imports-list')?.addEventListener('click', _onChannelEnableToggle, true);
+        $('pseudo-list')?.addEventListener('click', _onChannelEnableToggle, true);
+        $('imports-list')?.addEventListener('keydown', _onChannelKeydown);
+        $('pseudo-list')?.addEventListener('keydown', _onChannelKeydown);
+        $('imports-list')?.addEventListener('blur', _onChannelBlur, true);
+        $('pseudo-list')?.addEventListener('blur', _onChannelBlur, true);
+        // Drag-to-reorder (single-import). Bind at document level so they
+        // survive renderImports() innerHTML rewrites.
+        document.body.addEventListener('dragstart', _onChannelDragStart);
+        document.body.addEventListener('dragend',   _onChannelDragEnd);
+        document.body.addEventListener('dragover',  _onChannelDragOver);
+        document.body.addEventListener('drop',      _onChannelDrop);
+
+        // Escape closes any open modal.
+        document.addEventListener('keydown', (ev) => {
+            if (ev.key !== 'Escape') return;
+            if (document.getElementById('action-modal-overlay').classList.contains('open'))   closeActionModal();
+            // Path browser is now inline; Escape closes any open panel.
+            const openInlineBrowser = document.querySelector('.inline-browser');
+            if (openInlineBrowser) openInlineBrowser.remove();
+            if (document.getElementById('epg-modal-overlay').classList.contains('open'))      closeEpgModal();
+            if (document.getElementById('import-modal-overlay').classList.contains('open'))   closeImportModal();
+            if (document.getElementById('pseudo-modal-overlay').classList.contains('open'))   closePseudoModal();
+            if (document.getElementById('chfields-modal-overlay').classList.contains('open')) closeCustomEditModal();
+            if (document.getElementById('rules-modal-overlay').classList.contains('open'))    closeRulesModal();
+            // (implogo modal-overlay retired; inline editor handles Escape via its own close.)
+            document.querySelectorAll('.inline-logo-editor').forEach(el => el.remove());
+        });
+        // Settings tab: clicking the "📁 Browse" button next to a path input.
+        // Now opens an INLINE browser panel anchored beneath the setting row.
+        document.body.addEventListener('click', (ev) => {
+            const btn = ev.target.closest('[data-action="path-browse"]');
+            if (!btn) return;
+            const sid = btn.dataset.settingId;
+            const inp = document.querySelector(`#settings-body input[type=text][data-setting-id="${cssEscape(sid)}"]`);
+            if (inp) openPathBrowser(inp, inp.value, btn);
+        });
+        // Generic browse-for: 📁 buttons next to inputs target an input by id.
+        // Used by the chfields modal (cf-logo, cf-path), inline-logo editor, etc.
+        document.body.addEventListener('click', (ev) => {
+            const btn = ev.target.closest('[data-action="browse-for"]');
+            if (!btn) return;
+            const inp = document.getElementById(btn.dataset.target);
+            if (inp) openPathBrowser(inp, inp.value, btn);
+        });
+        // Hash routing on load.
+        const hash = (location.hash || '').replace(/^#tab-/, '');
+        const validTabs = new Set(['channels', 'imports', 'guide', 'info', 'settings']);
+        if (hash && validTabs.has(hash)) navigateTab(hash);
+        else                              navigateTab('channels');
+        // Initial imports fetch fires inside navigateTab().
+    };
+</script>
+</body>
+</html>

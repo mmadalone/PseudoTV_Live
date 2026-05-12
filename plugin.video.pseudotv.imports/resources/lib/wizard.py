@@ -1,0 +1,110 @@
+  # Copyright (C) 2025 Lunatixz
+
+
+# This file is part of PseudoTV Live.
+
+# PseudoTV Live is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# PseudoTV Live is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
+# https://github.com/xbmc/xbmc/blob/master/xbmc/input/actions/ActionIDs.h
+# https://github.com/xbmc/xbmc/blob/master/xbmc/input/Key.h
+
+# -*- coding: utf-8 -*-
+from globals   import *
+
+# https://github.com/PseudoTV/PseudoTV_Live/issues/68
+
+#todo move autotuning/startup to wizard.
+
+#display welcome
+#search discovery
+#parse library
+#prompt autotune
+
+
+
+# if SETTINGS.hasWizardRun():
+        # DIALOG.qrDialog(URL_WIKI,LANGUAGE(32216)%(ADDON_NAME,ADDON_AUTHOR))
+
+class Wizard(xbmcgui.WindowXMLDialog):
+    lastActionTime = time.time()
+    
+    def __init__(self, *args, **kwargs):
+        xbmcgui.WindowXMLDialog.__init__(self, *args, **kwargs)    
+        with BUILTIN.busy_dialog():
+            self.tasks   = kwargs.get('inherited')
+            self.cache   = SETTINGS.cache    
+            self.cacheDB = SETTINGS.cacheDB
+            self.player  = PLAYER()
+            self.monitor = MONITOR()
+            
+        if not PROPERTIES.isRunning('chkWizard'):
+            with PROPERTIES.chkRunning('chkWizard'):
+                self.doModal()
+            
+        
+    def log(self, msg, level=xbmc.LOGDEBUG):
+        log('%s: %s'%(self.__class__.__name__,msg),level)
+        
+        
+    def onInit(self):
+        self.log('onInit')  
+
+        
+    def isLocked(self):
+        return PROPERTIES.getProperty('Wizard.isLocked',False)
+        
+        
+    def setLocked(self, state=True):
+        self.getControl(41).setColorDiffuse({True:"0xC0FF0000",False:"0xFFFFFFFF"}[PROPERTIES.setProperty('Wizard.isLocked',state)])
+
+
+    @contextmanager
+    def toggleSpinner(self, state=True, lock=True, condition=None):
+        self.log('toggleSpinner, state = %s, condition = %s, lock = %s'%(state,condition,lock))
+        if not condition is None and condition:
+            PROPERTIES.setRunning('Manager.toggleSpinner',state)
+            self.setVisibility(self.spinner,state)
+            if lock: self.setLocked(True)
+            try: yield
+            finally:
+                if self.isLocked(): self.setLocked(False)
+                self.setVisibility(self.spinner,False)
+                PROPERTIES.setRunning('Manager.toggleSpinner',False)
+        else: yield
+
+
+    def onClose(self):
+        self.close()
+        
+        
+    def onAction(self, act):
+        actionId = act.getId()   
+        if (time.time() - self.lastActionTime) < .5 and actionId not in ACTION_PREVIOUS_MENU: action = ACTION_INVALID # during certain times we just want to discard all input
+        else:
+            if actionId in ACTION_PREVIOUS_MENU:
+                if self.isLocked(): DIALOG.notificationDialog(LANGUAGE(32260))
+            else:
+                with self.toggleSpinner(condition=PROPERTIES.isRunning('Wizard.toggleSpinner')==False):
+                    self.log('onAction: actionId = %s, locked = %s'%(actionId,self.isLocked()))
+
+            
+    def onFocus(self, controlId):
+        self.log('onFocus: controlId = %s'%(controlId))
+
+        
+    def onClick(self, controlId):
+        if (self.isLocked() or (time.time() - self.lastActionTime) < .5): DIALOG.notificationDialog(LANGUAGE(32260))
+        else:
+            with self.toggleSpinner(condition=PROPERTIES.isRunning('Wizard.toggleSpinner')==False):
+                self.log('onClick: controlId = %s, locked = %s'%(controlId,self.isLocked()))
+                if controlId == 0: self.onClose()
