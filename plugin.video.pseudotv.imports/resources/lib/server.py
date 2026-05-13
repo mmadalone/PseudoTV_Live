@@ -616,6 +616,23 @@ class MyHandler(BaseHTTPRequestHandler):
                             fields['group'] = [g.strip() for g in str(fields['group']).split('|') if g.strip()] or [ADDON_NAME]
                         for k in ('enabled', 'radio', 'favorite'):
                             if k in fields: fields[k] = bool(fields[k])
+                        # imports.37: snapshot pre-mutation values so the
+                        # classifier below discriminates by VALUE DIFF, not
+                        # just key presence. The cf-modal dashboard caller
+                        # (manager.html:stageCustomEdit) stages all 9 fields
+                        # unconditionally, so `set(fields.keys())` includes
+                        # non-META fields (path/radio/enabled) even when the
+                        # operator only changed name+logo. Pre-imports.37,
+                        # edited_keys.issubset(META_ONLY_FIELDS) always
+                        # failed for cf-modal edits → every Custom-channel
+                        # save triggered the slow ~9-min full rebuild
+                        # instead of imports.30's sub-second fast-path.
+                        # Snapshot must happen BEFORE the mutation loop +
+                        # BEFORE the imports.36 logo auto-copy (which can
+                        # rewrite fields['logo']). Use type-correct values
+                        # — bool coercion above has already normalized
+                        # enabled/radio/favorite from the JSON wire format.
+                        actually_changed = {k for k, v in fields.items() if target.get(k) != v}
                         for k, v in fields.items():
                             target[k] = v
                         # imports.36: parity with manager.py:switchLogo.__browse —
@@ -679,10 +696,20 @@ class MyHandler(BaseHTTPRequestHandler):
                         # behind each field's classification (radio is
                         # DELIBERATELY excluded because xmltv.getProgramItem
                         # reads it during programme generation).
-                        edited_keys = set(fields.keys())
+                        # imports.37: use the `actually_changed` snapshot
+                        # built above (value diff vs target's pre-mutation
+                        # values), NOT `set(fields.keys())`. The cf-modal
+                        # client stages all 9 fields unconditionally, so
+                        # raw-keys classification falsely routed every
+                        # cf-modal edit to the slow path. Empty
+                        # actually_changed (no-op save: operator opened
+                        # modal and clicked Save without changing anything)
+                        # leaves both flags untouched — no Builder kick,
+                        # no wasted rebuild.
+                        edited_keys = actually_changed
                         if edited_keys and edited_keys.issubset(META_ONLY_FIELDS):
                             target['metadata_changed'] = True
-                        else:
+                        elif edited_keys:
                             target['changed'] = True
                         channels.setChannels(channels=ch_list)
                         del channels
