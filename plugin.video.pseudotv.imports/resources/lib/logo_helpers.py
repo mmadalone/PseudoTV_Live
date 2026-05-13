@@ -43,6 +43,29 @@ MAX_LOGO_UPLOAD_BYTES = 5 * 1024 * 1024
 UNSAFE_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
+# imports.38: special:// namespaces that resolve to stable Kodi-managed
+# directories. Paths under these prefixes are passed through verbatim by
+# copyToLogoLoc — no copy needed because the source persists as long as
+# Kodi (or the source addon, for special://home/addons/) is installed.
+# Mirrors the existing pass-through for resource:// (also Kodi-persistent
+# VFS). Eliminates a surprising operator-visible behavior pre-imports.38:
+# when picking a logo from `special://home/addons/<logo-pack>/...png`,
+# the addon would copy the file into cache/logos/<chname>.<ext>, renaming
+# it on the way — wasting disk and introducing space-in-filename
+# scenarios when the channel name had a space.
+#
+# DELIBERATELY EXCLUDES special://temp/ — Kodi cleans the temp dir
+# periodically, so source files there ARE transient and SHOULD be copied
+# for resilience (same rationale as raw /tmp/ or /mnt/ paths).
+STABLE_SPECIAL_PREFIXES = (
+    'special://home/',
+    'special://xbmc/',
+    'special://profile/',
+    'special://userdata/',
+    'special://masterprofile/',
+)
+
+
 def sanitizeChnameForFilename(chname):
     """Replace filesystem-unsafe chars in a channel name so it's safe
     as a basename.
@@ -112,6 +135,17 @@ def copyToLogoLoc(source_path, chname, log_fn=None):
 
     # URLs / resource paths aren't files to copy.
     if source_path.startswith(('http://', 'https://', 'resource://', 'image://')):
+        return source_path
+
+    # imports.38: stable special:// namespaces — pass through verbatim.
+    # Source persists as long as Kodi (or the host addon, for
+    # special://home/addons/) is installed; no resilience benefit to
+    # copying, and the copy would rename to <chname>.<ext> (surprising
+    # operator-visible behavior, and introduces space-in-filename when
+    # the channel name has a space). special://temp/ is intentionally
+    # NOT in STABLE_SPECIAL_PREFIXES — temp paths ARE transient and
+    # should still be copied.
+    if source_path.startswith(STABLE_SPECIAL_PREFIXES):
         return source_path
 
     # Already inside LOGO_LOC? Idempotent skip.
