@@ -300,6 +300,42 @@ class Builder(object):
             self.log('[%s] buildChannels, __hasProgrammes = %s'%(citem['id'],state))
             return state
 
+        # imports.30: metadata-only fast-path helpers. `changed=True` always
+        # wins over `metadata_changed=True` — defensive default so any code
+        # path that set BOTH (e.g., a hypothetical bulk-renumber that also
+        # changed a path) gets the safe full rebuild.
+        def __hasMetadataOnlyChange(citem: dict) -> bool:
+            state = (bool(citem.get('metadata_changed', False))
+                     and not bool(citem.get('changed', False)))
+            self.log('[%s] buildChannels, __hasMetadataOnlyChange = %s' % (citem['id'], state))
+            return state
+
+        def __renderMetadataOnly(citem: dict) -> bool:
+            # Upsert M3U entry + XMLTV channel element from the current citem
+            # state. Skips __clrStation + __addProgrammes — the channel's
+            # programmes in XMLTVDATA['programmes'] stay intact (keyed by
+            # channel id, independent from the channel element).
+            #
+            # Safe because:
+            #   - m3u.addStation (m3u.py:592) internally deletes by id then
+            #     appends → net upsert; calling it on the existing channel
+            #     replaces the M3U entry with the new metadata.
+            #   - xmltv.addChannel (xmltvs.py:531) explicit upsert by id at
+            #     the same index.
+            #   - Programmes re-associate with the (replaced) channel element
+            #     by id at lookup time — no orphan risk.
+            #
+            # Caller must guard with __hasProgrammes — without programmes,
+            # xmltvs._save's cleanChannels (xmltvs.py:376) drops the channel
+            # silently. Caller escalates to changed=True in that case.
+            sitem = self.m3u.getStationItem(citem)
+            state = any([self.m3u.addStation(sitem), self.xmltv.addChannel(sitem)])
+            self.log('[%s] buildChannels, __renderMetadataOnly = %s' % (citem['id'], state))
+            citem['metadata_changed'] = False
+            changes.add(self.channels.addChannel(citem))
+            modified_ids.add(citem['id'])
+            return state
+
         def __hasFileList(fileList: list, state=False) -> bool:
             if isinstance(fileList,list) and len(fileList) > 0: state = True
             self.log('[%s] buildChannels, __hasFileList = %s'%(citem['id'],state))
@@ -423,8 +459,32 @@ class Builder(object):
                             self.pHeader = ADDON_NAME
                             self.pName   = citem['name']
                             citem = self.runActions(RULES_ACTION_CHANNEL_TEMP_CITEM, citem, Globals._cleanGroups(citem), inherited=self) #inject temporary citem changes here
+                            # imports.30: metadata-only fast-path. Catches operator
+                            # edits to number/name/logo/group/catchup/favorite via
+                            # any path that set `metadata_changed=True` (server.py
+                            # /channels/edit.json classifier, tasks.py drift
+                            # detection). Skips the ~90s programme re-enumeration
+                            # cost of the full-rebuild path below — Builder still
+                            # writes M3U + XMLTV (channel element only) atomically.
+                            # The `__hasProgrammes` guard is required: without it,
+                            # xmltvs._save's cleanChannels drops zero-programme
+                            # channels silently. When the guard fails, escalate
+                            # to full rebuild by setting changed=True and falling
+                            # through — __hasChanged below will see the flag and
+                            # trigger __clrStation + buildVideo + __addProgrammes.
+                            if __hasMetadataOnlyChange(citem):
+                                if __hasProgrammes(citem):
+                                    __renderMetadataOnly(citem)
+                                    completed.add(True)
+                                    PROPERTIES.setPropTimer('chkPVRRefresh') # nudge PVR
+                                    __setStation()                            # write M3U + XMLTV
+                                    continue
+                                else:
+                                    self.log('[%s] buildChannels, metadata-only escalating to full rebuild (no programmes — cleanChannels would drop the channel)' % (citem['id']), xbmc.LOGINFO)
+                                    citem['changed'] = True
+                                    citem['metadata_changed'] = False
                             _update, start = __needsUpdate(citem, now, fallback)
-                            _changed = __hasChanged(citem, enableChanged) 
+                            _changed = __hasChanged(citem, enableChanged)
                             self.log('[%s] buildChannels, preview = %s, rules = %s, _update = %s'%(citem['id'],preview,citem.get('rules',{}),_update))
                             if self.service._interrupt():
                                 self.log("[%s] buildChannels, _interrupt"%(citem['id']))

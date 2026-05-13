@@ -10,6 +10,8 @@ _site/
 .pytest_cache/
 tests/__pycache__/
 tests/**/__pycache__/
+tests/userdata/
+special:/
 REBASE_PLAN.md
 CLAUDE.md
 _NOTES.md

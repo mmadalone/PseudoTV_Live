@@ -240,7 +240,11 @@ CHANNELCHANGEDFLE   = 'channels.changed'
 CHANNELLATESTFLE    = 'channels.latest'
 CHANNELAUTOFLE      = 'channels.auto'
 MANAGERFLE          = 'manager.html'
-IMPORTSFLE          = 'imports.html'  # imports fork (madteevee): live-imports management page
+# imports.26: IMPORTSFLE/IMPORTSPATH constants removed alongside imports.html
+# deletion. The file was 302-redirected dead code since the dashboard
+# consolidation (Step 6 Phase 7-12); the constants were defined but never
+# referenced anywhere else (grep-verified). server.py:1560-1566 hardcodes
+# '/imports.html' in its redirect handler, independent of these constants.
 
 #exts
 VIDEO_EXTS          = xbmc.getSupportedMedia('video').split('|')[:-1]
@@ -279,7 +283,6 @@ SEASONS             = os.path.join(REMOTE_LOC,'seasons.json')
 HOLIDAYS            = os.path.join(REMOTE_LOC,'holidays.json')
 GROUPFLE_DEFAULT    = os.path.join(REMOTE_LOC,'groups.xml')
 MANAGERPATH         = os.path.join(REMOTE_LOC,MANAGERFLE)
-IMPORTSPATH         = os.path.join(REMOTE_LOC,IMPORTSFLE)  # imports fork (madteevee)
 LIBRARYFLE_DEFAULT  = os.path.join(REMOTE_LOC,LIBRARYFLE)
 CHANNELFLE_DEFAULT  = os.path.join(REMOTE_LOC,CHANNELFLE)
 GENREFLE_DEFAULT    = os.path.join(REMOTE_LOC,GENREFLE)

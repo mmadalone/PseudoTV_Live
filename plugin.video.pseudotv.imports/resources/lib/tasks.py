@@ -18,16 +18,18 @@
 #
 # -*- coding: utf-8 -*-
 
-from globals    import *
-from library    import Library
-from builder    import Builder
-from channels   import Channels
-from xmltvs     import XMLTVS
-from backup     import Backup
-from multiroom  import Multiroom
-from wizard     import Wizard
-from server     import HTTP, Discovery
-from renderers  import render_m3u, render_xmltv, write_atomic
+from globals        import *
+from library        import Library
+from builder        import Builder
+from channels       import Channels
+from xmltvs         import XMLTVS
+from m3u            import M3U
+from backup         import Backup
+from multiroom      import Multiroom
+from wizard         import Wizard
+from server         import HTTP, Discovery
+from renderers      import render_m3u, render_xmltv, write_atomic
+from filter_helpers import RENDER_KEYS, _renderStateDrift
 
 from context_create import _auto
 
@@ -68,8 +70,18 @@ class Tasks(object):
         if getattr(self, '_imports_thread', None) is not None and self._imports_thread.is_alive():
             return
         import threading
-        IMPORTS_INTERVAL_SECS = 300  # 5 minutes between auto-syncs
-        KICK_POLL_SECS        = 3    # how often to check the UI-set kick property
+        KICK_POLL_SECS = 3          # how often to check the UI-set kick property
+        # imports.23: auto-sync interval is now operator-configurable via the
+        # 'Imports_Sync_Interval_Minutes' setting (spinner with presets:
+        # Disabled, 5, 15, 30, 60, 120, 240, 480 min; default 5 = preserves
+        # prior behavior). Read at the top of each outer-loop iteration
+        # (below) so live config changes take effect on the next cycle —
+        # same semantics as Run_While_Playing. Manual kicks via the
+        # `chkImports.kick` property (UI Refresh buttons, per-edit kicks
+        # from /imports/channel/edit.json) ALWAYS fire chkImports regardless
+        # of this setting — the Disabled value only suppresses time-based
+        # auto-sync.
+        IMPORTS_INTERVAL_MAX_MINUTES = 480  # clamp ceiling matching the dropdown's largest option
         def _loop():
             try:
                 # First-run: short delay so the addon's main init can complete
@@ -77,11 +89,37 @@ class Tasks(object):
                 # writable Channels/M3U/XMLTV singletons.
                 if self.monitor.waitForAbort(5):
                     return
+                # imports.25 / .27: carries the kick scope between the wait
+                # loop and the next chkImports invocation. Pre-imports.27 this
+                # was a boolean `was_kicked = False/True`; in imports.27 it
+                # became the actual kick value (string) so syncAll can bypass
+                # the per-import refresh_interval_min gate ONLY for the import
+                # the operator targeted (or for 'all' on global kicks). The
+                # 7 kick setters (server.py:982/1022/1227/1299/1442/1472 +
+                # utilities.py:164) already write either 'all' or a specific
+                # import_id, so the daemon just carries the value forward
+                # verbatim without interpretation. None = no kick this cycle
+                # (natural daemon wake).
+                kick_scope = None
                 while not self.monitor.abortRequested():
+                    # imports.23: read interval setting fresh each cycle for
+                    # live config changes. Defensive try/except + fallback to
+                    # default 5 matches the tasks.py:305 pattern for
+                    # Library_Walk_Interval.
                     try:
-                        self.chkImports()
+                        interval_mins = int(SETTINGS.getSettingInt('Imports_Sync_Interval_Minutes') or 0)
+                    except Exception:
+                        interval_mins = 5
+                    if interval_mins <= 0:
+                        interval_secs = 0  # 0 = auto-sync disabled (manual kicks still honored)
+                    else:
+                        interval_secs = max(5, min(IMPORTS_INTERVAL_MAX_MINUTES, interval_mins)) * 60
+
+                    try:
+                        self.chkImports(force_scope=kick_scope)
                     except Exception as e:
                         self.log('imports thread, chkImports failed: %s'%(e), xbmc.LOGERROR)
+                    kick_scope = None  # imports.27: reset for next cycle (None = no force)
                     # One-shot post-cycle PVR.Scan trigger. No-op after first
                     # successful fire (or when toggle is off). Spawns its own
                     # daemon thread for the readiness probe so this loop's
@@ -90,23 +128,29 @@ class Tasks(object):
                         self._maybeFirePVRScan()
                     except Exception as e:
                         self.log('imports thread, _maybeFirePVRScan failed: %s'%(e), xbmc.LOGWARNING)
-                    # Sleep for IMPORTS_INTERVAL_SECS, but wake early if the
-                    # UI ("Refresh now" / "Refresh all" buttons via server.py,
-                    # OR the per-edit kick from /imports/channel/edit.json)
-                    # sets the chkImports.kick property. Polls every
-                    # KICK_POLL_SECS so manual refresh has near-realtime UX.
-                    # Use the EXT (cross-thread) property variant — getProperty/
-                    # setProperty thread-scope the key (`<key>.<instance>.<tid>`)
-                    # so a kick set from the HTTP-server thread would never be
-                    # visible to this daemon thread. Verified empirically:
-                    # 24 edits via imports.html sat unprocessed for 5 min until
-                    # the natural 300s cycle fired.
+                    # imports.23: wait loop with two exit conditions:
+                    #   - Time-based: elapsed >= interval_secs (only if
+                    #     auto-sync enabled, i.e. interval_secs > 0).
+                    #   - Kick-based: operator hit Refresh in the dashboard.
+                    #     Always honored — manual refresh works in any mode.
+                    # When interval_secs == 0 (Disabled), the loop only exits
+                    # via kick or Kodi abort — manual-refresh-only mode.
+                    #
+                    # Use the EXT (cross-thread) property variant for the kick —
+                    # getProperty/setProperty thread-scope the key
+                    # (`<key>.<instance>.<tid>`) so a kick set from the HTTP-
+                    # server thread would never be visible to this daemon
+                    # thread. Verified empirically pre-EXT fix: 24 edits via
+                    # imports.html sat unprocessed for 5 min until the natural
+                    # cycle fired.
                     elapsed = 0
                     last_defer_log = None  # dedupe deferred-kick log spam
-                    while elapsed < IMPORTS_INTERVAL_SECS:
+                    while True:
                         if self.monitor.waitForAbort(KICK_POLL_SECS):
                             return
                         elapsed += KICK_POLL_SECS
+                        if interval_secs > 0 and elapsed >= interval_secs:
+                            break  # time-based auto-sync interval expired
                         try:
                             kick = PROPERTIES.getEXTProperty('chkImports.kick', '')
                             if kick:
@@ -119,7 +163,7 @@ class Tasks(object):
                                 # ↻ Refresh would land server-side but their syncAll
                                 # never ran, stranding the channels.json half-state
                                 # (assigned_number=None on cleared channels) until the
-                                # next natural 5-min cycle (or longer if playback
+                                # next natural cycle (or longer if playback
                                 # continued). Now the kick survives until conditions
                                 # allow chkImports to actually run.
                                 blocker = None
@@ -139,6 +183,12 @@ class Tasks(object):
                                 if blocker is None:
                                     PROPERTIES.clrEXTProperty('chkImports.kick')
                                     self.log('imports thread, kick received (%s) — firing now'%(kick))
+                                    # imports.27: carry the scope value through.
+                                    # `kick` is either 'all' (global Refresh, batch
+                                    # edit, etc.) or a specific import_id (Renumber,
+                                    # Orphans, single-row Refresh). syncAll uses it
+                                    # to scope the gate-bypass per-import.
+                                    kick_scope = kick
                                     break  # fall out of wait → next chkImports iteration
                                 # Defer: leave kick set; log once per (kick, blocker) so
                                 # successive 3s polls don't spam the log while video plays.
@@ -152,7 +202,14 @@ class Tasks(object):
                 self.log('imports thread, fatal: %s'%(e), xbmc.LOGERROR)
         self._imports_thread = threading.Thread(target=_loop, name='pseudotv-imports', daemon=True)
         self._imports_thread.start()
-        self.log('_startImportsThread, daemon thread started (interval=%ds)'%(IMPORTS_INTERVAL_SECS))
+        # imports.23: interval is now per-cycle dynamic; log the initial
+        # value but note runtime re-read.
+        try:
+            initial_mins = int(SETTINGS.getSettingInt('Imports_Sync_Interval_Minutes') or 0)
+        except Exception:
+            initial_mins = 5
+        self.log('_startImportsThread, daemon thread started (initial interval = %s, dynamic per-cycle via Imports_Sync_Interval_Minutes)'
+                 % ('Disabled' if initial_mins <= 0 else '%d min' % initial_mins))
 
 
     def _maybeFirePVRScan(self):
@@ -551,7 +608,12 @@ class Tasks(object):
     def chkChanged(self, channels=None, silent=None):
         if silent is None: silent = BUILTIN.isPlaying()
         if channels is None: channels = self.getChannels()
-        changes = [channel for channel in channels if channel.get('changed',False)]
+        # imports.30: queue on EITHER flag. `changed=True` triggers Builder's
+        # full-rebuild path (existing); `metadata_changed=True` triggers the
+        # new fast-path (sub-second M3U + XMLTV channel-element re-render).
+        # Builder discriminates via __hasChanged / __hasMetadataOnlyChange.
+        changes = [channel for channel in channels
+                   if channel.get('changed', False) or channel.get('metadata_changed', False)]
         # madteevee (imports fork): import channels MUST NOT go through Builder.
         # Imports get their EPG from Imports.syncAll, not from buildChannels.
         # Builder._verify skips them (no `path` field) AND doesn't clear the
@@ -562,16 +624,19 @@ class Tasks(object):
         # Morning TV) that legitimately need a rebuild get buried behind 100+
         # stale import flags and never reach the queue head.
         # Fix: filter imports out of the build queue AND clear their stale
-        # changed=True flag (persists via Channels.setChannels merge-on-write)
-        # so the queue self-heals. Custom channels still flow normally.
+        # flags (persists via Channels.setChannels merge-on-write) so the
+        # queue self-heals. imports.30: same defense applies to the new
+        # metadata_changed flag — Builder skips imports either way.
+        # Custom channels still flow normally.
         stale_imports = [c for c in changes if c.get('type') == 'import']
         if stale_imports:
-            self.log('chkChanged, clearing stale changed=True on %s import channels (imports get EPG from syncAll, not Builder)' % (len(stale_imports)))
+            self.log('chkChanged, clearing stale change flags on %s import channels (imports get EPG from syncAll, not Builder)' % (len(stale_imports)))
             try:
                 ch = Channels(writable=True)
                 modified = set()
                 for c in stale_imports:
                     c['changed'] = False
+                    c['metadata_changed'] = False
                     ch.addChannel(c)
                     modified.add(c.get('id'))
                 ch.setChannels(modified_ids=modified)
@@ -583,7 +648,7 @@ class Tasks(object):
             self.service._que(Builder(service=self.service).buildChannels,3,*([channel],False,silent))
 
 
-    def chkImports(self, silent=None):
+    def chkImports(self, silent=None, force_scope=None):
         """imports fork (madteevee): periodic live-imports sync.
 
         Runs Imports.syncAll() directly (NOT through Builder), so first-install
@@ -643,8 +708,12 @@ class Tasks(object):
                 # second cycle without ever completing or releasing the lock).
                 m3u   = M3U(writable=False)
                 xmltv = XMLTVS(writable=False, m3u=m3u)
+                # imports.25 / .27: thread `force_scope` through so manual
+                # kicks bypass the per-import refresh_interval_min gate.
+                # None = no force; 'all' = bypass for every import; <id> =
+                # bypass for that import only (others still gate).
                 results = Imports(channels=channels, m3u=m3u, xmltv=xmltv,
-                                  service=self.service).syncAll()
+                                  service=self.service).syncAll(force_scope=force_scope)
                 # Atomic write under WRITER_LOCK. imports.13: writes go through
                 # the module-level renderers (consolidates the duplicated
                 # render that used to live in m3u._save / xmltvs._save).
@@ -709,11 +778,72 @@ class Tasks(object):
 
         xmltv  = XMLTVS()
         stops  = dict(xmltv.loadStopTimes(channels, fallback=fallback))
+
+        # imports.29: load currently-rendered M3U state once per filter pass
+        # for the drift check below. M3UDATA shape is
+        # {'data': str, 'stations': [dict], 'recordings': [dict]}
+        # (m3u.py:75-76). Iterating M3UDATA bare would walk dict keys, not
+        # the station list. Wrapped in try/except — the drift check is a
+        # supplementary signal, not load-bearing for the CRC path.
+        try:
+            m3u_obj   = M3U()
+            m3u_by_id = {s.get('id'): s for s in (m3u_obj.M3UDATA.get('stations') or [])}
+        except Exception as e:
+            self.log('_filterChannelsNeedingBuild, M3U load for drift check failed: %s' % e, xbmc.LOGWARNING)
+            m3u_by_id = {}
+
         needed = []
         crc_detected = 0
+        drift_detected = 0
+        metadata_drift = 0  # imports.30: subset of drift_detected routed to metadata_changed
         for citem in channels:
             if citem.get('changed', False):
                 needed.append(citem); continue
+            # Import channels go through Imports.syncAll, not Builder — skip
+            # both the drift and CRC checks. The final filter at the bottom
+            # of this function still drops imports from `needed`, but
+            # short-circuiting here saves a dict lookup + xs of CPU per
+            # cycle when most channels are imports (typical operator setup
+            # has 100+ imports vs <10 Custom).
+            if citem.get('type') == 'import':
+                if stops.get(citem['id'], 0) <= threshold:
+                    needed.append(citem)
+                continue
+            # imports.29: skip disabled Custom channels — Builder._verify
+            # (builder.py:215-217) drops them anyway, so queuing them just
+            # churns the build queue. Re-enabling sets changed=True via the
+            # enable path, which the first branch above catches.
+            if not citem.get('enabled', True):
+                continue
+            # imports.29: render-state drift detection. Catches renumber,
+            # name, logo, group, catchup, radio, favorite edits regardless
+            # of which edit path mutated channels.json — the existing
+            # `changed=True` signal at line 774 only catches paths that
+            # remembered to set the flag (server.py:629 always does;
+            # manager.py:itemInput only when value!=retval; switchLogo
+            # never; bulk-renumber endpoints unknown). Drift is the
+            # single-point-of-truth defense in depth. Sets
+            # citem['changed']=True so Builder.__hasChanged honors the
+            # rebuild via its explicit-flag branch (builder.py:277-279) —
+            # same propagation pattern as the CRC branch below.
+            sitem = m3u_by_id.get(citem.get('id'))
+            if _renderStateDrift(citem, sitem):
+                # imports.30: route drift by sitem presence.
+                #   - sitem is None → channel not yet rendered (fresh add or
+                #     just-re-enabled) → needs programmes → full rebuild via
+                #     changed=True.
+                #   - sitem exists → pure metadata drift → fast-path eligible
+                #     via metadata_changed=True. Builder will still escalate
+                #     to full rebuild if the channel happens to have zero
+                #     programmes (xmltvs._save's cleanChannels would drop it).
+                if sitem is None:
+                    citem['changed'] = True
+                else:
+                    citem['metadata_changed'] = True
+                    metadata_drift += 1
+                drift_detected += 1
+                needed.append(citem)
+                continue
             if stops.get(citem['id'], 0) <= threshold:
                 needed.append(citem); continue
             if detect:
@@ -766,7 +896,8 @@ class Tasks(object):
                 except Exception as e:
                     self.log('_filterChannelsNeedingBuild, failed to clear stale import flags: %s' % e, xbmc.LOGWARNING)
         needed = [c for c in needed if c.get('type') != 'import']
-        self.log('_filterChannelsNeedingBuild, total = %s, needed = %s, crc_detected = %s, detect = %s'%(len(channels), len(needed), crc_detected, detect))
+        self.log('_filterChannelsNeedingBuild, total = %s, needed = %s, drift = %s, metadata = %s, crc_detected = %s, detect = %s'
+                 % (len(channels), len(needed), drift_detected, metadata_drift, crc_detected, detect))
         return needed
 
 
@@ -832,7 +963,35 @@ class Tasks(object):
                 # stopped by then, the brute branch runs normally. The HTTP server restart
                 # signal still fires once per successful chkPVRRefresh call (timerit
                 # setEXTProperty below) but no longer in a self-perpetuating loop.
-                timerit(PROPERTIES.setEXTProperty)(M3U_REFRESH,*('%s.HTTP.pendingRestart'%(ADDON_ID),True))
+                # imports.22: drop the HTTP-server restart re-arm. The only setter of
+                # '<ADDON_ID>.HTTP.pendingRestart' in the codebase lived here; removing
+                # it makes the HTTP-server restart branch dead-code for chkPVRRefresh
+                # callers and eliminates the operator-visible "madteevee: Online" toast
+                # that fired every ~5 min during playback (chkImports → syncAll →
+                # setPropTimer('chkPVRRefresh') → this timerit → server.py:2096
+                # _pendingRestart → break → chkHTTP → fresh HTTP() →
+                # __update(pendingRestart=False) → notificationDialog).
+                # Three independent investigations (codebase, live kodi.log, official
+                # iptvsimple README + Kodi forum thread 340327) confirmed the restart
+                # is vestigial:
+                #   1. pvr.iptvsimple polls its own m3uUrl/epgUrl on its own
+                #      m3uRefreshIntervalMins cadence (default 15 min) — independent of
+                #      our server lifecycle.
+                #   2. MyHandler in server.py reads M3UFLEPATH/XMLTVFLEPATH from disk on
+                #      every GET (server.py:1600-1602; no in-process cache). Restart
+                #      invalidates nothing functional.
+                #   3. PVRScan below is documented no-op against iptvsimple (inline
+                #      comment + Kodi forum consensus) and stays for non-iptvsimple
+                #      PVR clients.
+                # server.py:2070-2073 _pendingRestart is intentionally left in place —
+                # a future operator-initiated UI restart path could rewire it; pruning
+                # the dead branch is a follow-up. Other setPropTimer('chkPVRRefresh')
+                # callers (builder.py:477, context_record.py:58/76, manager.py:1045,
+                # multiroom.py:165, kodi.py:519 chkPluginSettings, default.py:64,
+                # tasks.py:798 no-channels edge case) all fire from paths that DO
+                # mutate state — they continue to signal a refresh and continue to
+                # reach PVRScan below; they just no longer bounce the HTTP server as
+                # a side effect.
                 if brute:
                     if not self.service.player.isPlaying() and BUILTIN.getInfoBool('AddonIsEnabled(%s)'%(PVR_CLIENT_ID),'System'):
                         DIALOG.notificationWait('%s: %s'%(PVR_CLIENT_NAME,LANGUAGE(32125)),wait=M3U_REFRESH, usethread=True)

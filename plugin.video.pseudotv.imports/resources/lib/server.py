@@ -22,6 +22,7 @@ import base64, gzip, mimetypes, re, socket, errno
 from zeroconf                  import *
 from globals                   import *
 from channels                  import Channels, markOverrides
+from filter_helpers             import META_ONLY_FIELDS
 from resources                 import Resources
 from six.moves.BaseHTTPServer  import BaseHTTPRequestHandler, HTTPServer
 from six.moves.socketserver    import ThreadingMixIn
@@ -625,8 +626,24 @@ class MyHandler(BaseHTTPRequestHandler):
                                     c['assigned_number'] = n
                                     cascaded += 1
                             target['assigned_number'] = target_num
-                        # Mark this channel as needing a Builder rebuild.
-                        target['changed'] = True
+                        # imports.30: classify edits as metadata-only vs
+                        # full-rebuild. Metadata-only edits (number / name /
+                        # logo / group / catchup / favorite) go through the
+                        # Builder fast-path (~sub-second per channel); any
+                        # edit touching path / rules / enabled / radio /
+                        # other fields outside META_ONLY_FIELDS triggers the
+                        # full rebuild (~90s per channel — programme
+                        # re-enumeration). Mixed payloads route to full
+                        # rebuild via the `issubset` check. See
+                        # filter_helpers.META_ONLY_FIELDS for the rationale
+                        # behind each field's classification (radio is
+                        # DELIBERATELY excluded because xmltv.getProgramItem
+                        # reads it during programme generation).
+                        edited_keys = set(fields.keys())
+                        if edited_keys and edited_keys.issubset(META_ONLY_FIELDS):
+                            target['metadata_changed'] = True
+                        else:
+                            target['changed'] = True
                         channels.setChannels(channels=ch_list)
                         del channels
                         # defer_kick=true suppresses chkChanged; caller batches.
@@ -1638,9 +1655,54 @@ class MyHandler(BaseHTTPRequestHandler):
                                     'radio'           : c.get('radio'),
                                     'favorite'        : c.get('favorite'),
                                 })
+                            # imports.28: enrich each import with derived
+                            # retry-state fields so manager.html's statusBadge
+                            # can render "failed Nx · next retry in Xm" or
+                            # "abandoned" without re-deriving the curve on the
+                            # client. Computation matches imports.py:syncAll
+                            # exactly so the dashboard view and the daemon's
+                            # gate decision stay in lock-step. Storage stays
+                            # unchanged — these fields are server-derived per
+                            # request from (last_status, fail_count,
+                            # failed_since, last_sync_at, refresh_interval_min)
+                            # + the two new Imports_Failure_* settings.
+                            try:
+                                from imports import computeRetryDelay, RETRY_CURVE_BY_CODE
+                                try:    curve = RETRY_CURVE_BY_CODE.get(int(SETTINGS.getSettingInt('Imports_Failure_Retry_Curve') or 1), 'aggressive')
+                                except Exception: curve = 'aggressive'
+                                try:    abandon_hours = int(SETTINGS.getSettingInt('Imports_Failure_Abandon_Hours') or 0)
+                                except Exception: abandon_hours = 0
+                                now_epoch = int(time.time())
+                                imports_list = list(channels.getImports() or [])
+                                for imp in imports_list:
+                                    last_status = imp.get('last_status')
+                                    try:    fail_count = int(imp.get('fail_count') or 0)
+                                    except (TypeError, ValueError): fail_count = 0
+                                    try:    failed_since = int(imp.get('failed_since') or 0) or None
+                                    except (TypeError, ValueError): failed_since = None
+                                    # Derived abandoned status (NOT stored)
+                                    if (abandon_hours > 0
+                                        and failed_since
+                                        and last_status == 'failed'
+                                        and (now_epoch - failed_since) >= abandon_hours * 3600):
+                                        imp['last_status'] = 'abandoned'
+                                    # Derived next_retry_at (only when failing
+                                    # and not abandoned — abandoned means no
+                                    # auto-retry, dashboard shows "hit Refresh")
+                                    if last_status == 'failed' and fail_count > 0 and imp.get('last_status') != 'abandoned':
+                                        try:    rim_sec = int(imp.get('refresh_interval_min') or 0) * 60
+                                        except (TypeError, ValueError): rim_sec = 0
+                                        try:    last_sec = int(imp.get('last_sync_at') or 0)
+                                        except (TypeError, ValueError): last_sec = 0
+                                        if rim_sec > 0 and last_sec > 0:
+                                            delay = computeRetryDelay(curve, fail_count, rim_sec)
+                                            imp['next_retry_at'] = last_sec + delay
+                            except Exception as _e:
+                                self.log('do_GET /imports.json: retry-state enrichment failed: %s' % (_e), xbmc.LOGWARNING)
+                                imports_list = channels.getImports() or []
                             payload = {
                                 'uuid'     : SETTINGS.getMYUUID(),
-                                'imports'  : channels.getImports() or [],
+                                'imports'  : imports_list,
                                 'channels' : slim_channels,
                             }
                             del channels

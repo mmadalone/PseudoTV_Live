@@ -2639,3 +2639,111 @@ msgstr ""
 msgctxt "#33923"
 msgid "Show a persistent progress indicator while the library walk runs (the autotune-types scan that triggers channel rebuilds). The walk takes 1-10 minutes after a Kodi restart; without this indicator the operator may think the system is frozen. Disable to keep the walk silent."
 msgstr ""
+
+msgctxt "#33924"
+msgid "Auto-sync interval"
+msgstr ""
+
+msgctxt "#33925"
+msgid "How often the imports daemon automatically refreshes M3U/XMLTV sources. Default 5 minutes. Manual refresh (the 'Refresh' button in the web dashboard) always works regardless of this setting. Set to Disabled to turn off all automatic syncing — operator-triggered refreshes only."
+msgstr ""
+
+msgctxt "#33926"
+msgid "5 minutes"
+msgstr ""
+
+msgctxt "#33927"
+msgid "15 minutes"
+msgstr ""
+
+msgctxt "#33928"
+msgid "30 minutes"
+msgstr ""
+
+msgctxt "#33929"
+msgid "60 minutes"
+msgstr ""
+
+msgctxt "#33930"
+msgid "120 minutes (2 hours)"
+msgstr ""
+
+msgctxt "#33931"
+msgid "240 minutes (4 hours)"
+msgstr ""
+
+msgctxt "#33932"
+msgid "480 minutes (8 hours)"
+msgstr ""
+
+msgctxt "#33933"
+msgid "Live Imports"
+msgstr ""
+
+msgctxt "#33934"
+msgid "Refresh imports now"
+msgstr ""
+
+msgctxt "#33935"
+msgid "Triggers an immediate refresh of all imports, bypassing the per-import refresh_interval_min gate (same as the 'Refresh' button in the web dashboard). The actual sync runs in the background — closes this dialog and fires a confirmation toast. Useful when you want fresh M3U/XMLTV data right now without waiting for the per-import interval."
+msgstr ""
+
+msgctxt "#33936"
+msgid "Refresh queued"
+msgstr ""
+
+msgctxt "#33937"
+msgid "Refresh failed (see kodi.log)"
+msgstr ""
+
+# imports.28: failure-aware retry / exponential backoff settings.
+# Surfaces in Kodi's settings dialog AND the dashboard Settings tab via
+# the existing /api/settings/schema.json pipeline.
+
+msgctxt "#33938"
+msgid "Failure retry curve"
+msgstr ""
+
+msgctxt "#33939"
+msgid "When an import hits a hard failure (fetch error, parse error, dead source), the per-import gate switches from the full Refresh Interval to a shorter retry cadence so transient outages recover within minutes. Aggressive: 60s/5m/15m/1h, then doubles to your Refresh Interval cap. Slower: 5m/30m/2h, then doubles. Fixed: always 5m. All curves are capped at each import's Refresh Interval so the operator-set ceiling is never exceeded. Disabled preserves the pre-imports.28 behavior (always wait the full Refresh Interval between retries). Empty M3U results that keep the previous channels do NOT trigger backoff — only hard failures do."
+msgstr ""
+
+msgctxt "#33940"
+msgid "Aggressive (60s / 5m / 15m / 1h)"
+msgstr ""
+
+msgctxt "#33941"
+msgid "Slower (5m / 30m / 2h)"
+msgstr ""
+
+msgctxt "#33942"
+msgid "Fixed (5m)"
+msgstr ""
+
+msgctxt "#33943"
+msgid "Abandon failing imports after"
+msgstr ""
+
+msgctxt "#33944"
+msgid "When an import has been continuously failing for at least this many hours, status becomes 'abandoned' and the gate stops auto-retrying. The operator must hit Refresh (either Kodi-native or the dashboard) to wake it back up. Set to Never to keep auto-retrying forever via the curve above — the dashboard's last_error display already surfaces stuck imports for manual triage, so Never is a safe default. The timer reflects how long the SOURCE has been broken, not how recently a retry attempt happened: a manual Refresh that fails again does not reset the abandon clock."
+msgstr ""
+
+msgctxt "#33945"
+msgid "Never (keep auto-retrying)"
+msgstr ""
+
+msgctxt "#33946"
+msgid "6 hours"
+msgstr ""
+
+msgctxt "#33947"
+msgid "12 hours"
+msgstr ""
+
+msgctxt "#33948"
+msgid "24 hours"
+msgstr ""
+
+msgctxt "#33949"
+msgid "48 hours"
+msgstr ""

@@ -597,6 +597,10 @@
                     <input id="settings-search" type="text" placeholder="Filter by label, help, or id…" oninput="onSearchChange()">
                 </div>
                 <button class="btn-action" onclick="loadSettings()">↻ Reload</button>
+                <!-- imports.24: Cancel button reverts every pending Settings
+                     change at once (Settings tab only — does NOT touch the
+                     other 5 PENDING_* pools). Disabled when no pending. -->
+                <button id="btn-settings-cancel" class="btn-action" onclick="revertAllSettings()" title="Discard all pending Settings changes">✕ Cancel <span id="settings-cancel-count"></span></button>
                 <!-- Consolidated Save: same class + behavior as the inline Save in
                      Manager/Imports tabs. Delegated body-click handler routes to
                      globalSave(); updateGlobalSave() styles + counts across all tabs. -->
@@ -895,8 +899,23 @@
     }
 
     function bindRowEvents() {
-        // Generic change handler on every editable control.
-        document.querySelectorAll('#settings-body [data-setting-id]').forEach(el => {
+        // imports.24: scope binding to actual form-control tags. The row
+        // container `<div class="settings-row" data-setting-id="X">` ALSO
+        // matches `[data-setting-id]` and document-order returns it BEFORE
+        // the inner control. Previously the bubbling `change` event from a
+        // SELECT/checkbox would fire the DIV's listener too, where
+        // `DIV.value` is undefined → readControlValue returns null →
+        // originalValueOf returns null (no data-original on the row DIV) →
+        // isSameValue(null, null) is true → the entry the inner control
+        // JUST added to PENDING_SETTINGS gets deleted. Net effect: the Save
+        // button flickers on then immediately back off; from the operator's
+        // POV "the save button never enabled". Caught when imports.23
+        // shipped the first SELECT-type setting (Imports_Sync_Interval_Minutes);
+        // text/number inputs avoided the bug because they bind 'input' (not
+        // 'change'), so the row DIV's change listener never fired for them.
+        // Sliders fire 'change' too but most operators tweak them via the
+        // companion number input which uses 'input'.
+        document.querySelectorAll('#settings-body input[data-setting-id], #settings-body select[data-setting-id], #settings-body textarea[data-setting-id]').forEach(el => {
             if (el.dataset.bound) return;
             el.dataset.bound = '1';
             const evt = (el.tagName === 'TEXTAREA' || el.type === 'text' || el.type === 'number' || el.type === 'color') ? 'input' : 'change';
@@ -991,6 +1010,32 @@
         evaluateAllDependencies();
     }
 
+    // imports.24: Revert every pending Settings-tab change at once. Driven by
+    // the Cancel button in #tab-settings. Snapshots the PENDING_SETTINGS keys
+    // before iteration because revertField mutates the pool. Touches ONLY the
+    // Settings-tab pool — does NOT clear PENDING_TOGGLES/NUMBERS/etc. from
+    // other tabs.
+    function revertAllSettings() {
+        const sids = Object.keys(PENDING_SETTINGS);
+        if (!sids.length) return;
+        sids.forEach(sid => {
+            const el = document.querySelector(
+                `#settings-body input[data-setting-id="${cssEscape(sid)}"], `
+                + `#settings-body select[data-setting-id="${cssEscape(sid)}"], `
+                + `#settings-body textarea[data-setting-id="${cssEscape(sid)}"]`
+            );
+            if (el) {
+                revertField(el);
+            } else {
+                // Orphan entry (control no longer in DOM, e.g., filtered out by
+                // level/search). Drop it directly so the pool clears cleanly.
+                delete PENDING_SETTINGS[sid];
+            }
+        });
+        updateSaveCounter();
+        evaluateAllDependencies();
+    }
+
     // Settings-tab Save button is now an .inline-save-btn (same class as the
     // Manager/Imports inline buttons). updateSaveCounter is just an alias for
     // updateGlobalSave so existing call sites (loadSettings, onControlChange,
@@ -1055,7 +1100,15 @@
         // Look in PENDING_SETTINGS first; otherwise the input's current value;
         // otherwise the setting's `current` field from the schema.
         if (PENDING_SETTINGS.hasOwnProperty(setting_id)) return PENDING_SETTINGS[setting_id];
-        const el = document.querySelector(`#settings-body [data-setting-id="${cssEscape(setting_id)}"]`);
+        // imports.24: scope the query to actual form controls. The row
+        // container `<div class="settings-row" data-setting-id="X">` ALSO
+        // matches and is FIRST in document order. Calling readControlValue
+        // on the DIV returns null (DIV has no .value/.checked), which then
+        // overrides the correct schema `current` fallback below. Dependency
+        // evaluation (compareCondition) silently broke for any unchanged
+        // setting referenced by an `is`/`!is` operator. Mirrors the
+        // bindRowEvents fix above.
+        const el = document.querySelector(`#settings-body input[data-setting-id="${cssEscape(setting_id)}"], #settings-body select[data-setting-id="${cssEscape(setting_id)}"], #settings-body textarea[data-setting-id="${cssEscape(setting_id)}"]`);
         if (el) return readControlValue(el);
         const s = SETTINGS_INDEX[setting_id];
         return s ? s.current : null;
@@ -1405,12 +1458,68 @@
         return Math.floor(secs/86400) + 'd ago';
     }
 
+    // imports.26: forward-counting variant of fmtAge() for the per-import
+    // "next sync in Nm" countdown in statusBadge(). secs <= 0 means the
+    // per-import gate has released but the daemon hasn't fired yet
+    // (operator should see this as "due now" rather than negative time).
+    function fmtUntil(epoch) {
+        if (!epoch) return '—';
+        const secs = Math.floor(epoch - Date.now()/1000);
+        if (secs <= 0)    return 'due now';
+        if (secs < 60)    return 'in ' + secs + 's';
+        if (secs < 3600)  return 'in ' + Math.floor(secs/60)   + 'm';
+        if (secs < 86400) return 'in ' + Math.floor(secs/3600) + 'h';
+        return 'in ' + Math.floor(secs/86400) + 'd';
+    }
+
     function statusBadge(imp) {
         if (imp.enabled === false) return '<span class="warn">disabled</span>';
+        // imports.28: abandoned state — server.py overrides last_status to
+        // 'abandoned' when failed_since is older than Imports_Failure_Abandon_Hours.
+        // Distinct from a normal 'error: ...' badge because auto-retry has
+        // stopped; the operator must click Refresh to wake the import back up.
+        if (imp.last_status === 'abandoned') {
+            const since = imp.failed_since;
+            const sinceStr = since ? ` (failing ${fmtAge(since).replace(' ago', '')})` : '';
+            return `<span class="err">abandoned${sinceStr} — hit Refresh to retry</span>`;
+        }
         const e = imp.last_error;
-        if (e) return `<span class="err">error: ${escapeHtml(e)}</span>`;
-        const synced = imp.last_synced;
-        return synced ? `<span class="ok">last sync ${fmtAge(synced)}</span>` : '<span class="warn">never synced</span>';
+        if (e) {
+            // imports.28: retry-state tail. When fail_count>0 + next_retry_at
+            // is server-derived, show "failed Nx · next retry in Xm" so the
+            // operator sees the actual cadence (the curve takes over from
+            // refresh_interval_min on failure). next_retry_at is omitted by
+            // server.py when storage doesn't yet have fail_count populated
+            // (imports created before .28 land here on the very first failure).
+            const fc = imp.fail_count || 0;
+            let tail = '';
+            if (fc > 0 && imp.next_retry_at) {
+                tail = ` · failed ${fc}× · next retry ${fmtUntil(imp.next_retry_at)}`;
+            }
+            return `<span class="err">error: ${escapeHtml(e)}${tail}</span>`;
+        }
+        // imports.25: storage field is `last_sync_at` (imports.py:449 + .25's
+        // 304/failed-path additions). `imp.last_synced` was a pre-existing
+        // field-name drift that caused EVERY import to render "never synced"
+        // forever, regardless of how many real syncs had occurred. fmtAge()
+        // expects an integer Unix-seconds value, which is exactly what
+        // last_sync_at stores.
+        const synced = imp.last_sync_at;
+        // imports.26: per-import "next sync in Nm" countdown. Compute the
+        // next-sync time from last_sync_at + refresh_interval_min*60. If
+        // the operator hasn't set a per-import interval (rim = 0 or unset),
+        // omit the countdown — the daemon's Imports_Sync_Interval_Minutes
+        // setting governs cadence in that case and the per-import view has
+        // nothing meaningful to display. If the gate has released but the
+        // daemon hasn't fired yet (rare race: setting just changed, or
+        // playback is deferring the kick), fmtUntil shows "due now".
+        let nextStr = '';
+        const rim = parseInt(imp.refresh_interval_min, 10);
+        if (synced && Number.isFinite(rim) && rim > 0) {
+            const nextEpoch = synced + rim * 60;
+            nextStr = ` · next ${fmtUntil(nextEpoch)}`;
+        }
+        return synced ? `<span class="ok">last sync ${fmtAge(synced)}${nextStr}</span>` : '<span class="warn">never synced</span>';
     }
 
     function renderImportRow(imp, idx) {
@@ -2234,6 +2343,16 @@
                 if (span) span.textContent = '';
             }
         });
+        // imports.24: Settings-tab Cancel button. Disabled when nothing
+        // pending in the Settings pool (PENDING_SETTINGS only — does NOT
+        // sum the other 5 pools, since Cancel only reverts Settings).
+        const cancelBtn = $('btn-settings-cancel');
+        if (cancelBtn) {
+            const nSettings = Object.keys(PENDING_SETTINGS).length;
+            cancelBtn.disabled = (nSettings === 0);
+            const cancelSpan = $('settings-cancel-count');
+            if (cancelSpan) cancelSpan.textContent = nSettings > 0 ? `(${nSettings})` : '';
+        }
         // Floating FAB — only meaningful on tabs WITHOUT an inline Save in view.
         // (Imports + Manager tabs both have inline buttons; Settings / Live Guide /
         // System Info don't, so the FAB serves those.)

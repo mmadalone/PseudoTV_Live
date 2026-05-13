@@ -147,7 +147,27 @@ class Utilities(object):
         with BUILTIN.busy_dialog():
             if SETTINGS.hasAddon('script.kodi.loguploader', notify=True):
                 return BUILTIN.executebuiltin('RunScript(script.kodi.loguploader)')
-        
+
+    @staticmethod
+    def _runRefreshImports():
+        """imports.26: handler for the Kodi-native Settings dialog's
+        'Refresh imports now' button. Mirrors the kick-property set the
+        web dashboard's Refresh button does at server.py:1472 — same
+        chkImports daemon picks it up within KICK_POLL_SECS (3 s) and
+        runs syncAll(force=True), bypassing the per-import
+        refresh_interval_min gate. The action runs in script-mode (fresh
+        Python invocation, NOT the addon's service-mode process); the
+        EXT property write via xbmcgui.Window(10000).setProperty is
+        cross-instance window-scoped so the daemon sees it.
+        """
+        try:
+            PROPERTIES.setEXTProperty('chkImports.kick', 'all')
+            DIALOG.notificationDialog(LANGUAGE(33936))  # "Refresh queued"
+            log('Utilities: _runRefreshImports, kick set to all')
+        except Exception as e:
+            log('Utilities: _runRefreshImports failed! %s'%(e), xbmc.LOGERROR)
+            DIALOG.notificationDialog(LANGUAGE(33937))  # "Refresh failed (see kodi.log)"
+
     @staticmethod
     def _runCleanup(full=False):
         log('Utilities: _runCleanup, full = %s'%(full))
@@ -315,8 +335,14 @@ class Utilities(object):
                 Utilities()._runIOBench()
             elif param == 'Logger':
                 Utilities()._runLogger()
-                
-            
+
+            # imports.26: Kodi-native "Refresh imports now" button — sets the
+            # chkImports.kick property the daemon polls. Mirrors the webui
+            # /imports/refresh.json handler (server.py:1466-1481).
+            elif param == 'Refresh_Imports':
+                Utilities()._runRefreshImports()
+
+
             #Misc. Debug
             elif param == 'Debug_QR':
                 ctl = (6,1)

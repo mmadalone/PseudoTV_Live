@@ -35,6 +35,7 @@ the instance.
 
 import hashlib
 import json
+import random
 import urllib.parse
 
 from globals     import *
@@ -47,6 +48,70 @@ from xmltv       import parseExternalSource as _parse_xmltv_stream
 # `file://` is intentionally NOT included by default.
 ALLOWED_M3U_SCHEMES = frozenset({'http', 'https', 'special'})
 ALLOWED_EPG_SCHEMES = frozenset({'http', 'https', 'special'})
+
+
+# imports.28: failure-aware retry / exponential backoff for the per-import
+# refresh-interval gate. When an import enters last_status='failed', the
+# gate normally waits the full refresh_interval_min before retrying — far
+# too long for transient outages on operators with rim=600m (10h). The
+# curves below define alternative retry cadences while the import is in
+# a consecutive-failure run. `disabled` preserves pre-.28 behavior.
+#
+# Each curve is a list of seconds-until-next-retry indexed by fail_count.
+# After the curve is exhausted (fail_count > len(curve)), delay doubles
+# from the last entry. Always capped at refresh_interval_min so the
+# operator-set ceiling is never exceeded.
+RETRY_CURVES = {
+    'aggressive': [60, 300, 900, 3600],   # 60s, 5m, 15m, 1h, then 2x to cap
+    'slower':     [300, 1800, 7200],       # 5m, 30m, 2h, then 2x to cap
+    'fixed':      [300],                   # always 5m (capped at rim)
+}
+
+# Cap on persisted fail_count. Backoff is bounded by refresh_interval_min
+# anyway, so further growth is cosmetic — bounding the integer keeps
+# tests/dashboard predictable and the channels.json record clean.
+FAIL_COUNT_CAP = 20
+
+# Mapping from settings.xml integer codes to curve names. settings.xml uses
+# type="integer" with int-keyed <option> values (consistent with the
+# imports.23 Imports_Sync_Interval_Minutes pattern; the spinner format
+# resolves the labels via strings.po). Unknown codes fall back to
+# 'aggressive' (the default).
+RETRY_CURVE_BY_CODE = {
+    0: 'disabled',
+    1: 'aggressive',
+    2: 'slower',
+    3: 'fixed',
+}
+
+
+def computeRetryDelay(curve, fail_count, refresh_interval_sec):
+    """Seconds until next retry for a failing import.
+
+    Returns refresh_interval_sec when curve='disabled' or fail_count<=0
+    (preserves pre-imports.28 behavior). For active curves, walks the
+    curve indices; past the end, doubles from the last entry. Jitters
+    ±12.5% to avoid a thundering herd if many imports fail in the same
+    cycle (e.g., LAN outage). Always capped at refresh_interval_sec
+    (operator-set ceiling).
+    """
+    if curve == 'disabled' or fail_count <= 0:
+        return refresh_interval_sec
+    if curve == 'fixed':
+        return min(RETRY_CURVES['fixed'][0], refresh_interval_sec)
+    arr = RETRY_CURVES.get(curve, RETRY_CURVES['aggressive'])
+    n = min(fail_count, FAIL_COUNT_CAP)
+    if n <= len(arr):
+        delay = arr[n - 1]
+    else:
+        delay = arr[-1] * (2 ** (n - len(arr)))
+    # Jitter ±12.5% — symmetric bound (Python's floor division on negative
+    # values would make `-delay // 8` one larger than `delay // 8` in
+    # magnitude, e.g. -60//8 = -8 vs 60//8 = 7; using the same positive
+    # bound on both sides keeps the band actually symmetric).
+    jitter_bound = delay // 8
+    jitter = random.randint(-jitter_bound, jitter_bound) if jitter_bound > 0 else 0
+    return max(1, min(delay + jitter, refresh_interval_sec))
 
 # Maximum cascade scan steps before giving up (plan H5).
 # 9999 + a small margin lets cascade exhaust the full namespace before
@@ -313,8 +378,17 @@ class Imports(object):
                 # No reconcile when nothing's parsed-fresh — just no-op
                 result['updated_cfg']['last_status'] = 'unchanged'
                 result['updated_cfg']['last_error']  = None
-                # Don't update last_sync_at on 304 (the data didn't change)
-                # — but DO refresh etag/last_modified in case server rotated them
+                # imports.25: update last_sync_at on EVERY attempt outcome, not just
+                # 200. Semantics shift: "time of last sync attempt", not "time of
+                # last successful content fetch". Required by the per-import
+                # refresh_interval_min gate in syncAll (~line 486), which keys on
+                # `now - last_sync_at < interval * 60`. If last_sync_at didn't
+                # advance on 304s, a 304-returning source would always look due,
+                # and refresh_interval_min would have no effect. The display side
+                # (manager.html "last sync N ago") is more honest under the new
+                # semantic too — a 304 IS a successful poll.
+                result['updated_cfg']['last_sync_at'] = int(time.time())
+                # DO refresh etag/last_modified in case server rotated them
                 if fetched.get('etag'):          result['updated_cfg']['etag']          = fetched['etag']
                 if fetched.get('last_modified'): result['updated_cfg']['last_modified'] = fetched['last_modified']
                 # Skip to EPG fetch (still try; might have its own cadence)
@@ -322,6 +396,8 @@ class Imports(object):
                 result['error'] = fetched.get('error') or ('M3U fetch status %s' % fetched['status'])
                 result['updated_cfg']['last_status'] = 'failed'
                 result['updated_cfg']['last_error']  = result['error']
+                # imports.25: record the attempt (see 304-path comment above for rationale)
+                result['updated_cfg']['last_sync_at'] = int(time.time())
                 self.log('[%s] syncOne, M3U fetch failed: %s' % (import_id, result['error']),
                          level=xbmc.LOGWARNING)
                 return result
@@ -333,6 +409,8 @@ class Imports(object):
                     result['error'] = 'M3U parse failed: %s' % e
                     result['updated_cfg']['last_status'] = 'failed'
                     result['updated_cfg']['last_error']  = result['error']
+                    # imports.25: record the attempt (see 304-path comment for rationale)
+                    result['updated_cfg']['last_sync_at'] = int(time.time())
                     self.log('[%s] syncOne, %s' % (import_id, result['error']),
                              level=xbmc.LOGWARNING)
                     return result
@@ -345,6 +423,8 @@ class Imports(object):
                         c for c in existing_channels
                         if c.get('import_source') == import_id
                     ]
+                    # imports.25: record the attempt (see 304-path comment for rationale)
+                    result['updated_cfg']['last_sync_at'] = int(time.time())
                     self.log('[%s] syncOne, %s' % (import_id, result['error']),
                              level=xbmc.LOGWARNING)
                     return result
@@ -450,7 +530,7 @@ class Imports(object):
         return result
 
 
-    def syncAll(self):
+    def syncAll(self, force_scope=None):
         """
         Sync every enabled import; cascade-allocate; merge into channels.json
         and push to in-memory M3U/XMLTV.
@@ -459,6 +539,30 @@ class Imports(object):
         Builder.buildChannels (step 3 hook) is the canonical caller — it
         holds the build lock so concurrent operator edits via Channel
         Manager are safely merged via setChannels' merge-on-write.
+
+        imports.27: `force_scope` controls per-import gate bypass:
+          - None (default) — no force; every import honors its
+            refresh_interval_min gate. Used by natural daemon cycles and
+            by any caller that doesn't want to bypass (Builder step-3
+            hook, tests).
+          - 'all' — bypass the gate for every import in this cycle. Used
+            by global kicks (batch operator edits, disable, cleanup, the
+            'Refresh all' button when no specific id is targeted).
+          - '<import_id>' — bypass the gate ONLY for the specified import;
+            others still honor their interval. Used by single-import kicks
+            (Renumber, Orphans, Refresh on a single import row).
+          - '<unknown_id>' — no match; all imports gate normally. A debug
+            log line surfaces typos.
+
+        The kick value written to chkImports.kick (server.py:982/1022/
+        1227/1299/1442/1472 + utilities.py:164) is the source of this
+        parameter — the daemon reads the value verbatim and threads it
+        through chkImports → syncAll without interpretation.
+
+        Pre-imports.27 this was a boolean `force=False/True`; the rename
+        carries scope information so a kick targeting one import doesn't
+        force-refresh the unrelated others. See plan at
+        /home/madalone/.claude/plans/dig-into-c-do-typed-kettle.md.
 
         Returns dict {import_id: per-import-result}.
         """
@@ -469,6 +573,18 @@ class Imports(object):
         if not imports:
             self.log('syncAll, no imports configured; skipping')
             return {}
+
+        # imports.27: surface typos in force_scope (debug-only). If the
+        # operator's kick value doesn't match 'all' OR any known import
+        # id, the gate falls through to normal gating (no bypass) — the
+        # operator sees "Refresh did nothing" which is the same UX as a
+        # deferred kick. The debug log line makes the typo visible without
+        # spamming for the common cases (None, 'all', valid id).
+        if force_scope is not None and force_scope != 'all':
+            known_ids = {imp.get('id') for imp in imports if imp.get('id')}
+            if force_scope not in known_ids:
+                self.log("syncAll, force_scope=%r doesn't match any known import id (typo? known: %s)"
+                         % (force_scope, sorted(known_ids)), level=xbmc.LOGDEBUG)
 
         # Snapshot existing channels (operator-built + imported)
         existing_channels = list(self.channels.getChannels() or [])
@@ -483,7 +599,176 @@ class Imports(object):
                 if self.service._interrupt():
                     self.log('syncAll, interrupted before [%s]' % iid)
                     break
+
+            # imports.25 / .27: per-import refresh-interval gate. Honors the
+            # operator-facing `refresh_interval_min` setting (saved by the
+            # dashboard's edit-import dialog at manager.html:1678). Skip this
+            # import when: enabled AND no force-bypass active AND interval > 0
+            # AND less time elapsed than interval.
+            #
+            # imports.27: `force_active` is per-import — set True only when
+            # `force_scope` matches THIS import's id specifically OR is 'all'.
+            # Pre-imports.27 a single-import kick (Renumber on import X, say)
+            # would bypass the gate for EVERY import in the cycle because
+            # `force` was a boolean stripped of scope info. The kick property
+            # already encoded scope (see server.py:1227/1299/1472 + the 4
+            # 'all' setters); now the gate uses it. Disabled imports fall
+            # through to syncOne, which already returns status='disabled'
+            # (preserves existing per_import_results shape for that case).
+            #
+            # Operator edits to imported channels (rename / logo / number /
+            # enabled / favorite / group / tombstoned) are preserved across
+            # syncs by the existing imports.20 `operator_overrides` mechanism
+            # in `_mergeChannel` and `cascadeAllocate` — imports.25 + .27 do
+            # NOT weaken that guarantee. Skipped imports trivially preserve
+            # (no merge runs); non-skipped imports go through the same merge
+            # that respected operator_overrides before. See plan in
+            # /home/madalone/.claude/plans/dig-into-c-do-typed-kettle.md.
+            force_active = (force_scope == 'all'
+                            or (force_scope is not None
+                                and force_scope == import_cfg.get('id')))
+            if (import_cfg.get('enabled', True)
+                and import_cfg.get('id')):
+                try:
+                    rim = int(import_cfg.get('refresh_interval_min') or 0)
+                except (TypeError, ValueError):
+                    rim = 0
+                try:
+                    last = int(import_cfg.get('last_sync_at') or 0)
+                except (TypeError, ValueError):
+                    last = 0
+
+                # imports.28: failure-aware retry / abandon gating.
+                #
+                # Read curve + abandon-hours from settings ONCE per cycle (cheap
+                # cached reads, but doing it inside the loop keeps the test
+                # mocks deterministic). `disabled` curve preserves pre-.28
+                # behavior exactly — gate fires at rim*60 regardless of
+                # last_status. Abandon-hours=0 means "never abandon" (default).
+                try:
+                    curve = RETRY_CURVE_BY_CODE.get(
+                        int(SETTINGS.getSettingInt('Imports_Failure_Retry_Curve') or 1),
+                        'aggressive',
+                    )
+                except Exception:
+                    curve = 'aggressive'
+                try:
+                    abandon_hours = int(SETTINGS.getSettingInt('Imports_Failure_Abandon_Hours') or 0)
+                except Exception:
+                    abandon_hours = 0
+
+                try:
+                    fail_count = int(import_cfg.get('fail_count') or 0)
+                except (TypeError, ValueError):
+                    fail_count = 0
+                try:
+                    failed_since = int(import_cfg.get('failed_since') or 0) or None
+                except (TypeError, ValueError):
+                    failed_since = None
+                last_status = import_cfg.get('last_status')
+
+                now = int(time.time())
+
+                # 1) Abandon check FIRST (precedes normal gate). When an import
+                # has been failing for >= abandon_hours, status flips to
+                # 'abandoned' and the gate skips unconditionally — operator
+                # must hit Refresh (force_scope match) to wake it back up.
+                # Bypass-on-force keeps a manual Refresh actually meaningful;
+                # without it, abandon would be a one-way trap.
+                is_abandoned = (
+                    abandon_hours > 0
+                    and failed_since
+                    and last_status == 'failed'
+                    and (now - failed_since) >= abandon_hours * 3600
+                )
+                if is_abandoned and not force_active:
+                    self.log('[%s] syncAll, abandoned: failing %ds >= %dh (force Refresh to retry)'
+                             % (iid, now - failed_since, abandon_hours), level=xbmc.LOGINFO)
+                    # 'abandoned' is a DERIVED status emitted in this result
+                    # only. We deliberately do NOT write last_status='abandoned'
+                    # into updated_cfg — storage keeps last_status='failed'
+                    # (which is still the true storage state), and the next
+                    # cycle's abandon check re-evaluates from failed_since +
+                    # the current Imports_Failure_Abandon_Hours setting.
+                    # server.py mirrors this derivation when serving the
+                    # imports list so the dashboard sees the abandoned state.
+                    per_import_results[iid] = {
+                        'import_id'  : iid,
+                        'status'     : 'abandoned',
+                        'updated_cfg': dict(import_cfg),
+                        'parsed'     : [],
+                        'new'        : [],
+                        'refreshed'  : [],
+                        'orphans'    : [],
+                        'epg_pairs' : [],
+                        'epg_id_map': {},
+                        'error'      : None,
+                    }
+                    continue
+
+                # 2) Normal gate (with failure-aware effective interval).
+                # When the import is in a consecutive-failure run, derive a
+                # shorter retry interval from the configured curve. Capped at
+                # rim*60 so operator's ceiling is honored.
+                if not force_active and rim > 0 and last > 0:
+                    effective_gate_sec = rim * 60
+                    if last_status == 'failed' and fail_count > 0:
+                        effective_gate_sec = computeRetryDelay(curve, fail_count, rim * 60)
+                    elapsed = now - last
+                    # Defensive: 0 <= elapsed guards against negative values from
+                    # clock skew (NTP step backwards, system time set manually,
+                    # etc.) — never block a sync because of a misbehaving clock.
+                    if 0 <= elapsed < effective_gate_sec:
+                        if last_status == 'failed' and fail_count > 0:
+                            self.log('[%s] syncAll, retry gate: skipped (elapsed %ds < %ds backoff, fail_count=%d, curve=%s)'
+                                     % (iid, elapsed, effective_gate_sec, fail_count, curve), level=xbmc.LOGINFO)
+                        else:
+                            self.log('[%s] syncAll, refresh-interval gate: skipped (elapsed %ds < %dm)'
+                                     % (iid, elapsed, rim), level=xbmc.LOGINFO)
+                        per_import_results[iid] = {
+                            'import_id'  : iid,
+                            'status'     : 'skipped',
+                            'updated_cfg': dict(import_cfg),
+                            'parsed'     : [],
+                            'new'        : [],
+                            'refreshed'  : [],
+                            'orphans'    : [],
+                            'epg_pairs' : [],
+                            'epg_id_map': {},
+                            'error'      : None,
+                        }
+                        continue
+
             res = self.syncOne(import_cfg, existing_channels)
+
+            # imports.28: maintain fail_count + failed_since on the resulting
+            # updated_cfg. Centralized here (not in syncOne) so all status
+            # branches converge on one tracking rule. `warning` (empty M3U
+            # with channels-kept) deliberately doesn't touch the fields —
+            # operator's channels are intact and we want normal cadence to
+            # pick up fresh content. Only `failed` (hard fetch/parse error)
+            # triggers backoff.
+            new_status = res.get('status')
+            if new_status in ('ok', 'unchanged'):
+                res['updated_cfg']['fail_count']   = 0
+                res['updated_cfg']['failed_since'] = None
+            elif new_status == 'failed':
+                try:
+                    prev_fc = int(import_cfg.get('fail_count') or 0)
+                except (TypeError, ValueError):
+                    prev_fc = 0
+                res['updated_cfg']['fail_count'] = min(prev_fc + 1, FAIL_COUNT_CAP)
+                if not import_cfg.get('failed_since'):
+                    res['updated_cfg']['failed_since'] = int(time.time())
+                else:
+                    # Preserve the original failure-run start (don't reset on
+                    # subsequent failures). The agent-validated rule: the
+                    # timer reflects how long the SOURCE has been broken,
+                    # not how recently a retry attempt failed. Operator
+                    # force-Refresh that fails again does NOT restart the
+                    # abandon clock.
+                    res['updated_cfg']['failed_since'] = int(import_cfg.get('failed_since'))
+
             per_import_results[iid] = res
             if res['status'] in ('ok', 'unchanged'):
                 parsed_imports_for_cascade.append((res['updated_cfg'], res['parsed']))
@@ -1001,9 +1286,48 @@ class Imports(object):
             except Exception as e:
                 self.log('syncAll, M3U force-flush failed: %s' % e, level=xbmc.LOGWARNING)
 
-        # Trigger PVR refresh after Builder cycle commits
-        try: PROPERTIES.setPropTimer('chkPVRRefresh')
-        except Exception: pass
+        # imports.22: only signal chkPVRRefresh when this syncAll cycle actually
+        # changed disk state. Three change-signals jointly describe "bytes on disk
+        # differ from before this cycle":
+        #   (a) any syncOne returned status='ok' — a fresh HTTP 200 was fetched +
+        #       parsed. Content MAY still be byte-identical to the prior cycle (server
+        #       didn't honour ETag/If-Modified-Since) but cheap to over-signal vs.
+        #       byte-comparing multi-MB M3U/XMLTV bodies.
+        #   (b) any tombstone was processed — `deleted_ids` (computed at line 651) is
+        #       the union of `import_cfg['tombstones']` across all imports;
+        #       bool(deleted_ids) means setChannels' merge-on-write either stripped
+        #       records or carried deletion markers forward — either way,
+        #       channels.json changed.
+        #   (c) any reconcile observed orphans — `res['orphans']` is the diff between
+        #       parsed-now and existing channels for an import; non-empty means
+        #       is_orphan=True got written to channels.json.
+        # All-'unchanged'/'disabled' AND no tombstones AND no orphans is the genuine
+        # no-op cycle: every import returned HTTP 304, no operator deletion, nothing
+        # fell out of source. Skipping setPropTimer here is correctness-safe because:
+        #   - chkImports already runs every 5 min on its own daemon;
+        #   - iptvsimple polls m3uUrl every m3uRefreshIntervalMins (default 15)
+        #     regardless of whether we signal it;
+        #   - this signal's only consumer (tasks.py:802 chkPVRRefresh) calls PVRScan
+        #     (no-op against iptvsimple) and, until imports.22, bounced our HTTP
+        #     server (also no-op against iptvsimple).
+        # Reduces _chkPropTimer ticks, downstream queue churn, and the PVRScan
+        # JSON-RPC round-trip on every cycle. Genuine state-change callers of
+        # setPropTimer('chkPVRRefresh') outside syncAll (builder.py:477,
+        # manager.py:1045, context_record.py:58/76, multiroom.py:165, kodi.py:519,
+        # default.py:64, tasks.py:798) are NOT changed — they fire from paths that
+        # always mutate state, so their unconditional signal is correct.
+        changed = (
+            any(r.get('status') == 'ok' for r in per_import_results.values())
+            or bool(deleted_ids)
+            or any(r.get('orphans') for r in per_import_results.values())
+        )
+        if changed:
+            try: PROPERTIES.setPropTimer('chkPVRRefresh')
+            except Exception: pass
+        else:
+            self.log('syncAll, no disk change this cycle — skipping chkPVRRefresh signal '
+                     '(all imports status=unchanged/disabled, no tombstones, no orphans)',
+                     level=xbmc.LOGINFO)
 
         # Summary log
         for iid, res in per_import_results.items():
