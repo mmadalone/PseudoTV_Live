@@ -23,6 +23,7 @@ from zeroconf                  import *
 from globals                   import *
 from channels                  import Channels, markOverrides
 from filter_helpers             import META_ONLY_FIELDS
+from sysinfo_helpers            import resolveKodiOSVersion
 from resources                 import Resources
 from six.moves.BaseHTTPServer  import BaseHTTPRequestHandler, HTTPServer
 from six.moves.socketserver    import ThreadingMixIn
@@ -57,8 +58,8 @@ def _safe_filename(path, prefix):
 
 
 def _build_sysinfo_payload():
-    """Build the System Info payload (same logic as the on-demand endpoint).
-    Used by both the GET handler (fallback) and the pre-warm daemon thread.
+    """Build the System Info payload for /api/system/info.json. Called on
+    cache miss in the do_GET handler (35s on-demand cache).
     """
     import platform as _platform
     from jsonrpc  import JSONRPC
@@ -80,7 +81,7 @@ def _build_sysinfo_payload():
         'addon_name'            : ADDON_NAME,
         'addon_version'         : ADDON_VERSION,
         'kodi_build_version'    : labels.get('System.BuildVersion'),
-        'kodi_os_version'       : labels.get('System.OSVersionInfo'),
+        'kodi_os_version'       : resolveKodiOSVersion(labels.get('System.OSVersionInfo')),
         'remote_host'           : PROPERTIES.getRemoteHost(),
         'uuid'                  : SETTINGS.getMYUUID(),
         'machine'               : _platform.machine(),
