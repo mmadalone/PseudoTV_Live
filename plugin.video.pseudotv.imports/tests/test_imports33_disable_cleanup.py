@@ -517,16 +517,12 @@ def test_server_edit_renderCleanedFiles_NOT_called_on_metadata_only():
 # Backward-compat / regression guards
 # ============================================================
 
-def test_addon_version_bumped():
-    """Version string in addon.xml must reflect imports.33."""
-    src = _read(os.path.join(LIB, '..', '..', 'addon.xml'))
-    assert 'version="0.8.0+imports.33"' in src, (
-        "imports.33: addon.xml version must be bumped to 0.8.0+imports.33"
-    )
-
-
 def test_changelog_has_imports_33_entry():
-    """changelog.txt must have an imports.33 entry at the top."""
+    """changelog.txt must include the imports.33 entry — durable
+    assertion across future cycle bumps. The addon.xml version-string
+    check that previously lived here (`version="0.8.0+imports.33"`)
+    was a cycle-specific footgun — it broke when imports.34 shipped.
+    The changelog entry is the durable record."""
     src = _read(os.path.join(LIB, '..', '..', 'changelog.txt'))
     assert 'v.0.8.0+imports.33' in src, (
         "imports.33: changelog.txt must include the imports.33 entry"

@@ -17,18 +17,19 @@
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 # -*- coding: utf-8 -*-
 
-from globals    import *
-from cache      import Cache
-from library    import Library 
-from channels   import Channels, markOverrides
-from jsonrpc    import JSONRPC
-from rules      import RulesList
-from resources  import Resources
-from multiroom  import Multiroom
-from xsp        import XSP
-from builder    import Builder
-from predefined import Predefined
-from backup     import Backup
+from globals        import *
+from cache          import Cache
+from library        import Library
+from channels       import Channels, markOverrides
+from filter_helpers import META_ONLY_FIELDS  # imports.34: single source of truth for fast-path classification (mirrors server.py:25)
+from jsonrpc        import JSONRPC
+from rules          import RulesList
+from resources      import Resources
+from multiroom      import Multiroom
+from xsp            import XSP
+from builder        import Builder
+from predefined     import Predefined
+from backup         import Backup
 from infotagger.listitem import ListItemInfoTag
 
 # Actions
@@ -413,12 +414,30 @@ class Manager(xbmcgui.WindowXMLDialog):
                      "enabled"  : {'func':__getBool  , 'kwargs':{'citem':citem, 'state' :citem.get('enabled',True)}},
                      "changed"  : {'func':__getBool  , 'kwargs':{'citem':citem, 'state' :citem.get('changed',False)}}}
               
-        action = KEY_INPUT.get(key) 
+        action = KEY_INPUT.get(key)
         retval, citem = action['func'](*action.get('args',()),**action.get('kwargs',{}))
         retval, citem = self.validateInputs(key,retval,citem)
         if not retval is None:
-            citem['changed']    = value != retval
             self.madeItemchange = value != retval
+            # imports.34: classify the edit so Builder's metadata-only
+            # fast-path (imports.30, builder.py:313 __renderMetadataOnly)
+            # fires on the very next chkChanged tick (~3s) instead of
+            # waiting for imports.29 drift detection (one chkChannels-
+            # cycle latency, up to 5 min). Reachable META keys via
+            # itemInput are name/group/favorite — number/logo/catchup
+            # are excluded at buildChannelItem line 341 and have their
+            # own handlers (switchLogo, moveChannel). NOTE: the prior
+            # `citem['changed'] = value != retval` line is intentionally
+            # dropped — it was setting changed=False on the transient
+            # citem when no edit happened (a local-only mutation;
+            # newChannels state is updated by saveChannelItems gated on
+            # madeItemchange, so the False-set was a no-op for the
+            # persisted record).
+            if value != retval:
+                if key in META_ONLY_FIELDS:
+                    citem['metadata_changed'] = True
+                else:
+                    citem['changed'] = True
             if key in list(self.newChannel.keys()):
                 citem[key] = retval
                 # imports.20: mark the operator-edited field so Builder._verify
@@ -906,6 +925,12 @@ class Manager(xbmcgui.WindowXMLDialog):
             # imports.20: mark 'logo' so Builder._verify skips getLogo on the
             # next rebuild and Manager.setLogo skips re-derive on rename.
             markOverrides(channelData, 'logo')
+            # imports.34: logo is in META_ONLY_FIELDS — route to Builder's
+            # fast-path immediately (saves up to 5 min vs imports.29 drift
+            # detection). switchLogo does NOT call saveChannelItems, so the
+            # saveChannelItems policy change (step E) wouldn't reach this
+            # path — the flag must be set here directly.
+            channelData['metadata_changed'] = True
             self.newChannels[channelPOS] = channelData
             self.fillChanList(self.newChannels,refresh=True,focus=channelPOS)
 
@@ -991,6 +1016,12 @@ class Manager(xbmcgui.WindowXMLDialog):
                             tmpItem['number'] = channelPOS + 1
                             self.newChannels[channelPOS] = tmpItem
                             citem['number'] = retval
+                            # imports.34: number is in META_ONLY_FIELDS — route
+                            # to Builder's fast-path immediately. Must be set
+                            # BEFORE saveChannelItems so its imports.34 policy
+                            # preserves it (otherwise it would default to
+                            # changed=True for the "no flag set" case).
+                            citem['metadata_changed'] = True
                             self.saveChannelItems(citem)
             
 
@@ -1013,7 +1044,19 @@ class Manager(xbmcgui.WindowXMLDialog):
             self.madeChanges = True
             with self.toggleSpinner(condition=PROPERTIES.isRunning('Manager.toggleSpinner')==False):
                 self.madeItemchange = False
-                citem['changed'] = True
+                # imports.34: policy shift — preserve whichever rebuild flag the
+                # caller (itemInput, moveChannel, clearChannel) set; default to
+                # changed=True (full rebuild) only when neither flag is set.
+                # This makes Builder's metadata-only fast-path (imports.30)
+                # reachable from the Channel Manager (was: drift-detection
+                # fallback only, up to chkChannels-cycle latency). Mirrors the
+                # server.py /channels/edit.json classification in spirit —
+                # explicit-set wins, else default to "more rebuild, not less."
+                # clearChannel produces a blank tmpItem with neither flag set,
+                # so it falls into the default branch and gets a full rebuild
+                # (correct: wiped channel needs to start fresh).
+                if not (citem.get('changed') or citem.get('metadata_changed')):
+                    citem['changed'] = True
                 self.newChannels[citem['number'] - 1] = citem
         self.fillChanList(self.newChannels,True,(citem['number'] - 1),citem if open else None)
         return citem
