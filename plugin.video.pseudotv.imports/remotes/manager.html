@@ -526,6 +526,8 @@
                         <div style="display:flex;gap:6px;">
                             <input type="text" id="cf-logo">
                             <button class="btn-action" data-action="browse-for" data-target="cf-logo" title="Browse Kodi VFS">📁</button>
+                            <button class="btn-action" data-action="upload-logo" data-target="cf-logo" title="Upload from device (imports.36)">📤</button>
+                            <input type="file" class="logo-upload-input" accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.ico,.bmp" style="display:none;">
                         </div>
                     </div>
                     <div class="cf-row-wide"><label>Source path</label>
@@ -1942,6 +1944,8 @@
                 <div class="ile-input-row">
                     <input type="text" class="ile-input" value="${escapeHtml(value)}" placeholder="https://… or special://…">
                     <button class="btn-action" data-action="browse-for" data-target="ile-input-${escapeHtml(cid)}" title="Browse Kodi VFS">📁</button>
+                    <button class="btn-action" data-action="upload-logo" data-target="ile-input-${escapeHtml(cid)}" data-cid="${escapeHtml(cid)}" title="Upload from device (imports.36)">📤</button>
+                    <input type="file" class="logo-upload-input" accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.ico,.bmp" style="display:none;">
                 </div>
                 <div class="ile-actions">
                     <button class="btn-action ile-cancel">Cancel</button>
@@ -2622,6 +2626,56 @@
             if (!btn) return;
             const inp = document.getElementById(btn.dataset.target);
             if (inp) openPathBrowser(inp, inp.value, btn);
+        });
+        // imports.36: upload-logo: 📤 buttons next to logo inputs open the
+        // sibling hidden <input type=file>, read the chosen file via
+        // FileReader, base64-encode, POST to /channels/logo/upload.json,
+        // and update the target input with the server-returned special://
+        // path. Channel context comes from `data-cid` on the button OR (for
+        // the cf-* modal which doesn't render per row) the global
+        // CF_CURRENT_CID. 5 MB hard cap client-side mirrors the server cap.
+        document.body.addEventListener('click', async (ev) => {
+            const btn = ev.target.closest('[data-action="upload-logo"]');
+            if (!btn) return;
+            const inputId = btn.dataset.target;
+            const cid = btn.dataset.cid || (typeof CF_CURRENT_CID !== 'undefined' ? CF_CURRENT_CID : null);
+            if (!cid) { toast('No channel context for upload', 'err'); return; }
+            const fileInput = btn.parentElement.querySelector('.logo-upload-input');
+            if (!fileInput) { toast('Upload input missing', 'err'); return; }
+            fileInput.value = '';   // clear prior selection so onchange fires for same file
+            fileInput.onchange = async () => {
+                const file = fileInput.files && fileInput.files[0];
+                if (!file) return;
+                if (file.size > 5 * 1024 * 1024) { toast('File too big (>5 MB)', 'err'); return; }
+                let b64;
+                try {
+                    b64 = await new Promise((resolve, reject) => {
+                        const r = new FileReader();
+                        r.onload  = () => resolve((r.result || '').toString().split(',', 2)[1] || '');
+                        r.onerror = () => reject(r.error);
+                        r.readAsDataURL(file);
+                    });
+                } catch (e) { toast('Read error: ' + e, 'err'); return; }
+                try {
+                    const res = await fetch(`http://${REMOTE_HOST}/channels/logo/upload.json`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({uuid: UUID, channel_id: cid, filename: file.name, content_b64: b64}),
+                    });
+                    if (!res.ok) { toast('Upload failed: ' + res.status, 'err'); return; }
+                    const data = await res.json();
+                    const inp = document.getElementById(inputId);
+                    if (inp && data.logo) {
+                        inp.value = data.logo;
+                        inp.dispatchEvent(new Event('input',  {bubbles: true}));
+                        inp.dispatchEvent(new Event('change', {bubbles: true}));
+                    }
+                    toast('Logo uploaded', 'ok');
+                } catch (e) {
+                    toast('Upload error: ' + e, 'err');
+                }
+            };
+            fileInput.click();
         });
         // Hash routing on load.
         const hash = (location.hash || '').replace(/^#tab-/, '');

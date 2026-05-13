@@ -897,10 +897,15 @@ class Manager(xbmcgui.WindowXMLDialog):
             with self.toggleSpinner(condition=PROPERTIES.isRunning('Manager.toggleSpinner')==False):
                 chname = channelData.get('name')
                 retval = DIALOG.browseSources(type=1,heading='%s (%s)'%(LANGUAGE(32066).split('[CR]')[0],chname), default=channelData.get('icon',''), shares='files', mask=xbmc.getSupportedMedia('picture'), exclude=[12,13,14,15,16,17,21,22])
-            if FileAccess.copy(__cleanLogo(retval), os.path.join(LOGO_LOC,'%s%s'%(chname,retval[-4:])).replace('\\','/')): 
-                if FileAccess.exists(os.path.join(LOGO_LOC,'%s%s'%(chname,retval[-4:])).replace('\\','/')): 
-                    return os.path.join(LOGO_LOC,'%s%s'%(chname,retval[-4:])).replace('\\','/')
-            return retval
+            # imports.36: delegate the copy semantics to logo_helpers.copyToLogoLoc
+            # so the in-Kodi UI and the dashboard's /channels/edit.json path
+            # produce identical end states. The helper handles URL/resource://
+            # pass-through, idempotent re-saves (source already in LOGO_LOC),
+            # missing-source preservation, sanitization, and the canonical
+            # special:// return path. Previously inline at this site; the
+            # duplicated logic is gone.
+            from logo_helpers import copyToLogoLoc
+            return copyToLogoLoc(__cleanLogo(retval), chname, log_fn=lambda m: self.log(m))
             
         def __match():
             with self.toggleSpinner(condition=PROPERTIES.isRunning('Manager.toggleSpinner')==False):

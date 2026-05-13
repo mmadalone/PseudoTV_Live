@@ -618,6 +618,30 @@ class MyHandler(BaseHTTPRequestHandler):
                             if k in fields: fields[k] = bool(fields[k])
                         for k, v in fields.items():
                             target[k] = v
+                        # imports.36: parity with manager.py:switchLogo.__browse —
+                        # when the operator sets a logo path via the dashboard's
+                        # text input + 📁 Kodi-VFS browser, COPY the file into
+                        # LOGO_LOC for resilience (independent of the source's
+                        # lifecycle). Mirrors the in-Kodi UI's existing copy
+                        # behavior so both UIs produce the same end state. URLs
+                        # / resource:// / paths already inside LOGO_LOC are
+                        # passed through unchanged by the helper. Wrapped in
+                        # try/except so a copy failure doesn't 500 the edit —
+                        # operator's chosen path stays in channels.json (might
+                        # be a non-file URL they intend to reference).
+                        if 'logo' in fields:
+                            try:
+                                from logo_helpers import copyToLogoLoc
+                                copied = copyToLogoLoc(
+                                    fields['logo'],
+                                    target.get('name', ''),
+                                    log_fn=lambda m: self.log(m, xbmc.LOGINFO),
+                                )
+                                if copied != fields['logo']:
+                                    fields['logo'] = copied
+                                    target['logo'] = copied
+                            except Exception as _ce:
+                                self.log('do_POST /channels/edit.json: logo auto-copy failed: %s' % (_ce), xbmc.LOGWARNING)
                         # imports.20: mark every operator-edited field in
                         # operator_overrides so Builder._verify / Manager.setLogo
                         # respect the operator's pick. Mirrors the inline pattern
@@ -695,6 +719,52 @@ class MyHandler(BaseHTTPRequestHandler):
                     except Exception as e:
                         self.log('do_POST channels/edit.json failed: %s'%(e), xbmc.LOGERROR)
                         self.send_error(500, "Failed to edit channel: %s"%(e))
+                # imports.36: POST /channels/logo/upload.json — accept a
+                # base64-encoded image from the dashboard's local-file picker,
+                # write it into LOGO_LOC via logo_helpers.writeUploadedLogo,
+                # return the new special:// path. Client then POSTs
+                # /channels/edit.json with `fields: {logo: <returned_path>}`
+                # to actually associate the logo with the channel. Two-step
+                # flow keeps each endpoint simple. Body:
+                #   {uuid, channel_id, filename, content_b64}
+                # base64-in-JSON over multipart because Python 3.13 deprecates
+                # cgi.FieldStorage; logos are small (<200 KB typical, 5 MB
+                # hard cap) so the ~33% size overhead is fine.
+                elif self.path.split('?', 1)[0].lower() == '/channels/logo/upload.json':
+                    try:
+                        channel_id  = incoming.get('channel_id')
+                        filename    = incoming.get('filename') or ''
+                        content_b64 = incoming.get('content_b64') or ''
+                        if not channel_id or not content_b64:
+                            self.send_error(400, "channel_id + content_b64 required"); return
+                        try:
+                            file_bytes = base64.b64decode(content_b64, validate=True)
+                        except Exception:
+                            self.send_error(400, "content_b64 invalid"); return
+                        channels = Channels()
+                        target = next((c for c in (channels.getChannels() or [])
+                                       if c.get('id') == channel_id), None)
+                        del channels
+                        if target is None:
+                            self.send_error(404, "channel_id not found"); return
+                        from logo_helpers import writeUploadedLogo
+                        new_path = writeUploadedLogo(
+                            file_bytes,
+                            target.get('name', ''),
+                            filename,
+                            log_fn=lambda m: self.log(m, xbmc.LOGINFO),
+                        )
+                        if not new_path:
+                            self.send_error(500, "logo upload write failed (size/ext/permissions)"); return
+                        body = ('{"ok":true,"logo":"%s"}' % new_path).encode('utf-8')
+                        self.send_response(200, "OK")
+                        self.send_header("Content-Type", "application/json")
+                        self.send_header("Content-Length", str(len(body)))
+                        self.end_headers()
+                        self.wfile.write(body)
+                    except Exception as e:
+                        self.log('do_POST /channels/logo/upload.json failed: %s' % (e), xbmc.LOGERROR)
+                        self.send_error(500, "logo upload failed: %s" % (e))
                 # imports fork (madteevee) — Step 6 Phase 2:
                 # POST /api/settings/save.json — batch-apply addon settings.
                 # Body: {uuid, changes: {setting_id: new_value, ...}}.
