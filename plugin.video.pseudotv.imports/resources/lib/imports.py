@@ -1804,24 +1804,59 @@ class Imports(object):
         return target
 
     def _evictOrphanLogos(self, active_channel_ids):
-        """Remove cache/logos/ files for channel ids no longer present."""
+        """Remove cache/logos/ files for channel ids no longer present.
+
+        imports.35: extended the "keep" predicate to also preserve any
+        file currently referenced by a channel record's `logo` field in
+        channels.json. Without this, operator-uploaded custom logos
+        (added via manager.py:switchLogo.__browse at manager.py:900,
+        which copies to cache/logos/<chname>.<ext>) were treated as
+        orphans because their filename stem (e.g., "TMNT") doesn't match
+        any active import id (e.g., "TVLand.us@epgbest_46477"). Net
+        effect pre-fix: every syncAll cycle wiped operator-uploaded
+        Custom-channel logos. Naming-convention agnostic — works
+        whether the file is named by channel-id (imports cache) or by
+        channel-name (switchLogo.__browse).
+        """
         try:
             cache_dir = self._logoCacheDir()
             if not os.path.isdir(cache_dir):
                 return 0
             active = set(active_channel_ids or ())
+
+            # imports.35: cross-reference channels.json's logo fields to
+            # protect operator-uploaded customs (and any other valid
+            # referenced file) from eviction. Build the set of basenames
+            # currently referenced by ANY channel's logo field that
+            # points into cache/logos/. Wrapped in try/except so a
+            # channels-layer failure falls back to today's behavior
+            # (no regression — just no new protection).
+            referenced_basenames = set()
+            try:
+                for ch in (self.channels.getChannels() or []):
+                    logo = ch.get('logo') or ''
+                    if isinstance(logo, str) and 'cache/logos/' in logo:
+                        referenced_basenames.add(os.path.basename(logo))
+            except Exception as e:
+                self.log('_evictOrphanLogos, channels cross-ref failed: %s'
+                         % e, level=xbmc.LOGWARNING)
+
             removed = 0
             for name in os.listdir(cache_dir):
                 if name.startswith('.') or name.endswith('.tmp'):
                     continue
                 # filename = <channel_id>.<ext>
                 cid = name.rsplit('.', 1)[0]
-                if cid and cid not in active:
-                    try:
-                        os.unlink(os.path.join(cache_dir, name))
-                        removed += 1
-                    except Exception:
-                        pass
+                if cid and cid in active:
+                    continue
+                # imports.35: keep if any channel record references this file.
+                if name in referenced_basenames:
+                    continue
+                try:
+                    os.unlink(os.path.join(cache_dir, name))
+                    removed += 1
+                except Exception:
+                    pass
             if removed:
                 self.log('_evictOrphanLogos, removed %d orphan logo file(s)'
                          % removed, level=xbmc.LOGINFO)

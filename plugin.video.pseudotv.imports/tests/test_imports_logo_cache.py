@@ -226,3 +226,159 @@ def test_evictOrphanLogos_safe_when_dir_missing(tmp_path, monkeypatch):
     monkeypatch.setattr('imports.CACHE_LOC', str(nested))
     imp = Imports()
     assert imp._evictOrphanLogos({'whatever'}) == 0
+
+
+# ============================================================ imports.35 — keep files referenced by channels.json
+
+
+class _FakeChannels:
+    """Minimal stand-in for the Channels class — `_evictOrphanLogos` only
+    needs `getChannels()`. Imports(channels=None) default is None, so we
+    inject a fake explicitly for the imports.35 tests."""
+    def __init__(self, channels=None, raise_on_get=False):
+        self._channels = channels or []
+        self._raise = raise_on_get
+    def getChannels(self):
+        if self._raise:
+            raise RuntimeError("channels layer down")
+        return self._channels
+
+
+def _stub_channels(imp, channels, raise_on_get=False):
+    """Helper: attach a fake Channels wrapper that returns controlled records."""
+    imp.channels = _FakeChannels(channels=channels, raise_on_get=raise_on_get)
+
+
+def test_evictOrphanLogos_keeps_operator_upload_referenced_by_chname(tmp_path, monkeypatch):
+    """imports.35 — operator-uploaded custom logo (filename = chname like
+    'TMNT.png', NO @<import_id> suffix) survives eviction when a channel
+    record references it. This is the core bug fix: pre-imports.35
+    Custom-channel uploads via switchLogo __browse got wiped on every
+    syncAll cycle."""
+    monkeypatch.setattr('imports.CACHE_LOC', str(tmp_path))
+    imp = Imports()
+    logos_dir = tmp_path / 'logos'
+    logos_dir.mkdir()
+    (logos_dir / 'TMNT.png').write_bytes(b'OPERATOR_UPLOAD')
+    (logos_dir / 'TVLand.us@epgbest_46477.png').write_bytes(b'IMPORT_CACHE')
+    _stub_channels(imp, [
+        {'id': 'abc@PseudoTV_Live',
+         'logo': 'special://profile/addon_data/plugin.video.pseudotv.imports/cache/logos/TMNT.png'},
+        {'id': 'TVLand.us@epgbest_46477',
+         'logo': 'special://profile/addon_data/plugin.video.pseudotv.imports/cache/logos/TVLand.us@epgbest_46477.png'},
+    ])
+    removed = imp._evictOrphanLogos({'TVLand.us@epgbest_46477'})  # active = imports only
+    assert removed == 0, "Both files must survive (one via active set, one via referenced_basenames)"
+    assert (logos_dir / 'TMNT.png').exists()
+    assert (logos_dir / 'TVLand.us@epgbest_46477.png').exists()
+
+
+def test_evictOrphanLogos_evicts_truly_orphan_file(tmp_path, monkeypatch):
+    """imports.35 — a file in cache/logos/ with no channel reference AND
+    no active id match still gets deleted. The new check ADDS protection;
+    it doesn't suppress legitimate eviction."""
+    monkeypatch.setattr('imports.CACHE_LOC', str(tmp_path))
+    imp = Imports()
+    logos_dir = tmp_path / 'logos'
+    logos_dir.mkdir()
+    (logos_dir / 'truly_orphan.png').write_bytes(b'NOBODY_OWNS_ME')
+    _stub_channels(imp, [])
+    removed = imp._evictOrphanLogos(set())
+    assert removed == 1
+    assert not (logos_dir / 'truly_orphan.png').exists()
+
+
+def test_evictOrphanLogos_no_double_count_on_active_AND_referenced(tmp_path, monkeypatch):
+    """imports.35 — file whose chid is in active set AND its basename is
+    referenced by a channel's logo field gets kept exactly once. Both
+    checks are skip-on-match; neither tries to count or unlink twice."""
+    monkeypatch.setattr('imports.CACHE_LOC', str(tmp_path))
+    imp = Imports()
+    logos_dir = tmp_path / 'logos'
+    logos_dir.mkdir()
+    (logos_dir / 'TVLand.us@epgbest_46477.png').write_bytes(b'IMPORT_CACHE')
+    _stub_channels(imp, [
+        {'id': 'TVLand.us@epgbest_46477',
+         'logo': 'special://profile/addon_data/plugin.video.pseudotv.imports/cache/logos/TVLand.us@epgbest_46477.png'},
+    ])
+    removed = imp._evictOrphanLogos({'TVLand.us@epgbest_46477'})
+    assert removed == 0
+    assert (logos_dir / 'TVLand.us@epgbest_46477.png').exists()
+
+
+def test_evictOrphanLogos_handles_logo_field_outside_cache_dir(tmp_path, monkeypatch):
+    """imports.35 — `referenced_basenames` build filters on
+    `'cache/logos/' in logo`. A channel record pointing at a logo file
+    OUTSIDE cache/logos/ (e.g., `special://home/addons/.../TVLand.png`)
+    does NOT add `TVLand.png` to the protected set. A file named
+    `TVLand.png` happening to sit in cache/logos/ then gets evicted as
+    a true orphan (correct — no record points at it)."""
+    monkeypatch.setattr('imports.CACHE_LOC', str(tmp_path))
+    imp = Imports()
+    logos_dir = tmp_path / 'logos'
+    logos_dir.mkdir()
+    (logos_dir / 'TVLand.png').write_bytes(b'ORPHAN_IN_CACHE')
+    _stub_channels(imp, [
+        # Logo references a file OUTSIDE cache/logos/
+        {'id': 'TVLand.us@epgbest_46477',
+         'logo': 'special://home/addons/resource.images.pseudotv.logos.madteevee/resources/TVLand.png'},
+    ])
+    removed = imp._evictOrphanLogos(set())
+    assert removed == 1
+    assert not (logos_dir / 'TVLand.png').exists()
+
+
+def test_evictOrphanLogos_handles_None_logo_field(tmp_path, monkeypatch):
+    """imports.35 — channel record with `'logo': None` (or missing) doesn't
+    crash the cross-ref build. `logo or ''` handles None gracefully."""
+    monkeypatch.setattr('imports.CACHE_LOC', str(tmp_path))
+    imp = Imports()
+    logos_dir = tmp_path / 'logos'
+    logos_dir.mkdir()
+    (logos_dir / 'TMNT.png').write_bytes(b'OPERATOR_UPLOAD')
+    _stub_channels(imp, [
+        {'id': 'no_logo@PseudoTV_Live', 'logo': None},
+        {'id': 'no_logo_key@PseudoTV_Live'},  # no 'logo' key at all
+        {'id': 'real@PseudoTV_Live',
+         'logo': 'special://profile/addon_data/plugin.video.pseudotv.imports/cache/logos/TMNT.png'},
+    ])
+    removed = imp._evictOrphanLogos(set())
+    assert removed == 0  # TMNT.png protected via referenced_basenames
+    assert (logos_dir / 'TMNT.png').exists()
+
+
+def test_evictOrphanLogos_handles_channels_exception(tmp_path, monkeypatch):
+    """imports.35 — if channels.getChannels() raises, the cross-ref build
+    falls back to today's behavior (no referenced_basenames, just active
+    set). No regression vs pre-imports.35."""
+    monkeypatch.setattr('imports.CACHE_LOC', str(tmp_path))
+    imp = Imports()
+    logos_dir = tmp_path / 'logos'
+    logos_dir.mkdir()
+    (logos_dir / 'TMNT.png').write_bytes(b'OPERATOR_UPLOAD')
+
+    _stub_channels(imp, None, raise_on_get=True)
+
+    # Without referenced_basenames protection, TMNT.png (not in active set)
+    # falls through to eviction — matches pre-imports.35 behavior.
+    removed = imp._evictOrphanLogos(set())
+    assert removed == 1
+    assert not (logos_dir / 'TMNT.png').exists()
+
+
+def test_evictOrphanLogos_keeps_import_with_active_id_after_imports_35(tmp_path, monkeypatch):
+    """imports.35 regression — the existing active_channel_ids skip still
+    works after the patch. Empty channels list (cross-ref produces empty
+    referenced_basenames). Verify the original behavior is preserved
+    when only the active set is in play."""
+    monkeypatch.setattr('imports.CACHE_LOC', str(tmp_path))
+    imp = Imports()
+    logos_dir = tmp_path / 'logos'
+    logos_dir.mkdir()
+    (logos_dir / 'keep@s1.png').write_bytes(b'A')
+    (logos_dir / 'remove@s1.png').write_bytes(b'B')
+    _stub_channels(imp, [])  # no records → empty referenced_basenames
+    removed = imp._evictOrphanLogos({'keep@s1'})
+    assert removed == 1
+    assert (logos_dir / 'keep@s1.png').exists()
+    assert not (logos_dir / 'remove@s1.png').exists()
