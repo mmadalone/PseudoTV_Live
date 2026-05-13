@@ -485,6 +485,29 @@ class Builder(object):
                                     citem['metadata_changed'] = False
                             _update, start = __needsUpdate(citem, now, fallback)
                             _changed = __hasChanged(citem, enableChanged)
+                            # imports.31: when __hasChanged=True, __clrStation
+                            # (line 290 inside __hasChanged) just wiped this
+                            # channel's M3U entry + all programmes. The `start`
+                            # value captured by __needsUpdate above reflects
+                            # the PRE-clear last_stop, which can be far in the
+                            # future when the prior schedule already extended
+                            # N days out. Using a future `start` as the new
+                            # schedule anchor leaves a gap between `now` and
+                            # the first new programme; the next chkChannels
+                            # cycle then re-triggers __needsUpdate to fill the
+                            # gap (wasted ~9-min rebuild). After a wipe, the
+                            # anchor must be `now` (bottom-of-hour aligned to
+                            # match the existing programme-grid convention
+                            # established by `nstart` at line 429 + xmltvs.
+                            # loadStopTimes fallback semantics at xmltvs.py:
+                            # 266). NO change for the _update-only path
+                            # (extend without wipe) — that path correctly
+                            # anchors at last_stop, which preserves catchup
+                            # semantics (catchup_mode='vod' intentionally
+                            # schedules past programmes per
+                            # project_imports_catchup memory).
+                            if _changed:
+                                start = roundTimeDown(now, offset=60)
                             self.log('[%s] buildChannels, preview = %s, rules = %s, _update = %s'%(citem['id'],preview,citem.get('rules',{}),_update))
                             if self.service._interrupt():
                                 self.log("[%s] buildChannels, _interrupt"%(citem['id']))
