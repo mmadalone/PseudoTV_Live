@@ -249,8 +249,16 @@
         .channel-row { display: flex; align-items: center; gap: 6px; padding: 2px 4px; font-size: 0.8rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
         .channel-row.disabled { opacity: 0.45; }
         .channel-row.row-hidden { display: none; }
-        .channel-row .row-logo { width: 26px; height: 26px; object-fit: contain; background: rgba(0,0,0,0.35); border-radius: 3px; flex-shrink: 0; }
+        .channel-row .row-logo { width: 26px; height: 26px; object-fit: contain; background: rgba(0,0,0,0.35); border-radius: 3px; flex-shrink: 0; cursor: zoom-in; }
         .channel-row .row-logo.broken { display: none; }
+
+        /* imports.39: full-size logo preview lightbox. Click any .row-logo
+           thumbnail in the channel lists to open. Click anywhere on the
+           overlay (or press Escape) to close. */
+        .logo-preview-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 9999; display: none; align-items: center; justify-content: center; cursor: zoom-out; }
+        .logo-preview-overlay.open { display: flex; }
+        .logo-preview-overlay img { max-width: 90vw; max-height: 90vh; box-shadow: 0 8px 40px rgba(0,0,0,0.65); background: rgba(0,0,0,0.25); border-radius: 6px; }
+        .logo-preview-overlay .logo-preview-caption { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); color: var(--pstv-accent); font-size: 0.8rem; opacity: 0.7; pointer-events: none; }
         .channel-row .row-logo-slot { width: 26px; height: 26px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
         /* Drag-to-reorder (single-import). The grip is the actual draggable
            element so the inputs inside the row stay clickable. */
@@ -2677,6 +2685,34 @@
             };
             fileInput.click();
         });
+        // imports.39: logo lightbox. Click any .row-logo thumbnail to
+        // open a full-size preview overlay. Click overlay or press
+        // Escape to close. Pure UX — no server interaction.
+        document.body.addEventListener('click', (ev) => {
+            const img = ev.target.closest('.row-logo');
+            if (!img || img.classList.contains('broken')) return;
+            const overlay = document.getElementById('logo-preview-overlay');
+            const overlayImg = overlay?.querySelector('img');
+            const caption = overlay?.querySelector('.logo-preview-caption');
+            if (!overlay || !overlayImg) return;
+            overlayImg.src = img.src;
+            if (caption) {
+                // Show the channel name from the row, if available.
+                const row = img.closest('.channel-row');
+                const nameInp = row?.querySelector('.name input[type=text]');
+                caption.textContent = (nameInp?.value || '').trim() || '';
+            }
+            overlay.classList.add('open');
+            ev.stopPropagation();
+        });
+        document.getElementById('logo-preview-overlay')?.addEventListener('click', () => {
+            document.getElementById('logo-preview-overlay').classList.remove('open');
+        });
+        document.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Escape') {
+                document.getElementById('logo-preview-overlay')?.classList.remove('open');
+            }
+        });
         // Hash routing on load.
         const hash = (location.hash || '').replace(/^#tab-/, '');
         const validTabs = new Set(['channels', 'imports', 'guide', 'info', 'settings']);
@@ -2685,5 +2721,12 @@
         // Initial imports fetch fires inside navigateTab().
     };
 </script>
+
+<!-- imports.39: full-size logo preview overlay. Hidden by default; toggled
+     by .open class via the JS click handler above. -->
+<div class="logo-preview-overlay" id="logo-preview-overlay" role="dialog" aria-hidden="true">
+    <img alt="">
+    <div class="logo-preview-caption"></div>
+</div>
 </body>
 </html>
