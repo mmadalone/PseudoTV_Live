@@ -337,7 +337,13 @@ class XMLTVS(object):
             # carried the orphan + 181 programmes).
             # `None` on lookup failure → cross-reference disabled → falls
             # back to today's namespace+length filter (no regression).
-            live_channel_ids = {c.get('id') for c in (_chans.getChannels() or []) if c.get('id')}
+            # imports.33: predicate tightened to `id-in-channels.json AND
+            # enabled=True`. Without the enabled filter, disabled Custom
+            # channels' <channel> elements and their programmes survive
+            # cleanSelf-on-load — pvr.iptvsimple keeps showing stale EPG
+            # for them. Symmetric with the parallel m3u.py:_verify change.
+            live_channel_ids = {c.get('id') for c in (_chans.getChannels() or [])
+                                if c.get('id') and c.get('enabled', True)}
         except Exception:
             import_slugs = set()
             live_channel_ids = None

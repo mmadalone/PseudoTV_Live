@@ -551,6 +551,21 @@ class MyHandler(BaseHTTPRequestHandler):
                         ch_list = [c for c in ch_list if c.get('id') != cid]
                         channels.setChannels(channels=ch_list)
                         del channels
+                        # imports.33: propagate the delete to pseudotv.m3u +
+                        # pseudotv.xml synchronously. Without this, the M3U/XML
+                        # entries persist until the NEXT Builder.buildChannels or
+                        # chkImports cycle (~5 min latency). cleanSelf-on-load
+                        # already drops the orphan from in-memory state when
+                        # the fresh M3U/XMLTVS is instantiated; we just render
+                        # + atomic-write the cleaned state. Mirrors the
+                        # tasks.chkImports pattern (tasks.py:709-727). Wrapped
+                        # in try/except so a write failure doesn't 500 the
+                        # delete itself — channels.json is already saved.
+                        try:
+                            from cleanup_helpers import renderCleanedFiles
+                            renderCleanedFiles()
+                        except Exception as _ce:
+                            self.log('do_POST channels/delete.json: post-delete render failed: %s' % (_ce), xbmc.LOGWARNING)
                         DIALOG.notificationDialog('Deleted channel "%s"'%(target.get('name','?')))
                         body = ('{"ok":true,"removed":%d}'%(before - len(ch_list))).encode('utf-8')
                         self.send_response(200, "OK")
@@ -647,6 +662,27 @@ class MyHandler(BaseHTTPRequestHandler):
                             target['changed'] = True
                         channels.setChannels(channels=ch_list)
                         del channels
+                        # imports.33: propagate a disable (enabled=False) to
+                        # pseudotv.m3u + pseudotv.xml synchronously. Without
+                        # this, Builder._verify (builder.py:215-217) skips
+                        # disabled channels in the build loop so __setStation
+                        # is never called for them — the stale M3U/XML entries
+                        # persist indefinitely and pvr.iptvsimple keeps showing
+                        # the channel. cleanSelf-on-load (m3u.py:_verify +
+                        # xmltvs.py:cleanSelf, both with imports.33's
+                        # enabled-filter) drops the entry in-memory at fresh
+                        # M3U/XMLTVS instantiation; we just render + atomic-
+                        # write the cleaned state. Mirrors the tasks.chkImports
+                        # pattern (tasks.py:709-727). Only fires on actual
+                        # disable transitions (not on enable/metadata/path
+                        # edits) — Builder handles those via the existing
+                        # changed=True / metadata_changed=True pipelines.
+                        if 'enabled' in fields and not fields['enabled']:
+                            try:
+                                from cleanup_helpers import renderCleanedFiles
+                                renderCleanedFiles()
+                            except Exception as _ce:
+                                self.log('do_POST channels/edit.json: post-disable render failed: %s' % (_ce), xbmc.LOGWARNING)
                         # defer_kick=true suppresses chkChanged; caller batches.
                         if not incoming.get('defer_kick'):
                             PROPERTIES.setPropTimer('chkChanged')

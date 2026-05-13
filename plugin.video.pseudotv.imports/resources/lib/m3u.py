@@ -469,8 +469,18 @@ class M3U(object):
         
     def _verify(self, stations=[], recordings=[], chkPath=SETTINGS.getSettingBool('Clean_Recordings')):
         if stations: #remove abandoned m3u entries; Stations that are not found in the channel list
-            channels = Channels().getChannels()
-            stations = [station for station in stations for channel in channels if channel.get('id') == station.get('id',str(random.random()))] 
+            # madteevee (imports fork, imports.33): predicate tightened from
+            # "id-in-channels.json" to "id-in-channels.json AND enabled=True".
+            # Without the enabled filter, disabled Custom channels survive
+            # cleanSelf-on-load and Builder.buildChannels re-renders the M3U
+            # with the stale entry on every cycle — pvr.iptvsimple keeps the
+            # disabled channel visible in the PVR guide indefinitely. Imports.
+            # syncAll already filters disabled imports (imports.py:1008) so
+            # this brings Custom channels to parity. Also replaces the prior
+            # O(N*M) nested comprehension with O(N+M) set-membership lookup.
+            enabled_ids = {c.get('id') for c in Channels().getChannels()
+                           if c.get('id') and c.get('enabled', True)}
+            stations = [s for s in stations if s.get('id') in enabled_ids]
             self.log('_verify, stations = %s'%(len(stations)))
             return stations
         elif recordings:#remove recordings that no longer exists on disk
