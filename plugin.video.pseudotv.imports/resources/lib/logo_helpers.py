@@ -187,18 +187,26 @@ def copyToLogoLoc(source_path, chname, log_fn=None):
     )
 
 
-def writeUploadedLogo(file_bytes, chname, filename, log_fn=None):
+def writeUploadedLogo(file_bytes, name_hint, filename, log_fn=None):
     """Write base64-decoded operator-uploaded bytes into LOGO_LOC.
 
     Args:
         file_bytes : decoded bytes from the upload endpoint.
-        chname     : channel name (becomes the basename).
+        name_hint  : becomes the basename. For the cf-modal flow this
+                     is the existing channel's name; for the imports.40
+                     Add-modal flow it's a client-generated pending_id
+                     (`add_<ts>_<rand>`) so two staged adds with the
+                     same name don't overwrite each other's bytes.
+                     Either way the input is sanitized via
+                     `sanitizeChnameForFilename` before being used as
+                     a basename — opaque pending_ids are safe by
+                     construction.
         filename   : client-provided filename (only used for the
-                     extension; basename is derived from chname).
+                     extension; basename is derived from name_hint).
 
     Returns:
         New path string (`special://...`) on success, or None on
-        failure (size cap exceeded, empty sanitized chname, write
+        failure (size cap exceeded, empty sanitized name_hint, write
         error). The endpoint maps None → 500.
 
     Size cap + extension allow-list enforced HERE (writeUploadedLogo
@@ -222,9 +230,9 @@ def writeUploadedLogo(file_bytes, chname, filename, log_fn=None):
         log_fn('writeUploadedLogo, rejected empty upload')
         return None
 
-    safe = sanitizeChnameForFilename(chname)
+    safe = sanitizeChnameForFilename(name_hint)
     if not safe:
-        log_fn('writeUploadedLogo, sanitized chname empty for %r' % (chname,))
+        log_fn('writeUploadedLogo, sanitized name_hint empty for %r' % (name_hint,))
         return None
 
     ext = extForFilename(filename)

@@ -477,7 +477,8 @@ class MyHandler(BaseHTTPRequestHandler):
                 # Builder picks it up on next chkChanged cycle (~5s).
                 elif self.path.split('?', 1)[0].lower() == '/channels/add.json':
                     try:
-                        from globals import getChannelID
+                        from globals       import getChannelID
+                        from rules_helpers import _normalizeRules
                         name   = (incoming.get('name') or '').strip()
                         number = incoming.get('number')
                         path   = (incoming.get('path') or '').strip()
@@ -487,6 +488,101 @@ class MyHandler(BaseHTTPRequestHandler):
                             self.send_error(400, "number must be int 1..%d"%(CHANNEL_LIMIT)); return
                         if not path:
                             self.send_error(400, "path required (Kodi library URL or smartplaylist .xsp)"); return
+                        # imports.40: collect operator-supplied optional fields
+                        # (logo, group, catchup, radio, favorite, enabled, rules)
+                        # so the Add modal can stage a fully-configured Custom
+                        # channel in one POST instead of forcing the operator
+                        # through Add → Edit → Rules. `_overridden_keys` tracks
+                        # the field names that came from the operator (not
+                        # template defaults) so we can call markOverrides on
+                        # them — mirrors the edit.json pattern at server.py:666.
+                        _overridden_keys = []
+                        # logo: optional. If supplied, run through copyToLogoLoc
+                        # like edit.json:649-661. Typical Add-flow value is a
+                        # special:// path already inside LOGO_LOC (pending_id-
+                        # named, from the imports.40 upload endpoint), so
+                        # copyToLogoLoc's idempotent-skip kicks in.
+                        logo_in = incoming.get('logo')
+                        logo_resolved = None
+                        if isinstance(logo_in, str) and logo_in.strip():
+                            try:
+                                from logo_helpers import copyToLogoLoc
+                                logo_resolved = copyToLogoLoc(
+                                    logo_in.strip(),
+                                    name,
+                                    log_fn=lambda m: self.log(m, xbmc.LOGINFO),
+                                )
+                            except Exception as _ce:
+                                self.log('do_POST /channels/add.json: logo copy failed: %s' % (_ce), xbmc.LOGWARNING)
+                                logo_resolved = logo_in.strip()
+                            _overridden_keys.append('logo')
+                        # group: optional. Pipe-separated string OR list. Coerce
+                        # to list. Empty/whitespace-only → fall back to today's
+                        # default [ADDON_NAME] (NOT marked as override).
+                        group_in = incoming.get('group')
+                        group_resolved = None
+                        if group_in is not None:
+                            if isinstance(group_in, list):
+                                group_resolved = [str(g).strip() for g in group_in if str(g).strip()]
+                            else:
+                                group_resolved = [g.strip() for g in str(group_in).split('|') if g.strip()]
+                            if group_resolved:
+                                _overridden_keys.append('group')
+                            else:
+                                group_resolved = None
+                        # catchup: optional, allow-list. Empty string allowed
+                        # (means "no catchup"), so no override mark.
+                        catchup_in = incoming.get('catchup')
+                        catchup_resolved = None
+                        if catchup_in is not None:
+                            if not isinstance(catchup_in, str):
+                                self.send_error(400, "catchup must be a string"); return
+                            allowed_catchup = {'', 'default', 'vod', 'timeshift'}
+                            if catchup_in not in allowed_catchup:
+                                self.send_error(400, "catchup must be one of %s"%(sorted(allowed_catchup))); return
+                            if catchup_in:
+                                catchup_resolved = catchup_in
+                                _overridden_keys.append('catchup')
+                        # radio: operator-explicit wins; if absent, fall back
+                        # to today's auto-derive (musicdb:// path → radio=True).
+                        radio_in = incoming.get('radio')
+                        if radio_in is not None:
+                            radio_resolved = bool(radio_in)
+                            _overridden_keys.append('radio')
+                        else:
+                            radio_resolved = path.startswith('musicdb://')
+                        # favorite: optional, default False.
+                        favorite_in = incoming.get('favorite')
+                        if favorite_in is not None:
+                            favorite_resolved = bool(favorite_in)
+                            _overridden_keys.append('favorite')
+                        else:
+                            favorite_resolved = False
+                        # enabled: optional, default True. Add modal default is
+                        # True + warns operator that disabling skips Builder
+                        # (builder.py:215). Server still accepts False for
+                        # parity with edit.json — operator explicitly chose it.
+                        enabled_in = incoming.get('enabled')
+                        if enabled_in is not None:
+                            enabled_resolved = bool(enabled_in)
+                            _overridden_keys.append('enabled')
+                        else:
+                            enabled_resolved = True
+                        # rules: optional dict, validated via _normalizeRules
+                        # (same helper as /api/channels/rules.json). Rejected
+                        # entries surfaced in response body so the dashboard
+                        # can show which rules were dropped.
+                        rules_in = incoming.get('rules')
+                        rules_normalized = {}
+                        rules_rejected = []
+                        if isinstance(rules_in, dict) and rules_in:
+                            try:
+                                rules_normalized, rules_rejected = _normalizeRules(rules_in)
+                            except Exception as _re:
+                                self.log('do_POST /channels/add.json: rules normalize failed: %s' % (_re), xbmc.LOGWARNING)
+                                rules_rejected = [{'reason': 'normalize_failed: %s' % _re}]
+                            if rules_normalized:
+                                _overridden_keys.append('rules')
                         channels = Channels(writable=True)
                         ch_list = list(channels.getChannels() or [])
                         # Conflict-bump same as edit: cascade other channels out of the way
@@ -505,13 +601,19 @@ class MyHandler(BaseHTTPRequestHandler):
                         citem['number']   = number
                         citem['path']     = [path]
                         citem['type']     = 'Custom'
-                        citem['enabled']  = True
+                        citem['enabled']  = enabled_resolved
                         citem['changed']  = True
-                        citem['favorite'] = False
-                        citem['radio']    = path.startswith('musicdb://')
-                        citem['group']    = [ADDON_NAME]
-                        citem['logo']     = LOGO
+                        citem['favorite'] = favorite_resolved
+                        citem['radio']    = radio_resolved
+                        citem['group']    = group_resolved if group_resolved is not None else [ADDON_NAME]
+                        citem['logo']     = logo_resolved if logo_resolved is not None else LOGO
+                        if catchup_resolved is not None:
+                            citem['catchup'] = catchup_resolved
+                        if rules_normalized:
+                            citem['rules'] = rules_normalized
                         citem['id']       = getChannelID(name, [path], number, SETTINGS.getMYUUID())
+                        if _overridden_keys:
+                            markOverrides(citem, *_overridden_keys)
                         ch_list.append(citem)
                         channels.setChannels(channels=ch_list)
                         del channels
@@ -522,7 +624,21 @@ class MyHandler(BaseHTTPRequestHandler):
                         if not incoming.get('defer_kick'):
                             PROPERTIES.setPropTimer('chkChanged')
                         DIALOG.notificationDialog('Channel "%s" added at #%d'%(name, number))
-                        body = ('{"ok":true,"id":"%s","number":%d}'%(citem['id'], number)).encode('utf-8')
+                        # imports.40: response body includes rules.applied + rules.rejected
+                        # so the dashboard can surface which rules were dropped on
+                        # validation. Keeps {ok,id,number} top-level for backward
+                        # compat with the existing manager.html Save loop (which only
+                        # checks res.ok).
+                        resp = {
+                            'ok': True,
+                            'id': citem['id'],
+                            'number': number,
+                            'rules': {
+                                'applied': sorted(rules_normalized.keys()),
+                                'rejected': rules_rejected,
+                            },
+                        }
+                        body = FileAccess.dumpJSON(resp).encode('utf-8')
                         self.send_response(200, "OK")
                         self.send_header("Content-Type", "application/json")
                         self.send_header("Content-Length", str(len(body)))
@@ -753,31 +869,54 @@ class MyHandler(BaseHTTPRequestHandler):
                 # /channels/edit.json with `fields: {logo: <returned_path>}`
                 # to actually associate the logo with the channel. Two-step
                 # flow keeps each endpoint simple. Body:
-                #   {uuid, channel_id, filename, content_b64}
+                #   {uuid, channel_id, filename, content_b64}    (cf-modal flow)
                 # base64-in-JSON over multipart because Python 3.13 deprecates
                 # cgi.FieldStorage; logos are small (<200 KB typical, 5 MB
                 # hard cap) so the ~33% size overhead is fine.
+                #
+                # imports.40 extension: ALSO accepts a `pending_id` (str)
+                # alternative to `channel_id` for the Add-modal flow, where
+                # the channel doesn't exist yet at upload time. When
+                # pending_id is provided, it's used directly as the basename
+                # source (via writeUploadedLogo's name_hint). Two staged adds
+                # with the same operator-typed name still get distinct files
+                # because pending_id is client-generated unique per modal-open
+                # (`add_<ts>_<rand>`). Discarded adds leave their bytes in
+                # cache/logos/; imports.35's `_evictOrphanLogos` reaps them
+                # on the next syncAll (not referenced in channels.json).
                 elif self.path.split('?', 1)[0].lower() == '/channels/logo/upload.json':
                     try:
                         channel_id  = incoming.get('channel_id')
+                        pending_id  = incoming.get('pending_id')
                         filename    = incoming.get('filename') or ''
                         content_b64 = incoming.get('content_b64') or ''
-                        if not channel_id or not content_b64:
-                            self.send_error(400, "channel_id + content_b64 required"); return
+                        if not content_b64:
+                            self.send_error(400, "content_b64 required"); return
+                        if not (channel_id or pending_id):
+                            self.send_error(400, "channel_id or pending_id required"); return
                         try:
                             file_bytes = base64.b64decode(content_b64, validate=True)
                         except Exception:
                             self.send_error(400, "content_b64 invalid"); return
-                        channels = Channels()
-                        target = next((c for c in (channels.getChannels() or [])
-                                       if c.get('id') == channel_id), None)
-                        del channels
-                        if target is None:
-                            self.send_error(404, "channel_id not found"); return
+                        if pending_id:
+                            # imports.40 Add-modal flow: client-generated
+                            # pending_id is the basename source. No channel
+                            # lookup needed (the channel doesn't exist yet).
+                            name_hint = str(pending_id).strip()
+                            if not name_hint:
+                                self.send_error(400, "pending_id empty"); return
+                        else:
+                            channels = Channels()
+                            target = next((c for c in (channels.getChannels() or [])
+                                           if c.get('id') == channel_id), None)
+                            del channels
+                            if target is None:
+                                self.send_error(404, "channel_id not found"); return
+                            name_hint = target.get('name', '')
                         from logo_helpers import writeUploadedLogo
                         new_path = writeUploadedLogo(
                             file_bytes,
-                            target.get('name', ''),
+                            name_hint,
                             filename,
                             log_fn=lambda m: self.log(m, xbmc.LOGINFO),
                         )
@@ -916,30 +1055,15 @@ class MyHandler(BaseHTTPRequestHandler):
                 # channel fields via field-level merge. Rejects type='import'.
                 elif self.path.split('?', 1)[0].lower() == '/api/channels/rules.json':
                     try:
-                        from rules import RulesList
+                        from rules_helpers import _normalizeRules
                         cid    = incoming.get('channel_id')
                         rules  = incoming.get('rules') or {}
                         if not cid or not isinstance(rules, dict):
                             self.send_error(400, "channel_id + rules required"); return
-                        # Build set of valid rule ids from the live RulesList.
-                        catalog = {r.myId: r for r in RulesList().allRules()}
-                        rejected = []
-                        normalized = {}
-                        for raw_rid, raw_block in rules.items():
-                            try: rid = int(raw_rid)
-                            except (TypeError, ValueError):
-                                rejected.append({'rule_id': raw_rid, 'reason': 'rule_id must be int'}); continue
-                            if rid not in catalog:
-                                rejected.append({'rule_id': rid, 'reason': 'unknown rule id'}); continue
-                            if not isinstance(raw_block, dict):
-                                rejected.append({'rule_id': rid, 'reason': 'rule block must be object'}); continue
-                            values = (raw_block.get('values') or {}) if isinstance(raw_block.get('values'), dict) else {}
-                            norm_values = {}
-                            for raw_idx, v in values.items():
-                                try: norm_values[int(raw_idx)] = v
-                                except (TypeError, ValueError):
-                                    rejected.append({'rule_id': rid, 'idx': raw_idx, 'reason': 'idx must be int'}); continue
-                            normalized[rid] = {'values': norm_values}
+                        # imports.40: validation extracted to rules_helpers._normalizeRules
+                        # so /channels/add.json can reuse it for new-channel rules
+                        # at create-time. Behavior unchanged from inline version.
+                        normalized, rejected = _normalizeRules(rules)
                         channels = Channels(writable=True)
                         ch_list = list(channels.getChannels() or [])
                         target = next((c for c in ch_list if c.get('id') == cid), None)
