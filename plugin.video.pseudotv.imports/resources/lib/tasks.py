@@ -89,6 +89,42 @@ class Tasks(object):
                 # writable Channels/M3U/XMLTV singletons.
                 if self.monitor.waitForAbort(5):
                     return
+
+                # imports.43: boot-strategy dispatch. Reads `Imports_Boot_Strategy`
+                # once at boot, dispatches based on operator choice. Default
+                # 'disk_presence' (code 0) is a no-op — the per-import gate's
+                # disk-presence check inside Imports.syncAll handles missing-M3U
+                # recovery on the first chkImports cycle without any boot-time
+                # action. 'eager_render' (code 1) renders channels.json's
+                # existing import records to disk NOW (no HTTP). 'force_sync'
+                # (code 2) carries `kick_scope='all'` into the first chkImports
+                # call below, bypassing every import's refresh_interval_min
+                # gate for one cycle. See plan at
+                # /home/madalone/.claude/plans/declarative-stirring-rainbow.md
+                # and the BOOT_STRATEGY_BY_CODE map in imports.py.
+                try:
+                    from imports import BOOT_STRATEGY_BY_CODE
+                    boot_strategy_code = int(SETTINGS.getSettingInt('Imports_Boot_Strategy') or 0)
+                    boot_strategy = BOOT_STRATEGY_BY_CODE.get(boot_strategy_code, 'disk_presence')
+                except Exception:
+                    boot_strategy = 'disk_presence'
+
+                eager_kick_scope = None
+                if boot_strategy == 'eager_render':
+                    try:
+                        self._eagerImportsRender()
+                    except Exception as e:
+                        self.log('imports thread, eager_render at boot failed: %s' % (e,),
+                                 xbmc.LOGWARNING)
+                elif boot_strategy == 'force_sync':
+                    # Carry 'all' into the first chkImports call — bypasses every
+                    # import's refresh_interval_min gate for one cycle. Subsequent
+                    # cycles return to normal cadence (kick_scope reset on each
+                    # iteration tail per existing imports.27 pattern).
+                    eager_kick_scope = 'all'
+                    self.log('imports thread, force_sync at boot — first cycle will refresh all imports',
+                             xbmc.LOGINFO)
+
                 # imports.25 / .27: carries the kick scope between the wait
                 # loop and the next chkImports invocation. Pre-imports.27 this
                 # was a boolean `was_kicked = False/True`; in imports.27 it
@@ -100,7 +136,9 @@ class Tasks(object):
                 # import_id, so the daemon just carries the value forward
                 # verbatim without interpretation. None = no kick this cycle
                 # (natural daemon wake).
-                kick_scope = None
+                # imports.43: initial value sourced from boot-strategy dispatch
+                # above — `force_sync` sets 'all'; other strategies leave None.
+                kick_scope = eager_kick_scope
                 while not self.monitor.abortRequested():
                     # imports.23: read interval setting fresh each cycle for
                     # live config changes. Defensive try/except + fallback to
@@ -646,6 +684,62 @@ class Tasks(object):
         self.log('chkChanged, changes = %s'%(len(changes)))
         for channel in changes:
             self.service._que(Builder(service=self.service).buildChannels,3,*([channel],False,silent))
+
+
+    def _eagerImportsRender(self):
+        """imports.43: eager-render-from-channels.json at boot+5s.
+
+        Called from `_startImportsThread._loop` when `Imports_Boot_Strategy`
+        is 'eager_render' (code 1). Constructs writable Channels/M3U/XMLTVS
+        singletons (same shape chkImports uses at the syncAll call site),
+        then asks Imports to render the persisted import-channel state to
+        disk via `Imports.renderFromPersistedState`. NO HTTP. NO Builder
+        iteration. NO syncAll. Just makes the LAST-KNOWN import state
+        visible to iptvsimple immediately so the operator can tune live
+        channels before Builder finishes rebuilding the Custom queue
+        (~30 min wait with 20+ Custom channels).
+
+        Skipped silently inside `renderFromPersistedState` when the on-
+        disk M3U is already healthy (returns 0) — disk content is
+        preserved. The first chkImports cycle then runs normally with
+        the disk-presence gate active.
+
+        Logs at INFO when render happens (visible at default Kodi log
+        level so the operator sees the warm-start fire), at DEBUG when
+        skipped (normal boot — nothing to do). Caller catches exceptions
+        and logs at WARNING so a failed boot-render doesn't break the
+        rest of the imports daemon.
+        """
+        # Function-local imports mirror chkImports' tasks.py:782 pattern —
+        # avoids module-load circular dependency (Imports imports M3U which
+        # imports renderers which imports M3U_TEMP from m3u — fully loaded
+        # by the time _eagerImportsRender is first called from the daemon
+        # thread at boot+5s).
+        from channels import Channels
+        from m3u      import M3U
+        from xmltvs   import XMLTVS
+        from imports  import Imports
+        # Mirrors the chkImports construction pattern (writable singletons,
+        # explicit del at exit to encourage GC).
+        channels = Channels(writable=True)
+        m3u      = M3U(writable=True)
+        xmltv    = XMLTVS(writable=True, m3u=m3u)
+        try:
+            imports = Imports(channels=channels, m3u=m3u, xmltv=xmltv, service=self.service)
+            rendered = imports.renderFromPersistedState()
+            if rendered > 0:
+                self.log('_eagerImportsRender, rendered %d import channels to disk (no HTTP) — iptvsimple will see them on next poll'
+                         % (rendered,), xbmc.LOGINFO)
+            else:
+                self.log('_eagerImportsRender, skipped — on-disk M3U already healthy or no imports configured',
+                         xbmc.LOGDEBUG)
+        finally:
+            # Mirror chkImports' explicit del — encourages GC of the
+            # writable singletons before the long-lived daemon loop
+            # holds them.
+            del xmltv
+            del m3u
+            del channels
 
 
     def chkImports(self, silent=None, force_scope=None):

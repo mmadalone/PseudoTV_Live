@@ -2747,3 +2747,52 @@ msgstr ""
 msgctxt "#33949"
 msgid "48 hours"
 msgstr ""
+
+# imports.43: LiveTV-first availability — boot strategy + disk-presence
+# check scope. Operator-flagged 2026-05-15: imports should be visible to
+# iptvsimple immediately after Kodi boot, not after Builder finishes
+# rebuilding 20+ Custom channels (~30 min wait). Two new settings:
+#   Imports_Boot_Strategy           — what to do at service boot+5s
+#   Imports_Disk_Presence_Scope     — what counts as "missing" for the gate
+# Default values preserve existing behavior; opt-in for the more aggressive
+# warm-start strategies.
+
+msgctxt "#33950"
+msgid "Live imports — boot strategy"
+msgstr ""
+
+msgctxt "#33951"
+msgid "What pseudotv does at service boot to make live import channels visible faster. 'Disk-presence check only' (default) is a no-op at boot — the per-import gate's disk-presence check (see below) handles missing-M3U recovery on the first sync cycle. 'Eager render from channels.json' immediately renders the LAST-KNOWN import channel state to disk at boot+5s without any HTTP fetch — fast warm-start so iptvsimple sees imports before Builder finishes the Custom queue. 'Force full sync (HTTP)' fetches every import's M3U/EPG at boot regardless of refresh interval — freshest data at the cost of 5-30s network I/O at every Kodi restart."
+msgstr ""
+
+msgctxt "#33952"
+msgid "Disk-presence check only"
+msgstr ""
+
+msgctxt "#33953"
+msgid "Eager render from channels.json (no HTTP)"
+msgstr ""
+
+msgctxt "#33954"
+msgid "Force full sync (HTTP at every boot)"
+msgstr ""
+
+msgctxt "#33955"
+msgid "Live imports — disk-presence check scope"
+msgstr ""
+
+msgctxt "#33956"
+msgid "What counts as 'missing data' for the per-import refresh-interval gate. When the configured artifact is missing or stub-sized on disk, the gate force-syncs that import on the next chkImports cycle regardless of the refresh_interval_min ceiling. 'Main M3U file only' (default) checks pseudotv.m3u once per cycle (a missing/empty M3U forces a sync for ALL imports). 'Per-import EPG cache only' checks cache/epg_<id>.xml per-import (granular: each broken cache forces only its own import). 'Both' triggers on either condition (defense in depth, slightly more I/O)."
+msgstr ""
+
+msgctxt "#33957"
+msgid "Main M3U file only"
+msgstr ""
+
+msgctxt "#33958"
+msgid "Per-import EPG cache only"
+msgstr ""
+
+msgctxt "#33959"
+msgid "Both main M3U and per-import EPG"
+msgstr ""

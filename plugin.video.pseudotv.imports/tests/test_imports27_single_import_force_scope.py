@@ -26,6 +26,8 @@ import re
 import sys
 import time
 
+import pytest
+
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ADDON_ROOT = os.path.dirname(HERE)
@@ -35,6 +37,23 @@ LIB = os.path.join(ADDON_ROOT, 'resources', 'lib')
 def _read(path):
     with open(path) as f:
         return f.read()
+
+
+@pytest.fixture(autouse=True)
+def _imports43_disable_disk_presence_check(monkeypatch):
+    """imports.43: neutralize the new disk-presence check inside syncAll for
+    every test in this file. These tests exercise the imports.27 elapsed-
+    time gate + force_scope interaction in isolation against in-memory
+    mocks (no real M3U file on disk) — the imports.43 disk-presence check
+    would always fire (M3U absent) and force-bypass the gate, masking the
+    behavior under test. The disk-presence check has its own dedicated
+    test file (test_imports43_disk_presence_check.py); here we want it
+    inert.
+    """
+    if LIB not in sys.path:
+        sys.path.insert(0, LIB)
+    import imports as _imp
+    monkeypatch.setattr(_imp, '_isDiskMissing', lambda iid, scope: False)
 
 
 # ======================================================================

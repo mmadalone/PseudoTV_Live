@@ -119,6 +119,92 @@ def computeRetryDelay(curve, fail_count, refresh_interval_sec):
 CASCADE_OVERFLOW_LIMIT = CHANNEL_LIMIT + 1
 
 
+# madteevee (imports fork, imports.43): LiveTV-first availability hardening.
+# Operator-flagged 2026-05-15 — imports should be visible to iptvsimple
+# immediately at Kodi boot, not after Builder finishes rebuilding the
+# Custom queue (~30 min wait with 20+ Custom channels). The pain manifests
+# specifically in the post-cleanup + first-boot cases where the on-disk M3U
+# is missing/empty AND the per-import `refresh_interval_min` gate keeps
+# syncAll from re-fetching for hours.
+#
+# Two settings (resources/settings.xml `Imports_Boot_Strategy` +
+# `Imports_Disk_Presence_Scope`, both `type="integer"` mirroring the
+# imports.28 RETRY_CURVE_BY_CODE pattern) drive three behavior dimensions.
+# The maps below decode the int-stored settings to string identifiers used
+# throughout the code paths — cleaner than naked ints, idiomatic with
+# imports.28.
+
+# Imports_Boot_Strategy — what happens at service boot+5s
+# (tasks.py:_startImportsThread._loop after the existing 5s delay).
+BOOT_STRATEGY_BY_CODE = {
+    0: 'disk_presence',   # default — no boot action; gate handles missing data on first cycle
+    1: 'eager_render',    # render channels.json's existing import records to disk (no HTTP)
+    2: 'force_sync',      # first chkImports call carries force_scope='all' (HTTP at every boot)
+}
+
+# Imports_Disk_Presence_Scope — what counts as "missing" for the gate's
+# disk-presence check. See _isDiskMissing below.
+DISK_PRESENCE_SCOPE_BY_CODE = {
+    0: 'main_m3u',         # default — only check pseudotv.m3u; missing/empty forces ALL imports
+    1: 'per_import_epg',   # check cache/epg_<id>.xml per-import; missing forces just that one
+    2: 'both',             # either condition triggers (defense in depth)
+}
+
+# imports.43: stub-sized thresholds for the disk-presence check. 200 bytes
+# is comfortably above the M3U header-only stub (`#EXTM3U ...\n` is ~107 B,
+# the corruption shape past empty-write incidents have produced) and below
+# any legitimate single-channel payload (one EXTINF + URL line is ~300 B).
+# 100 bytes is above the self-closing `<tv/>` XML root (~50 B) that
+# `render_xmltv`'s refuse-empty guard exists to prevent.
+_DISK_PRESENCE_M3U_MIN_BYTES = 200
+_DISK_PRESENCE_EPG_MIN_BYTES = 100
+
+
+def _isDiskMissing(import_id, scope):
+    """Return True when the on-disk artifact required by `scope` is missing
+    or stub-sized for the given import. Caller treats True as "force-sync
+    this import despite the refresh_interval_min gate."
+
+    Scopes:
+      'main_m3u'        — only check pseudotv.m3u (the merged file).
+                          Triggers for ALL imports on a single positive
+                          check (the main M3U is shared).
+      'per_import_epg'  — check cache/epg_<import_id>.xml per-import.
+                          Naming mirrors imports.py:_epgCachePath.
+      'both'            — either condition triggers (defense in depth).
+
+    Filesystem errors (rare: OSError from os.path.exists / getsize on a
+    permission glitch or stat race) are treated as "missing" — fail-safe
+    behavior so we force-sync rather than silently skip when we can't
+    tell. Same rationale as the refuse-empty guard's bias toward "preserve
+    disk content" — better to do an extra sync than to miss a real
+    corruption.
+    """
+    if scope in ('main_m3u', 'both'):
+        try:
+            real = FileAccess.translatePath(M3UFLEPATH)
+            if not os.path.exists(real) or os.path.getsize(real) < _DISK_PRESENCE_M3U_MIN_BYTES:
+                return True
+        except OSError:
+            return True
+
+    if scope in ('per_import_epg', 'both'):
+        try:
+            # Mirror imports.py:_epgCachePath naming. Function-local to
+            # avoid forward-reference (_epgCachePath is an Imports method,
+            # not module-level — this helper is module-level so we build
+            # the path here directly).
+            epg_path = FileAccess.translatePath(
+                'special://profile/addon_data/%s/cache/epg_%s.xml' % (ADDON_ID, import_id),
+            )
+            if not os.path.exists(epg_path) or os.path.getsize(epg_path) < _DISK_PRESENCE_EPG_MIN_BYTES:
+                return True
+        except OSError:
+            return True
+
+    return False
+
+
 def validate_source_url(url, allowed=ALLOWED_M3U_SCHEMES):
     """
     Allowlist scheme check for import source URLs.
@@ -222,6 +308,86 @@ class Imports(object):
             # `log` not yet bound during unit-test import-time when globals are
             # stubbed; degrade silently.
             pass
+
+    # ------------------------------------------------------------------
+    # imports.43: LiveTV-first availability — boot-time render-from-persisted
+    # ------------------------------------------------------------------
+
+    def renderFromPersistedState(self):
+        """Render the existing import-channel state from channels.json to disk
+        (pseudotv.m3u) WITHOUT a fresh HTTP fetch.
+
+        Called from `tasks.py:_startImportsThread._loop` at boot+5s when
+        `Imports_Boot_Strategy` is set to `eager_render` (code 1). Operator-
+        flagged 2026-05-15: with 20+ Custom channels building serially at
+        ~90s each, imports stay invisible to iptvsimple for ~30 min on boot
+        if the on-disk M3U is empty/missing. This method makes the LAST-
+        KNOWN persisted import state visible immediately by rendering the
+        type='import' enabled channels straight from channels.json into
+        the in-memory M3UDATA + calling m3u._save (which triggers the
+        renderers.render_m3u + write_atomic path imports.42 plumbs
+        channel_count through).
+
+        Guarded by `_isDiskMissing(scope='main_m3u')` — fires only when
+        the on-disk M3U is missing or stub-sized (header-only). Healthy
+        M3U → no-op return 0 (don't clobber existing data). This means
+        the eager_render strategy is safe to leave enabled across reboots:
+        normal boots with intact M3U skip this entirely, only post-cleanup
+        or first-ever boots see the eager render fire.
+
+        EPG content is NOT rendered here. Channels alone are enough for
+        iptvsimple to load + let the operator tune them; EPG fills in on
+        the natural chkImports cycle (≤5 min for autosync operators).
+        Adding EPG would require parsing each `cache/epg_<id>.xml` per-
+        import and merging into XMLTVDATA — meaningful complexity for
+        marginal benefit. Defer to imports.44 if operators report long
+        EPG-empty windows post-eager-render.
+
+        Returns the count of imports rendered (excluding disabled), or 0
+        if the on-disk M3U is already healthy / no imports are configured.
+        Caller logs the result at INFO.
+
+        Requires `self.channels` and `self.m3u` to be set (writable). When
+        either is None (test/standalone construction) returns 0 silently.
+        Idempotent — the imports.42 writer_lock + atomic-rename in
+        `write_atomic` prevents torn writes if multiple boot-render calls
+        race (shouldn't happen in practice — `_startImportsThread` is
+        single-threaded — but defensive).
+        """
+        if self.channels is None or self.m3u is None:
+            return 0
+        # Guard: only fire when on-disk M3U is actually missing/stub.
+        # Re-uses the same helper the gate disk-presence check uses, so
+        # the trigger semantics are consistent across both paths.
+        if not _isDiskMissing(import_id='__bootcheck__', scope='main_m3u'):
+            return 0
+        # Pull all enabled import-typed channels from channels.json. The
+        # records carry full M3U EXTINF state (id, name, url, group, logo,
+        # catchup, etc) — verified in the imports.43 planning phase via
+        # Phase 1 exploration of the live channels.json shape. No HTTP
+        # fetch, no re-parse — just the persisted state Builder/syncAll
+        # produced on a prior cycle.
+        try:
+            all_channels = self.channels.getChannels() or []
+        except Exception as e:
+            self.log('renderFromPersistedState, channels.getChannels() failed: %s' % (e,),
+                     level=xbmc.LOGWARNING)
+            return 0
+        import_channels = [c for c in all_channels
+                           if c.get('type') == 'import' and c.get('enabled', True)]
+        if not import_channels:
+            return 0
+        # Direct stations-list assignment matches the shape M3U._save
+        # expects (M3UDATA dict with 'stations' + 'recordings' keys per
+        # m3u.py:75). Builder.__setStation does the same kind of mutation
+        # per-channel; we just do it bulk for imports. Recordings stay
+        # untouched (they're a different concept — DVR-style local
+        # recordings, not live imports).
+        self.m3u.M3UDATA['stations'] = list(import_channels)
+        saved = self.m3u._save()   # imports.42 plumbs channel_count for breaker + INFO log
+        if saved:
+            return len(import_channels)
+        return 0
 
     # ------------------------------------------------------------------
     # Parsers — implemented in step 2
@@ -627,6 +793,33 @@ class Imports(object):
             force_active = (force_scope == 'all'
                             or (force_scope is not None
                                 and force_scope == import_cfg.get('id')))
+
+            # imports.43: disk-presence check. When the configured scope
+            # detects missing/stub on-disk M3U or per-import EPG cache,
+            # force-sync THIS import regardless of refresh_interval_min.
+            # Integrates with the existing force_active mechanism so all
+            # downstream gate logic (abandon check at the next block, normal
+            # gate at the elapsed-time check) automatically honors disk-
+            # missing as a force-sync trigger — zero new branching needed.
+            # Skipped when force_active is already True (no point double-
+            # forcing) or when the import is disabled / lacks an id (the
+            # next block handles that). Setting reads use the same defensive
+            # try/except + fallback pattern as the imports.28 retry curve
+            # reads two blocks down — settings.xml edge cases (corrupt,
+            # missing) don't break the gate.
+            if not force_active and import_cfg.get('enabled', True) and import_cfg.get('id'):
+                try:
+                    scope = DISK_PRESENCE_SCOPE_BY_CODE.get(
+                        int(SETTINGS.getSettingInt('Imports_Disk_Presence_Scope') or 0),
+                        'main_m3u',
+                    )
+                except Exception:
+                    scope = 'main_m3u'
+                if _isDiskMissing(import_cfg.get('id'), scope):
+                    force_active = True
+                    self.log('[%s] syncAll, disk-presence: forcing sync (scope=%s, file missing/stub)'
+                             % (import_cfg.get('id'), scope), level=xbmc.LOGINFO)
+
             if (import_cfg.get('enabled', True)
                 and import_cfg.get('id')):
                 try:
