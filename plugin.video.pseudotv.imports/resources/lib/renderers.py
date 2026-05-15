@@ -70,6 +70,26 @@ def _m3u_label_sanitize(v):
     return str(v).replace('\r', ' ').replace('\n', ' ')
 
 
+# madteevee (imports fork, imports.41): keys ALREADY emitted by render_m3u's
+# explicit format string (channel-id / tvg-chno / tvg-id / tvg-name / tvg-logo
+# / group-title / radio / catchup) and dedicated locations (label after the
+# final comma; url on its own standalone line). The optional-attrs loop must
+# NOT re-emit these — `group` is the load-bearer of the bug: as a Python list
+# it serializes via `str(['x','y'])` to `"['x', 'y']"` which embeds a literal
+# comma INSIDE the rendered `group="..."` value. m3u.py:_load's greedy regex
+# `,(.*)' for the display-name field captures from the FIRST comma — so the
+# in-value comma becomes the label boundary, and the parsed label ends up
+# containing the entire EXTINF tail (url=, catchup-source=, provider=, ...).
+# Next render the giant label gets escaped (`"` → `%22`) and emitted both as
+# the optional `label="..."` attr AND as the raw display-name after the line
+# comma — line size doubles per cycle. Live-observed in imports.40: one
+# pseudotv.m3u line grew from ~442 bytes to 1.6 GB in ~22 doublings, which
+# OOM-killed Kodi on parse + put the host into a kodi-standalone crash loop
+# (kernel killed each Kodi at anon-rss ≈ 6.8 GB on an 8 GB Pi5).
+_EXPLICIT_M3U_KEYS = frozenset({'id', 'number', 'name', 'logo', 'group',
+                                'radio', 'catchup', 'label', 'url'})
+
+
 def render_m3u(m3udata):
     """Build M3U file content from in-memory M3UDATA. Pure function.
 
@@ -125,7 +145,23 @@ def render_m3u(m3udata):
             xplaylist = station.pop('x-playlist-type', '')
             webprops  = station.pop('webprops', None) or []
             for key, value in list(station.items()):
+                # imports.41: skip already-explicitly-emitted keys (see
+                # _EXPLICIT_M3U_KEYS doc above). Without this guard, `group`
+                # leaks a literal comma into the EXTINF line and m3u._load
+                # mis-parses the display-name field — file size doubles per
+                # render→reload→render cycle, eventually OOMing Kodi.
+                if key in _EXPLICIT_M3U_KEYS:
+                    continue
                 if key in opts and str(value):
+                    # imports.41: normalize list/tuple values to a ';'-joined
+                    # string (matches how `group-title` is rendered above).
+                    # str(list) would embed `, ` separators inside the value,
+                    # which is the corruption vector documented at
+                    # _EXPLICIT_M3U_KEYS. Defense in depth so a future M3U
+                    # attribute happening to be list-typed doesn't reopen the
+                    # bug.
+                    if isinstance(value, (list, tuple)):
+                        value = ';'.join(str(x) for x in value)
                     optional += '%s="%s" ' % (key, _m3u_attr_escape(value))
             # Restore list-typed attrs back into station dict for any later read
             if kodiprops: station['kodiprops'] = kodiprops

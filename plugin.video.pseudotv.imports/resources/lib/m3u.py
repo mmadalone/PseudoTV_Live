@@ -118,7 +118,20 @@ class M3U(object):
 
                 elif line.startswith('#EXTINF:'):
                     chCount += 1
-                    match = {'label'             :re.compile(',(.*)'                        , re.IGNORECASE).search(line),
+                    # imports.41: label regex anchored on the EXTINF separator
+                    # (closing `"` of last attribute + `,`), not the FIRST `,`.
+                    # The previous `,(.*)` captured from whichever comma came
+                    # first, so a stray comma inside any attribute value (e.g.
+                    # the legacy `group="['a', 'b']"` repr emitted by an old
+                    # renderers.py) leaked the rest of the EXTINF line into
+                    # the parsed label, which the next render rewrote at the
+                    # line tail — doubling file size every cycle. Defense in
+                    # depth for the renderer fix at renderers._EXPLICIT_M3U_KEYS:
+                    # if a future external-source M3U arrives with comma-bearing
+                    # attribute values, the parser still extracts the correct
+                    # display-name. Falls back to first-comma split for lines
+                    # without quoted attributes (`#EXTINF:-1,Display`).
+                    match = {'label'             :re.compile(r'(?:.*"|^#EXTINF:[^,]*),(.*)$' , re.IGNORECASE).search(line),
                              'id'                :re.compile('tvg-id=\"(.*?)\"'             , re.IGNORECASE).search(line),
                              'name'              :re.compile('tvg-name=\"(.*?)\"'           , re.IGNORECASE).search(line),
                              'group'             :re.compile('group-title=\"(.*?)\"'        , re.IGNORECASE).search(line),
@@ -253,7 +266,10 @@ class M3U(object):
             'catchup-correction': re.compile(r'catchup-correction="(.*?)"', re.IGNORECASE),
         }
         EXTINF_PATTERNS = {
-            'label'             : re.compile(r',(.*)'                       , re.IGNORECASE),
+            # imports.41: anchored on last `",` (closing quote + comma) so a
+            # stray comma in any attribute value doesn't mis-parse as the
+            # display-name boundary. See m3u.py:_load label regex comment.
+            'label'             : re.compile(r'(?:.*"|^#EXTINF:[^,]*),(.*)$' , re.IGNORECASE),
             'id'                : re.compile(r'tvg-id="(.*?)"'              , re.IGNORECASE),
             'name'              : re.compile(r'tvg-name="(.*?)"'            , re.IGNORECASE),
             'group'             : re.compile(r'group-title="(.*?)"'         , re.IGNORECASE),

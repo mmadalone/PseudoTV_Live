@@ -224,3 +224,155 @@ def test_m3u_label_sanitize_handles_none():
 
 def test_m3u_label_sanitize_passes_safe_strings_through():
     assert _m3u_label_sanitize('A normal label') == 'A normal label'
+
+
+# --------------------------------------------- imports.41 regression: m3u OOM bloat
+#
+# Bug: render_m3u's optional-attrs loop iterated M3U_TEMP keys without skipping
+# the keys already emitted in the explicit format string. `group` (a Python list)
+# serialized via `str([...])` to `"['x', 'y']"` — embedded a literal comma INSIDE
+# the rendered `group="..."` value. m3u.py:_load's `,(.*)' label regex captured
+# from the FIRST comma, so the in-value comma became the label boundary. Parsed
+# label = entire EXTINF tail. Next render: label re-emitted both as optional
+# `label="..."` and as raw display-name → line doubled. ~22 cycles → 1.6 GB
+# single EXTINF line → pvr.iptvsimple OOM-killed Kodi (anon-rss ≈ 6.8 GB on Pi5).
+#
+# Fix: renderers._EXPLICIT_M3U_KEYS skips id/number/name/logo/group/radio/catchup/
+# label/url in the optional loop. Defense in depth: list/tuple values are
+# ;-joined instead of str()'d, and m3u.py's label regex anchors on `",` (the
+# closing-quote-comma of the last attribute) rather than the first comma.
+
+
+def test_render_m3u_no_redundant_group_attribute():
+    """`group` is already emitted as `group-title` in the explicit format
+    string. Re-emitting it in the optional loop as a Python list-repr
+    embeds a literal comma INSIDE the `group="..."` value, which leaks
+    into m3u._load's label parsing. The renderer must NOT emit a bare
+    `group="..."` attribute."""
+    station = _station(group=['Adult Swim', 'PseudoTV Live (imports)'])
+    out = render_m3u({'stations': [station], 'recordings': []})
+    assert out is not None
+    # group-title (the canonical M3U attribute) is fine and expected.
+    assert 'group-title="Adult Swim;PseudoTV Live (imports)"' in out
+    # bare `group=` MUST NOT appear — that's the corruption vector.
+    assert ' group="' not in out, (
+        'render_m3u must not emit bare `group="..."` attribute — it embeds '
+        'a literal comma when value is a list, which mis-anchors the label '
+        'boundary in m3u._load. Use group-title only.')
+
+
+def test_render_m3u_no_redundant_explicit_keys():
+    """`id`, `number`, `name`, `logo`, `group`, `radio`, `catchup` are all
+    emitted by the explicit format string already (as channel-id / tvg-chno
+    / tvg-id / tvg-name / tvg-logo / group-title / radio / catchup). They
+    must NOT also appear in the optional loop — redundant bytes that
+    accumulated in pseudotv.m3u for years."""
+    station = _station(
+        id='ALJAZE@movistarplus',
+        number=42,
+        name='Al Jazeera',
+        logo='https://example.com/aj.png',
+        group=['News'],
+        radio=False,
+        catchup='vod',
+    )
+    out = render_m3u({'stations': [station], 'recordings': []})
+    assert out is not None
+    # Find the EXTINF line for this station.
+    extinf = [ln for ln in out.split('\n') if ln.startswith('#EXTINF:')][0]
+    # None of these bare keys should be in the EXTINF line.
+    for bare_key in (' id="', ' number="', ' name="', ' logo="',
+                     ' group="', ' label="', ' url="'):
+        assert bare_key not in extinf, (
+            'render_m3u emitted redundant `%s..."` — duplicates the explicit '
+            'format string (or the label/url dedicated locations) and breaks '
+            'idempotency through m3u._load.' % bare_key.strip())
+
+
+def test_render_m3u_idempotent_through_parse_reload():
+    """The full render → parse → render cycle MUST be size-stable. Before
+    imports.41 each cycle DOUBLED the file size for any station whose
+    `group` list had ≥2 elements (the corruption ran on every Custom
+    channel because they all get auto-added to `['Adult Swim', 'PseudoTV
+    Live (imports)']`-style multi-group). Regression coverage: simulate
+    one round-trip and confirm no growth."""
+    import re as _re
+
+    station = _station(group=['Adult Swim', 'PseudoTV Live (imports)'])
+    line1 = render_m3u({'stations': [station], 'recordings': []})
+    assert line1 is not None
+    extinf1 = [ln for ln in line1.split('\n') if ln.startswith('#EXTINF:')][0]
+
+    # Simulate the m3u._load label regex (the new anchored one, post-fix).
+    label_re = _re.compile(r'(?:.*"|^#EXTINF:[^,]*),(.*)$', _re.IGNORECASE)
+    m = label_re.search(extinf1)
+    assert m is not None, 'label regex must match a well-formed EXTINF line'
+    parsed_label = m.group(1)
+    # Sane label after parse: the actual display name, NOT the EXTINF tail.
+    # (Pre-imports.41 this captured everything from the FIRST comma onward,
+    # so parsed_label would have been hundreds of bytes including url=,
+    # catchup-source=, provider=, etc.)
+    assert parsed_label == 'Test Channel', (
+        'parsed label must be the bare display name, not the EXTINF tail; '
+        'got %r' % (parsed_label,))
+    assert len(parsed_label) < 64, (
+        'parsed label suspiciously long — likely picked up attribute values; '
+        'got len=%d, content=%r' % (len(parsed_label), parsed_label))
+
+    # Feed parsed label back and re-render. Total size must NOT grow.
+    station['label'] = parsed_label
+    line2 = render_m3u({'stations': [station], 'recordings': []})
+    assert line2 is not None
+    assert len(line2) == len(line1), (
+        'render→parse→render cycle must be size-stable; was %d → %d (a '
+        '%+d byte drift signals the doubling bug has reopened)'
+        % (len(line1), len(line2), len(line2) - len(line1)))
+
+
+def test_render_m3u_normalizes_list_typed_optional_values():
+    """If a future M3U attribute happens to be list-typed (e.g. someone
+    decides `provider-countries` should be a list of country codes), the
+    renderer must NOT serialize it via Python str(list)-repr — that
+    embeds literal commas which is the corruption vector. List/tuple
+    values get ;-joined like `group-title` does."""
+    station = _station()
+    # Inject a list-typed optional attribute.
+    station['provider-countries'] = ['US', 'CA', 'MX']
+    out = render_m3u({'stations': [station], 'recordings': []})
+    assert out is not None
+    # Bad: str(list)-repr form.
+    assert "['US', 'CA', 'MX']" not in out, (
+        'list value must NOT be emitted as Python str()-repr — embedded '
+        'commas break m3u._load label parsing.')
+    # Good: ;-joined form.
+    assert 'provider-countries="US;CA;MX"' in out, (
+        'list value must be ;-joined like group-title.')
+
+
+def test_m3u_load_label_anchored_on_last_attribute_quote():
+    """Regression test for the parser-side defense. Feed a fake EXTINF
+    line that intentionally contains a comma INSIDE a quoted attribute
+    value (simulating the OLD pre-imports.41 rendered output or an
+    external-source M3U with comma-bearing values). The parser must
+    extract the actual display-name, NOT capture from the in-value
+    comma."""
+    import re as _re
+    # Anchored regex (imports.41 fix).
+    label_re = _re.compile(r'(?:.*"|^#EXTINF:[^,]*),(.*)$', _re.IGNORECASE)
+    # Hostile line: comma inside group= value, like the renderers.py
+    # output BEFORE the fix.
+    line = ('#EXTINF:-1 channel-id="aswim" tvg-chno="304" tvg-name="Adult Swim" '
+            'group-title="A;B" radio="False" catchup="vod" '
+            "group=\"['Adult Swim', 'PseudoTV Live (imports)']\" "
+            'provider="PseudoTV",Adult Swim')
+    m = label_re.search(line)
+    assert m is not None, 'label regex must match a hostile EXTINF line'
+    assert m.group(1) == 'Adult Swim', (
+        'parser must extract the actual display-name, not the EXTINF tail '
+        'after the first in-value comma; got %r' % (m.group(1),))
+    # Plain line still works.
+    m2 = label_re.search('#EXTINF:-1 channel-id="x" tvg-name="Y",Display')
+    assert m2 is not None and m2.group(1) == 'Display'
+    # No-attrs fallback still works.
+    m3 = label_re.search('#EXTINF:-1,BareDisplay')
+    assert m3 is not None and m3.group(1) == 'BareDisplay'
