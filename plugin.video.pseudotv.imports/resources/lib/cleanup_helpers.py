@@ -38,16 +38,24 @@ def renderCleanedFiles():
     m3u   = M3U(writable=False)
     xmltv = XMLTVS(writable=False, m3u=m3u)
 
+    # imports.42: pass channel_count for write_atomic's circuit-breaker
+    # + LOGINFO size message. Counts match each renderer's own iteration
+    # (render_m3u line 134-137; render_xmltv line 271).
+    station_count = (len(m3u.M3UDATA.get('stations')   or [])
+                   + len(m3u.M3UDATA.get('recordings') or []))
+    channel_count = (len(xmltv.XMLTVDATA.get('channels')   or [])
+                   + len(xmltv.XMLTVDATA.get('recordings') or []))
+
     m3u_written = False
     _m3u = render_m3u(m3u.M3UDATA)
     if _m3u is not None:
-        write_atomic(M3UFLEPATH, _m3u)
+        write_atomic(M3UFLEPATH, _m3u, channel_count=station_count)
         m3u_written = True
 
     xml_written = False
     _xml = render_xmltv(xmltv.XMLTVDATA)
     if _xml is not None:
-        write_atomic(XMLTVFLEPATH, _xml)
+        write_atomic(XMLTVFLEPATH, _xml, channel_count=channel_count)
         xml_written = True
 
     return m3u_written, xml_written

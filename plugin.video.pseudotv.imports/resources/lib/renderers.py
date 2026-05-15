@@ -169,13 +169,22 @@ def render_m3u(m3udata):
             if xplaylist: station['x-playlist-type'] = xplaylist
             if webprops:  station['webprops'] = webprops
 
+            # imports.42: sort + dedup + filter-falsy the group list before
+            # `;`-joining. This matches m3u.py:_load line 168 which does
+            # `sorted(list(set(...split(';'))))` on parse. Pre-imports.42
+            # the renderer emitted input order while the parser stored
+            # sorted-dedup'd — a one-cycle drift that wasn't a bug per se
+            # (iptvsimple is order-agnostic on group-title) but broke
+            # render→parse→render byte-stability. After this change, the
+            # renderer is exactly symmetric with the parser.
+            group_sorted = sorted({g for g in (station.get('group') or []) if g})
             out.append(line_template % (
                 _m3u_attr_escape(station.get('id', '')),   # channel-id (IPTV Simple unique ID override)
                 station.get('number', 0),
                 _m3u_attr_escape(station.get('id', '')),
                 _m3u_attr_escape(station.get('name', '')),
                 _m3u_attr_escape(station.get('logo', '')),
-                _m3u_attr_escape(';'.join(station.get('group') or [])),
+                _m3u_attr_escape(';'.join(group_sorted)),
                 station.get('radio', False),
                 _m3u_attr_escape(station.get('catchup', '')),
                 optional.strip(),
@@ -284,7 +293,57 @@ def render_xmltv(xmltvdata):
         return b'<?xml version="1.0" encoding="utf-8"?>\n<tv/>\n'
 
 
-def write_atomic(target_special_path, content_bytes):
+# madteevee (imports fork, imports.42): size circuit-breaker thresholds for
+# write_atomic. Defends against runaway file bloat (imports.40 incident:
+# pseudotv.m3u grew to 1.6 GB before OOM-killing Kodi at anon-rss ≈ 6.8 GB on
+# an 8 GB Pi5, kicking the host into a kodi-standalone crash loop). The
+# imports.41 fix closed the specific render→parse→render doubling bug; this
+# is the safety net so a future regression of the WHOLE CLASS of bug (any
+# silent file bloat from any cause) is caught at cycle ~10-17 instead of
+# cycle ~22 (where imports.40 OOM'd), preserves disk content, and is loud
+# in logs.
+#
+# Threshold math (per _compute_size_limit below):
+#   limit = min(HARD_CAP, max(FLOOR, channel_count × PER_CHANNEL))
+#
+# Real-world calibration (operator's prod is 78 channels):
+#   - Norm: ~150 KB total M3U (~2 KB/channel). 78 × 1 MB = 78 MB cap → 500×
+#     safety margin. False-positive risk: near zero.
+#   - For 1000 channels: 1 GB scaled → hits 100 MB hard ceiling. Sensible —
+#     community reports pvr.iptvsimple slows badly above ~20 MB; 100 MB is
+#     hard-OOM territory only on memory-constrained boxes.
+#   - For low channel counts (1-5): FLOOR wins (5 MB), avoiding false
+#     positives on first-channel-only or small Custom-only configs.
+#   - channel_count=None (caller without count context): HARD_CAP only,
+#     graceful default protection.
+#
+# When the limit is exceeded: LOGWARNING + return without writing (disk
+# content preserved). Mirrors the refuse-empty guards at render_m3u line 109
+# and render_xmltv line 258. Includes the first _WRITE_ATOMIC_PREVIEW_BYTES
+# of the offending payload in the warning so on-disk forensics doesn't need
+# a debug-level rerun to identify what bloated.
+_WRITE_ATOMIC_HARD_CAP_BYTES    = 100 * 1024 * 1024   # 100 MB absolute ceiling
+_WRITE_ATOMIC_FLOOR_BYTES       =   5 * 1024 * 1024   # 5 MB floor (handles low channel counts)
+_WRITE_ATOMIC_BYTES_PER_CHANNEL =   1 * 1024 * 1024   # 1 MB per channel scaling factor
+_WRITE_ATOMIC_PREVIEW_BYTES     =        1024         # 1 KB payload preview on refuse (forensics)
+
+
+def _compute_size_limit(channel_count):
+    """Compute the maximum allowed byte length for a write_atomic call.
+
+    Returns _WRITE_ATOMIC_HARD_CAP_BYTES when channel_count is None
+    (graceful default for callers without channel-count context).
+    Otherwise: min(HARD_CAP, max(FLOOR, channel_count × PER_CHANNEL)).
+    See the _WRITE_ATOMIC_HARD_CAP_BYTES block comment above for the
+    calibration rationale.
+    """
+    if channel_count is None:
+        return _WRITE_ATOMIC_HARD_CAP_BYTES
+    scaled = channel_count * _WRITE_ATOMIC_BYTES_PER_CHANNEL
+    return min(_WRITE_ATOMIC_HARD_CAP_BYTES, max(_WRITE_ATOMIC_FLOOR_BYTES, scaled))
+
+
+def write_atomic(target_special_path, content_bytes, channel_count=None):
     """Atomic file write under WRITER_LOCK.
 
     imports.12 / writer_lock: serializes concurrent writers (Builder
@@ -299,23 +358,79 @@ def write_atomic(target_special_path, content_bytes):
     the real file.
 
     Carries the lock wrap so callers don't need to know about it.
-    Mirrors today's Tasks._writeAtomic public contract (callers pass
-    (target_special_path, content_bytes); no return value).
+    Mirrors today's Tasks._writeAtomic public contract; callers pass
+    (target_special_path, content_bytes) plus an OPTIONAL channel_count
+    (added imports.42 — see _WRITE_ATOMIC_HARD_CAP_BYTES block comment).
+    No return value.
+
+    imports.42 — `channel_count`:
+        Optional. When supplied, used both for:
+          (1) Per-channel size cap (catches runaway bloat — see
+              _compute_size_limit + the constants above for math).
+          (2) Promoting the success log line to LOGINFO and including
+              the channel count alongside the byte size (makes
+              regressions visible in routine log review at default
+              Kodi log level).
+        When None, the circuit-breaker falls back to the absolute
+        100 MB hard cap only, and the success log stays at LOGDEBUG.
+        Backward-compatible: existing callers continue to work; they
+        just lose the per-channel-cap + INFO logging until updated.
     """
     try:
         with held(ctx='write_atomic[%s]' % os.path.basename(target_special_path)):
             try:
                 real_path = FileAccess.translatePath(target_special_path)
                 tmp = real_path + '.tmp'
+                # Normalize to bytes BEFORE the size check so the check
+                # operates on the on-disk byte count (matches what the
+                # filesystem will actually see). Pre-imports.42 the
+                # normalize happened inside the `with open(...)` block,
+                # which would have measured the wrong size for str input.
+                if isinstance(content_bytes, str):
+                    content_bytes = content_bytes.encode('utf-8')
+
+                # imports.42: size circuit-breaker. See
+                # _WRITE_ATOMIC_HARD_CAP_BYTES block comment above for
+                # the OOM-incident background. Refuse oversize writes;
+                # preserve disk content. channel_count over-allocates by
+                # design (counts pre-render, but render's try/except at
+                # render_m3u line 230 may drop malformed stations) —
+                # that's safer than under-allocating.
+                limit = _compute_size_limit(channel_count)
+                if len(content_bytes) > limit:
+                    preview = content_bytes[:_WRITE_ATOMIC_PREVIEW_BYTES]
+                    try:    preview = preview.decode('utf-8', errors='replace')
+                    except Exception: preview = repr(preview)
+                    _log('write_atomic, REFUSING to write %s — content size %d bytes '
+                         'exceeds limit %d (channel_count=%s). Disk content preserved. '
+                         'First %d bytes of offending payload: %r'
+                         % (target_special_path, len(content_bytes), limit,
+                            channel_count, len(preview), preview),
+                         xbmc.LOGWARNING)
+                    return  # preserve disk content
+
                 with open(tmp, 'wb') as f:
-                    if isinstance(content_bytes, str):
-                        content_bytes = content_bytes.encode('utf-8')
                     f.write(content_bytes)
                     f.flush()
                     try: os.fsync(f.fileno())
                     except OSError: pass
                 os.replace(tmp, real_path)  # atomic on POSIX & Win >= 3.3
-                _log('write_atomic, wrote %d bytes to %s' % (len(content_bytes), real_path))
+                # imports.42: LOGINFO when channel_count is supplied (the
+                # common case post-imports.42 caller updates), LOGDEBUG
+                # otherwise (backward-compat for any caller without the
+                # count in scope). The INFO line is the routine log
+                # signal — operators scanning kodi.log at default level
+                # see one INFO line per M3U/XML write with size + count,
+                # so any future bloat is visible without flipping debug
+                # logging on.
+                if channel_count is not None:
+                    _log('write_atomic, wrote %d bytes (%d channels) to %s'
+                         % (len(content_bytes), channel_count, real_path),
+                         xbmc.LOGINFO)
+                else:
+                    _log('write_atomic, wrote %d bytes to %s'
+                         % (len(content_bytes), real_path),
+                         xbmc.LOGDEBUG)
             except Exception as e:
                 _log('write_atomic, failed for %s: %s' % (target_special_path, e), xbmc.LOGERROR)
                 try: os.unlink(tmp)

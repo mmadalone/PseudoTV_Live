@@ -1250,7 +1250,11 @@ class Imports(object):
                     self.log('syncAll, force-flush skipped (empty XMLTVDATA); disk content preserved',
                              level=xbmc.LOGWARNING)
                 else:
-                    write_atomic(XMLTVFLEPATH, rendered)
+                    # imports.42: pass channel_count for write_atomic's
+                    # circuit-breaker + LOGINFO size message.
+                    channel_count = (len(self.xmltv.XMLTVDATA.get('channels')   or [])
+                                   + len(self.xmltv.XMLTVDATA.get('recordings') or []))
+                    write_atomic(XMLTVFLEPATH, rendered, channel_count=channel_count)
                     self.log('syncAll, force-flushed merged XMLTVDATA to disk (%d bytes)'
                              % len(rendered), level=xbmc.LOGINFO)
             except Exception as e:
@@ -1278,7 +1282,11 @@ class Imports(object):
                 # rendered=None means refuse-empty-write guard fired; skip
                 # to preserve disk content rather than wipe to header-only.
                 if rendered is not None:
-                    write_atomic(M3UFLEPATH, rendered)
+                    # imports.42: pass channel_count for write_atomic's
+                    # circuit-breaker + LOGINFO size message.
+                    station_count = (len(self.m3u.M3UDATA.get('stations')   or [])
+                                   + len(self.m3u.M3UDATA.get('recordings') or []))
+                    write_atomic(M3UFLEPATH, rendered, channel_count=station_count)
                     self.log('syncAll, force-flushed merged M3UDATA to disk (%d bytes)'
                              % len(rendered), level=xbmc.LOGINFO)
                 else:

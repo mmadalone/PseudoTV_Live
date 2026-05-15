@@ -471,10 +471,15 @@ class M3U(object):
         if rendered is None:
             # Empty-data guard fired inside render_m3u; preserve disk content.
             return False
+        # imports.42: pass channel_count for write_atomic's circuit-breaker
+        # + LOGINFO size message. stations + recordings combined matches
+        # the renderer's own iteration (render_m3u line 134-137).
+        station_count = (len(self.M3UDATA.get('stations')   or [])
+                       + len(self.M3UDATA.get('recordings') or []))
         self.log('_save, writable = %s, file = %s, stations = %s, recordings = %s' % (
             self.writable, self.stationFile, len(self.M3UDATA.get('stations') or []), len(self.M3UDATA.get('recordings') or []),
         ))
-        write_atomic(self.stationFile, rendered)
+        write_atomic(self.stationFile, rendered, channel_count=station_count)
         return True
         
         

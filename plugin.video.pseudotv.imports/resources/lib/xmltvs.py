@@ -156,8 +156,13 @@ class XMLTVS(object):
         if rendered is None:
             # Empty-data guard fired in render_xmltv; preserve disk content.
             return False
+        # imports.42: pass channel_count for write_atomic's circuit-breaker
+        # + LOGINFO size message. channels + recordings combined matches
+        # the renderer's own iteration (render_xmltv line 271).
+        channel_count = (len(self.XMLTVDATA.get('channels')   or [])
+                       + len(self.XMLTVDATA.get('recordings') or []))
         try:
-            write_atomic(self.XMLTVFile, rendered)
+            write_atomic(self.XMLTVFile, rendered, channel_count=channel_count)
         except Exception as e:
             self.log("_save, failed: %s" % (e,), xbmc.LOGERROR)
             DIALOG.notificationDialog(LANGUAGE(32000))

@@ -272,8 +272,12 @@ class _RenderCallTracker:
         return self.m3u_out
     def render_xmltv(self, xmltvdata):
         return self.xml_out
-    def write_atomic(self, path, content):
-        self.writes_log.append((path, content))
+    def write_atomic(self, path, content, channel_count=None):
+        # imports.42: write_atomic gained an optional `channel_count` kwarg
+        # for size-circuit-breaker + LOGINFO size logging. Accept it here
+        # (and record it alongside the path/content) so cleanup_helpers'
+        # post-imports.42 invocation through this tracker doesn't TypeError.
+        self.writes_log.append((path, content, channel_count))
 
 
 def _install_fakes(monkeypatch, tracker, fake_m3u_cls=_FakeM3U, fake_xmltvs_cls=_FakeXMLTVS):
@@ -315,7 +319,7 @@ def test_renderCleanedFiles_writes_both_files(monkeypatch):
     m3u_written, xml_written = cleanup_helpers.renderCleanedFiles()
     assert m3u_written is True
     assert xml_written is True
-    paths = [p for p, _ in tracker.writes_log]
+    paths = [entry[0] for entry in tracker.writes_log]   # imports.42: writes_log tuples are 3-element (path, content, channel_count)
     assert '/fake/pseudotv.m3u' in paths
     assert '/fake/pseudotv.xml' in paths
 
@@ -334,7 +338,7 @@ def test_renderCleanedFiles_skips_write_on_empty_m3u(monkeypatch):
     m3u_written, xml_written = cleanup_helpers.renderCleanedFiles()
     assert m3u_written is False
     assert xml_written is True
-    paths = [p for p, _ in tracker.writes_log]
+    paths = [entry[0] for entry in tracker.writes_log]   # imports.42: writes_log tuples are 3-element (path, content, channel_count)
     assert '/fake/pseudotv.m3u' not in paths
     assert '/fake/pseudotv.xml' in paths
 
@@ -352,7 +356,7 @@ def test_renderCleanedFiles_skips_write_on_empty_xml(monkeypatch):
     m3u_written, xml_written = cleanup_helpers.renderCleanedFiles()
     assert m3u_written is True
     assert xml_written is False
-    paths = [p for p, _ in tracker.writes_log]
+    paths = [entry[0] for entry in tracker.writes_log]   # imports.42: writes_log tuples are 3-element (path, content, channel_count)
     assert '/fake/pseudotv.m3u' in paths
     assert '/fake/pseudotv.xml' not in paths
 

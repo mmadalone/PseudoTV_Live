@@ -1486,7 +1486,11 @@ class MyHandler(BaseHTTPRequestHandler):
                                     from renderers import render_m3u, write_atomic
                                     rendered = render_m3u(m3u.M3UDATA)
                                     if rendered is not None:
-                                        write_atomic(M3UFLEPATH, rendered)
+                                        # imports.42: pass channel_count for
+                                        # write_atomic's circuit-breaker + LOGINFO.
+                                        station_count = (len(m3u.M3UDATA.get('stations')   or [])
+                                                       + len(m3u.M3UDATA.get('recordings') or []))
+                                        write_atomic(M3UFLEPATH, rendered, channel_count=station_count)
                                         m3u_written = True
                                         self.log('renumber, rewrote pseudotv.m3u with %d updated numbers'%(touched))
                                     else:
