@@ -1861,9 +1861,26 @@ class MyHandler(BaseHTTPRequestHandler):
                     self.send_response(200)
                     __sendFile(img_path, False)
                 else:
-                    _allowed_roots = [os.path.abspath(LOGO_LOC),
-                                      os.path.abspath(CACHE_LOC),
-                                      os.path.abspath(MEDIA_LOC)]
+                    # imports.45: translatePath each root before abspath.
+                    # LOGO_LOC, CACHE_LOC, and MEDIA_LOC are stored as
+                    # `special://...` URIs at module-load time (variables.py
+                    # and constants.py join `getAddonInfo('profile')` /
+                    # `ADDON_PATH` with subdir names — both Kodi-VFS URIs).
+                    # os.path.abspath on a special:// string produces
+                    # `<cwd>/special:/...` because Linux/macOS treat the
+                    # colon as a regular char; that path doesn't exist on
+                    # disk, the candidate join lands in a nowhere-tree,
+                    # FileAccess.stream returns empty bytes silently, and
+                    # the caller sees 200 OK + 0 content. Dormant before
+                    # imports.44 because the only callers of /images/ used
+                    # the `img_path.startswith('/')` absolute-path branch
+                    # which sidesteps _allowed_roots[0]. imports.44's new
+                    # cross-host logo URLs are basenames (e.g. /images/
+                    # 13TV%40movistarplus.png) and route through the
+                    # relative-path branch, which exposed this bug.
+                    _allowed_roots = [os.path.abspath(FileAccess.translatePath(LOGO_LOC)),
+                                      os.path.abspath(FileAccess.translatePath(CACHE_LOC)),
+                                      os.path.abspath(FileAccess.translatePath(MEDIA_LOC))]
                     if img_path.startswith('/'):
                         candidate = os.path.abspath(img_path)
                     else:
