@@ -382,3 +382,68 @@ def test_evictOrphanLogos_keeps_import_with_active_id_after_imports_35(tmp_path,
     assert removed == 1
     assert (logos_dir / 'keep@s1.png').exists()
     assert not (logos_dir / 'remove@s1.png').exists()
+
+
+# ============================================================ imports.44 _portableLogoURL
+# Cross-host logo URL wrap. _cacheLogo returns an absolute madteevee-local
+# filesystem path; before imports.44 that path was assigned directly to
+# ch['logo'] and emitted as tvg-logo in the served M3U, so iptvsimple
+# clients on other hosts (a tablet pulling our M3U via HTTP) rendered
+# Kodi's default texture for every cached logo. The fix wraps to
+# `http://<host>/images/<basename>` — the server's /images/ handler
+# (server.py:1846+) maps the basename back to LOGO_LOC + <basename>.
+
+
+class _StubProperties:
+    """Minimal stub for imports.PROPERTIES used by _portableLogoURL."""
+
+    def __init__(self, host=''):
+        self._host = host
+
+    def getRemoteHost(self):
+        return self._host
+
+
+def test_portableLogoURL_wraps_when_host_set(tmp_path, monkeypatch):
+    monkeypatch.setattr('imports.CACHE_LOC', str(tmp_path))
+    monkeypatch.setattr('imports.PROPERTIES', _StubProperties('192.168.2.217:50002'))
+    imp = Imports()
+    local = os.path.join(str(tmp_path), 'logos', 'TVE.png')
+    assert imp._portableLogoURL(local) == 'http://192.168.2.217:50002/images/TVE.png'
+
+
+def test_portableLogoURL_falls_back_when_host_empty(tmp_path, monkeypatch):
+    """Host-empty branch: keep the absolute path so the local Kodi (the
+    one that just wrote the file) still resolves it from disk. Better
+    than emitting a broken URL — at least madteevee itself renders."""
+    monkeypatch.setattr('imports.CACHE_LOC', str(tmp_path))
+    monkeypatch.setattr('imports.PROPERTIES', _StubProperties(''))
+    imp = Imports()
+    local = os.path.join(str(tmp_path), 'logos', 'TVE.png')
+    assert imp._portableLogoURL(local) == local
+
+
+def test_portableLogoURL_url_encodes_at_namespace(tmp_path, monkeypatch):
+    """Imports channel ids carry the `<id>@<importsource>` namespace
+    convention (e.g. `TV3Cat.es@autonomiques`). `@` must be %-encoded in
+    the URL path — server.py's /images/ handler unquotes via
+    Globals._unquoteString before rejoining with LOGO_LOC, so the
+    roundtrip recovers the original basename."""
+    monkeypatch.setattr('imports.CACHE_LOC', str(tmp_path))
+    monkeypatch.setattr('imports.PROPERTIES', _StubProperties('madteevee:50002'))
+    imp = Imports()
+    local = os.path.join(str(tmp_path), 'logos', 'TV3Cat.es@autonomiques.png')
+    result = imp._portableLogoURL(local)
+    assert result == 'http://madteevee:50002/images/TV3Cat.es%40autonomiques.png'
+
+
+def test_portableLogoURL_strips_directory_portion(tmp_path, monkeypatch):
+    """Only the basename should be in the URL. The server's /images/
+    handler validates the resolved path stays under LOGO_LOC; if we
+    leaked the absolute directory into the URL we'd both bloat the M3U
+    and (depending on quoting) bypass the path-traversal guard."""
+    monkeypatch.setattr('imports.CACHE_LOC', str(tmp_path))
+    monkeypatch.setattr('imports.PROPERTIES', _StubProperties('h:50002'))
+    imp = Imports()
+    local = '/home/madalone/.kodi/userdata/addon_data/plugin.video.pseudotv.imports/cache/logos/abc.png'
+    assert imp._portableLogoURL(local) == 'http://h:50002/images/abc.png'

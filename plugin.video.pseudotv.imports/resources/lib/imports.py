@@ -1181,12 +1181,13 @@ class Imports(object):
                     continue
                 local = self._cacheLogo(cid, src, refresh_mode, validators)
                 if local:
-                    ch['logo'] = local
+                    # imports.44: portable URL wrap — see _portableLogoURL.
+                    ch['logo'] = self._portableLogoURL(local)
                     cached_count += 1
             self._logoSaveValidators(validators)
             # Evict logos for channels no longer present
             self._evictOrphanLogos({ch.get('id') for ch in all_imported_now.values() if ch.get('id')})
-            self.log('syncAll, logo cache: rewrote %d channel logos to local paths (mode=%d)'
+            self.log('syncAll, logo cache: rewrote %d channel logos to portable HTTP URLs (mode=%d)'
                      % (cached_count, refresh_mode), level=xbmc.LOGINFO)
 
         # Push imported channels into in-memory M3U/XMLTV
@@ -2003,6 +2004,26 @@ class Imports(object):
                 'url'          : source_url,
             }
         return target
+
+    def _portableLogoURL(self, local):
+        """imports.44: convert an absolute LOGO_LOC path returned by
+        _cacheLogo into a portable `http://<remote_host>/images/<basename>`
+        URL so cross-host iptvsimple clients (e.g. a tablet pulling our
+        M3U via http://<madteevee>:50002/pseudotv.m3u) can resolve the
+        logo. Without the wrap, the absolute madteevee-only path lands
+        in tvg-logo and remote clients render Kodi's default texture for
+        every cached logo. server.py's /images/ handler (server.py:1846+)
+        maps the basename back to LOGO_LOC + <basename>, so the URL
+        roundtrips to the same file. PROPERTIES.getRemoteHost() lazy-inits
+        the Remote_Host window property if syncAll runs before the HTTP
+        server has published it via setRemoteHost (server.py:2426). On
+        the rare host-empty branch we keep the absolute path so at least
+        local Kodi keeps rendering correctly.
+        """
+        host = PROPERTIES.getRemoteHost()
+        if not host:
+            return local
+        return 'http://%s/images/%s' % (host, Globals._quoteString(os.path.basename(local)))
 
     def _evictOrphanLogos(self, active_channel_ids):
         """Remove cache/logos/ files for channel ids no longer present.
