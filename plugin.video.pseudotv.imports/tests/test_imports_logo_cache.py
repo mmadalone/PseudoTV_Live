@@ -276,16 +276,24 @@ def test_evictOrphanLogos_keeps_operator_upload_referenced_by_chname(tmp_path, m
 def test_evictOrphanLogos_evicts_truly_orphan_file(tmp_path, monkeypatch):
     """imports.35 — a file in cache/logos/ with no channel reference AND
     no active id match still gets deleted. The new check ADDS protection;
-    it doesn't suppress legitimate eviction."""
+    it doesn't suppress legitimate eviction.
+
+    imports.46: updated to provide a non-empty active set, otherwise
+    the new defensive bail-out (both keep predicates empty) would
+    refuse to walk the cache. The "legitimate eviction" semantics this
+    test guards are unchanged — when at least one keep predicate is
+    populated, orphan files still get removed."""
     monkeypatch.setattr('imports.CACHE_LOC', str(tmp_path))
     imp = Imports()
     logos_dir = tmp_path / 'logos'
     logos_dir.mkdir()
     (logos_dir / 'truly_orphan.png').write_bytes(b'NOBODY_OWNS_ME')
+    (logos_dir / 'KEEP@x.png').write_bytes(b'KEEP')
     _stub_channels(imp, [])
-    removed = imp._evictOrphanLogos(set())
+    removed = imp._evictOrphanLogos({'KEEP@x'})
     assert removed == 1
     assert not (logos_dir / 'truly_orphan.png').exists()
+    assert (logos_dir / 'KEEP@x.png').exists()
 
 
 def test_evictOrphanLogos_no_double_count_on_active_AND_referenced(tmp_path, monkeypatch):
@@ -308,22 +316,28 @@ def test_evictOrphanLogos_no_double_count_on_active_AND_referenced(tmp_path, mon
 
 def test_evictOrphanLogos_handles_logo_field_outside_cache_dir(tmp_path, monkeypatch):
     """imports.35 — `referenced_basenames` build filters on
-    `'cache/logos/' in logo`. A channel record pointing at a logo file
-    OUTSIDE cache/logos/ (e.g., `special://home/addons/.../TVLand.png`)
-    does NOT add `TVLand.png` to the protected set. A file named
-    `TVLand.png` happening to sit in cache/logos/ then gets evicted as
-    a true orphan (correct — no record points at it)."""
+    `'cache/logos/' in logo` (imports.46 also accepts `/images/`). A
+    channel record pointing at a logo file OUTSIDE both forms (e.g.,
+    `special://home/addons/.../TVLand.png`) does NOT add `TVLand.png`
+    to the protected set. A file named `TVLand.png` happening to sit
+    in cache/logos/ then gets evicted as a true orphan (correct — no
+    record points at it).
+
+    imports.46: updated to pass a non-empty active set so the new
+    defensive bail-out doesn't suppress eviction. The selectivity-of-
+    referenced_basenames semantics this test guards are unchanged."""
     monkeypatch.setattr('imports.CACHE_LOC', str(tmp_path))
     imp = Imports()
     logos_dir = tmp_path / 'logos'
     logos_dir.mkdir()
     (logos_dir / 'TVLand.png').write_bytes(b'ORPHAN_IN_CACHE')
     _stub_channels(imp, [
-        # Logo references a file OUTSIDE cache/logos/
+        # Logo references a file OUTSIDE cache/logos/ and NOT in
+        # imports.44 /images/ URL form either.
         {'id': 'TVLand.us@epgbest_46477',
          'logo': 'special://home/addons/resource.images.pseudotv.logos.madteevee/resources/TVLand.png'},
     ])
-    removed = imp._evictOrphanLogos(set())
+    removed = imp._evictOrphanLogos({'TVLand.us@epgbest_46477'})
     assert removed == 1
     assert not (logos_dir / 'TVLand.png').exists()
 
@@ -350,20 +364,28 @@ def test_evictOrphanLogos_handles_None_logo_field(tmp_path, monkeypatch):
 def test_evictOrphanLogos_handles_channels_exception(tmp_path, monkeypatch):
     """imports.35 — if channels.getChannels() raises, the cross-ref build
     falls back to today's behavior (no referenced_basenames, just active
-    set). No regression vs pre-imports.35."""
+    set). No regression vs pre-imports.35.
+
+    imports.46: updated to pass a non-empty active set so the new
+    defensive bail-out doesn't fire. The exception-tolerance semantics
+    this test guards are unchanged — with channels.getChannels()
+    raising, referenced_basenames stays empty, but eviction still
+    proceeds when active provides a keep predicate."""
     monkeypatch.setattr('imports.CACHE_LOC', str(tmp_path))
     imp = Imports()
     logos_dir = tmp_path / 'logos'
     logos_dir.mkdir()
     (logos_dir / 'TMNT.png').write_bytes(b'OPERATOR_UPLOAD')
+    (logos_dir / 'KEEP@x.png').write_bytes(b'KEEP')
 
     _stub_channels(imp, None, raise_on_get=True)
 
     # Without referenced_basenames protection, TMNT.png (not in active set)
     # falls through to eviction — matches pre-imports.35 behavior.
-    removed = imp._evictOrphanLogos(set())
+    removed = imp._evictOrphanLogos({'KEEP@x'})
     assert removed == 1
     assert not (logos_dir / 'TMNT.png').exists()
+    assert (logos_dir / 'KEEP@x.png').exists()
 
 
 def test_evictOrphanLogos_keeps_import_with_active_id_after_imports_35(tmp_path, monkeypatch):
@@ -447,3 +469,96 @@ def test_portableLogoURL_strips_directory_portion(tmp_path, monkeypatch):
     imp = Imports()
     local = '/home/madalone/.kodi/userdata/addon_data/plugin.video.pseudotv.imports/cache/logos/abc.png'
     assert imp._portableLogoURL(local) == 'http://h:50002/images/abc.png'
+
+
+# ============================================================ imports.46 eviction sanity
+# After imports.44, ch['logo'] for cached imports is a portable HTTP URL
+# (`http://<host>/images/<encoded basename>`) instead of an absolute
+# `.../cache/logos/<basename>` path. imports.35's reference-check only
+# matched the OLD form, so on a sync cycle where `all_imported_now` was
+# empty (e.g. all per-imports returned 304 Not-Modified) the eviction
+# loop walked the cache with active=empty AND referenced=empty and
+# wiped every file. Live-observed 2026-05-20: 78 PNGs → 0 between two
+# Kodi restarts. imports.46 fixes both layers.
+
+
+def test_evictOrphanLogos_recognizes_imports44_url_form(tmp_path, monkeypatch):
+    """imports.46: the new portable URL form
+    (`http://<host>/images/<basename>`) protects the referenced file
+    from eviction even when active_channel_ids is empty (e.g. a
+    304-only sync cycle)."""
+    monkeypatch.setattr('imports.CACHE_LOC', str(tmp_path))
+    imp = Imports()
+    logos_dir = tmp_path / 'logos'
+    logos_dir.mkdir()
+    (logos_dir / 'TVE@movistarplus.png').write_bytes(b'IMPORT_CACHE')
+    _stub_channels(imp, [
+        {'id': 'TVE@movistarplus',
+         'logo': 'http://192.168.2.217:50002/images/TVE%40movistarplus.png'},
+    ])
+    # Empty active set — simulates a 304-only cycle where no records
+    # were synthesized into all_imported_now. The imports.46 reference-
+    # check via /images/ pattern is the sole protector here.
+    removed = imp._evictOrphanLogos(set())
+    assert removed == 0
+    assert (logos_dir / 'TVE@movistarplus.png').exists()
+
+
+def test_evictOrphanLogos_decodes_url_encoded_basename(tmp_path, monkeypatch):
+    """imports.46: `%40` in the URL must round-trip back to `@` so the
+    basename matches what's actually on disk. Mirrors server.py's
+    `_unquoteString(img_path)` of the relative-path branch."""
+    monkeypatch.setattr('imports.CACHE_LOC', str(tmp_path))
+    imp = Imports()
+    logos_dir = tmp_path / 'logos'
+    logos_dir.mkdir()
+    (logos_dir / 'TV3Cat.es@autonomiques.png').write_bytes(b'X')
+    _stub_channels(imp, [
+        {'id': 'TV3Cat.es@autonomiques',
+         'logo': 'http://madteevee:50002/images/TV3Cat.es%40autonomiques.png'},
+    ])
+    removed = imp._evictOrphanLogos(set())
+    assert removed == 0
+    assert (logos_dir / 'TV3Cat.es@autonomiques.png').exists()
+
+
+def test_evictOrphanLogos_refuses_mass_wipe_when_both_keep_predicates_empty(tmp_path, monkeypatch):
+    """imports.46 defense-in-depth: if both active_channel_ids and
+    referenced_basenames end up empty (e.g. a 304-only sync cycle on a
+    cache from a code version that hadn't run imports.44 yet — the
+    fields wouldn't be recognized by EITHER branch — OR the channels
+    layer has no records yet at all), the eviction loop refuses to
+    walk and returns 0. The pre-imports.46 behavior was to wipe every
+    file in cache/logos/."""
+    monkeypatch.setattr('imports.CACHE_LOC', str(tmp_path))
+    imp = Imports()
+    logos_dir = tmp_path / 'logos'
+    logos_dir.mkdir()
+    (logos_dir / 'A.png').write_bytes(b'A')
+    (logos_dir / 'B.jpg').write_bytes(b'B')
+    (logos_dir / 'C@x.png').write_bytes(b'C')
+    _stub_channels(imp, [])  # channels layer empty → referenced=empty
+    removed = imp._evictOrphanLogos(set())  # active=empty
+    assert removed == 0
+    # All three files survive the refuse-to-walk bail-out.
+    assert (logos_dir / 'A.png').exists()
+    assert (logos_dir / 'B.jpg').exists()
+    assert (logos_dir / 'C@x.png').exists()
+
+
+def test_evictOrphanLogos_still_evicts_when_active_provides_a_keep_predicate(tmp_path, monkeypatch):
+    """imports.46 regression guard — the new bail-out only fires when
+    BOTH keep predicates are empty. When active_channel_ids has any
+    entries, eviction proceeds as before and orphan files (not in
+    active and not referenced) are removed."""
+    monkeypatch.setattr('imports.CACHE_LOC', str(tmp_path))
+    imp = Imports()
+    logos_dir = tmp_path / 'logos'
+    logos_dir.mkdir()
+    (logos_dir / 'KEEP@x.png').write_bytes(b'KEEP')
+    (logos_dir / 'EVICT@x.png').write_bytes(b'EVICT')
+    _stub_channels(imp, [])
+    removed = imp._evictOrphanLogos({'KEEP@x'})
+    assert removed == 1
+    assert (logos_dir / 'KEEP@x.png').exists()
+    assert not (logos_dir / 'EVICT@x.png').exists()

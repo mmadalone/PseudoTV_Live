@@ -2049,19 +2049,60 @@ class Imports(object):
             # imports.35: cross-reference channels.json's logo fields to
             # protect operator-uploaded customs (and any other valid
             # referenced file) from eviction. Build the set of basenames
-            # currently referenced by ANY channel's logo field that
-            # points into cache/logos/. Wrapped in try/except so a
-            # channels-layer failure falls back to today's behavior
-            # (no regression — just no new protection).
+            # currently referenced by ANY channel's logo field.
+            #
+            # imports.46: also recognize the imports.44 URL form
+            # `http://<remote_host>/images/<url-encoded-basename>`. Pre-
+            # imports.44 ch['logo'] for cached channels held the absolute
+            # `/.../cache/logos/<basename>` path and matched the
+            # `'cache/logos/' in logo` predicate; imports.44 replaced
+            # that with the portable HTTP URL form so cross-host
+            # consumers can resolve it, but `'cache/logos/'` no longer
+            # appears in the field. Without this branch every cycle
+            # where `all_imported_now` ends up empty (e.g. a 304-only
+            # sync — every per-import returned Not-Modified, so no
+            # `new`/`refreshed` records were synthesized) walks the
+            # cache with active=empty AND referenced=empty and wipes
+            # every file. Live-observed 2026-05-20 between imports.44
+            # ship and imports.45: 78 PNGs in cache/logos/ → 0 after a
+            # subsequent sync, which then made imports.45's translatePath
+            # fix moot because the files /images/ pointed at no longer
+            # existed.
+            # Wrapped in try/except so a channels-layer failure falls
+            # back to today's behavior (no regression — just no new
+            # protection).
             referenced_basenames = set()
             try:
                 for ch in (self.channels.getChannels() or []):
                     logo = ch.get('logo') or ''
-                    if isinstance(logo, str) and 'cache/logos/' in logo:
+                    if not isinstance(logo, str) or not logo:
+                        continue
+                    if 'cache/logos/' in logo:
                         referenced_basenames.add(os.path.basename(logo))
+                    elif '/images/' in logo:
+                        # imports.44 wrap form. Extract the URL-encoded
+                        # basename from the tail and decode (mirrors
+                        # server.py's _unquoteString of img_path).
+                        try:
+                            tail = logo.rsplit('/images/', 1)[1]
+                            decoded = urllib.parse.unquote(tail)
+                            if decoded and '/' not in decoded:
+                                referenced_basenames.add(decoded)
+                        except Exception:
+                            pass
             except Exception as e:
                 self.log('_evictOrphanLogos, channels cross-ref failed: %s'
                          % e, level=xbmc.LOGWARNING)
+
+            # imports.46: defense-in-depth bail-out. If neither path
+            # produced a "keep" predicate (active set empty AND no
+            # channel references), refuse to walk the cache. The
+            # eviction loop would unlink every file — almost certainly
+            # not what the operator wants for a single bad sync cycle.
+            if not active and not referenced_basenames:
+                self.log('_evictOrphanLogos, skipping: empty active set + no channel references (likely a 304-only or failed sync cycle — refusing to mass-wipe)',
+                         level=xbmc.LOGWARNING)
+                return 0
 
             removed = 0
             for name in os.listdir(cache_dir):
