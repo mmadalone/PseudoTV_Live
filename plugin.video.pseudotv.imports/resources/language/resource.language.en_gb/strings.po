@@ -2455,7 +2455,7 @@ msgid "Change the default A.I. generative prompt use {name} and {group} along wi
 msgstr ""
 
 msgctxt "#33222"
-msgid "How long to wait in seconds before PseudoTV attempts to correct failed playback. [90 Default]"
+msgid "Seconds before PseudoTV recovers a stalled channel transition (watchdog re-fires PlayMedia) and the cooldown between retries when a short-file runaway loop is detected. [45 Default]"
 msgstr ""
 
 msgctxt "#33224"

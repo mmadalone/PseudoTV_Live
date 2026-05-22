@@ -1443,7 +1443,7 @@
                 </setting>
                 <setting id="Playback_Timeout" type="integer" label="30222" help="33222">
                     <level>3</level>
-                    <default>90</default>
+                    <default>45</default>
                     <constraints>
                         <minimum>30</minimum>
                         <step>15</step>

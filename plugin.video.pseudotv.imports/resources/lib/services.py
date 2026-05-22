@@ -89,6 +89,12 @@ class Player(xbmc.Player):
         self.jsonRPC     = service.jsonRPC
         self.pendingItem = {}
         self.playingItem = {}
+        # imports.47: transition-supervisor state. _play_started is stamped by
+        # onAVStarted and read by _onChange to measure how long the just-ended
+        # programme actually ran (loop-breaker short-play detection). _short_plays
+        # is the consecutive-short-play counter; resets on a normal-length play.
+        self._play_started = 0
+        self._short_plays  = 0
         
         
     def log(self, msg, level=xbmc.LOGDEBUG):
@@ -122,6 +128,10 @@ class Player(xbmc.Player):
             if new_ts > cur_ts:
                 self.pendingItem['_max_tune_ts'] = new_ts
         self.pendingItem.update({'invoked':-1,'pending':False,'item':newItem})
+        # imports.47: stamp the play-start timestamp so the loop-breaker can later
+        # measure how long this programme actually played. Set AFTER the _tune_ts
+        # stale-event early-return above so aborted fast-zap tunes don't pollute it.
+        self._play_started = time.time()
         self.log('onAVStarted, pendingItem = %s'%(self.pendingItem))
         self._onPlay(self.pendingItem.get('item',{}))
         
@@ -466,8 +476,36 @@ class Player(xbmc.Player):
                     callback = self.jsonRPC.getCallback(playingItem)
                     if callback: playingItem['callback'] = callback
                 if callback:
-                    BUILTIN.executebuiltin('PlayMedia(%s)'%(callback))
-                    self.log('_onChange, [%s], isPlaylist = %s, callback = %s'%(playingItem.get('citem',{}).get('id'),playingItem.get('isPlaylist',False),callback))
+                    # imports.47: transition supervisor — runaway loop-breaker + watchdog arm.
+                    # Loop-breaker accounting: for PseudoTV non-filler items, measure how long
+                    # the just-ended programme actually played (now - _play_started); a play
+                    # shorter than Seek_Tolerance counts as "short" and increments _short_plays.
+                    # Fillers are excluded (legitimately short) and so is non-PseudoTV content
+                    # (so the supervisor never engages on library/IPTV playback).
+                    if playingItem.get('isPseudoTV') and not playingItem.get('isfiller', False) and self._play_started > 0:
+                        played = time.time() - self._play_started
+                        if played < SETTINGS.getSettingInt('Seek_Tolerance'):
+                            self._short_plays += 1
+                            self.log('_onChange, [%s] short play: %.1fs < Seek_Tolerance — _short_plays=%s'%(playingItem.get('citem',{}).get('id'), played, self._short_plays))
+                        else:
+                            self._short_plays = 0
+                    if playingItem.get('isPseudoTV') and self._short_plays >= TRANSITION_LOOP_THRESHOLD:
+                        # Loop-breaker engaged: do NOT fire PlayMedia immediately. _chkTransition
+                        # will fire it after the Playback_Timeout cooldown — calm spaced retries
+                        # that naturally wait out the dead zone between a short file's end and
+                        # its EPG slot's end. retune_attempts=0 because the watchdog cap is for
+                        # true stalls (no onAVStarted), not the loop-breaker case where each
+                        # cycle's onAVStarted resets it.
+                        self.pendingItem.update({'invoked': time.time(), 'retune_cb': callback, 'retune_attempts': 0})
+                        self.log('_onChange, [%s] runaway: %s consecutive short plays — deferring re-tune via Playback_Timeout cooldown'%(playingItem.get('citem',{}).get('id'), self._short_plays), xbmc.LOGWARNING)
+                    else:
+                        BUILTIN.executebuiltin('PlayMedia(%s)'%(callback))
+                        self.log('_onChange, [%s], isPlaylist = %s, callback = %s'%(playingItem.get('citem',{}).get('id'),playingItem.get('isPlaylist',False),callback))
+                        # Watchdog arm: only for PseudoTV items (non-PTV transitions stay byte-identical
+                        # to pre-imports.47 — no arm, no _chkTransition involvement). Normal transitions
+                        # auto-disarm in ~1s when onPlayBackStarted/onAVStarted reset invoked=-1.
+                        if playingItem.get('isPseudoTV'):
+                            self.pendingItem.update({'invoked': time.time(), 'retune_cb': callback, 'retune_attempts': 0})
                 else:
                     self.log('_onChange, [%s], skipping PlayMedia: callback unresolved (would have been PlayMedia(None))'%(playingItem.get('citem',{}).get('id')), xbmc.LOGWARNING)
             self._runActions(RULES_ACTION_PLAYER_CHANGE, playingItem.get('citem',{}), playingItem, inherited=self)
@@ -542,11 +580,73 @@ class Player(xbmc.Player):
             self.log('_chkCallback, state swapped under us; dropping write (next tick will retry)', xbmc.LOGINFO)
 
 
+    def _chkTransition(self):
+        # imports.47: channel-transition supervisor (watchdog + loop-breaker recovery).
+        # Called every ~1s from Monitor._chkIdle's not-playing branch — i.e. it runs
+        # during the between-programmes gap where _onIdle (and the dead __chkPlayback
+        # it used to host) cannot reach.
+        #
+        # Two armers in _onChange set pendingItem['invoked']:
+        #   1. Watchdog — a normal PseudoTV transition fired PlayMedia and we want
+        #      a safety net in case Kodi sits on it (the BUG 1 stall class).
+        #   2. Loop-breaker — _onChange detected a runaway (>=3 consecutive short
+        #      plays: file ends before its slot does) and deferred the re-tune
+        #      instead of firing PlayMedia; _chkTransition fires it after the
+        #      Playback_Timeout cooldown, breaking the flicker storm into calm
+        #      spaced retries that naturally wait out the dead zone.
+        #
+        # Auto-disarms (no-op) when:
+        #   - pendingItem['invoked'] <= 0 (no transition pending; also clears the
+        #     retune_attempts counter so the next genuine arm starts from zero)
+        #   - isPlaying() (playback in progress — the relevant onXxx callback
+        #     resets invoked=-1; we defensively re-check here too)
+        #   - BUILTIN.isBusyDialog() (don't fight a system busy state)
+        #   - elapsed < Playback_Timeout (not yet stale)
+        #
+        # Concurrency: pendingItem is already touched without a lock by Kodi's
+        # player-event thread (callbacks), the @threadit workers (_onChange), and
+        # this idle-thread method — consistent with the codebase's GIL-reliance
+        # (cf. _chkCallback at line 522). The only meaningful race is "playback
+        # just started in the ~1s window before we fire" — we re-check isPlaying()
+        # immediately before executebuiltin to narrow it; a residual redundant
+        # re-tune of the same channel is bounded and benign.
+        inv = self.pendingItem.get('invoked', -1)
+        if inv <= 0:
+            if self.pendingItem.get('retune_attempts', 0) != 0:
+                self.pendingItem['retune_attempts'] = 0
+            return
+        if self.isPlaying(): return
+        if BUILTIN.isBusyDialog(): return
+        timeout = SETTINGS.getSettingInt('Playback_Timeout') or 45
+        if (time.time() - inv) < timeout: return
+        attempts = self.pendingItem.get('retune_attempts', 0)
+        if attempts >= TRANSITION_MAX_RETRIES:
+            self.log('_chkTransition, giving up after %s recovery attempts — '
+                     'channel left on background overlay; operator can change channel'
+                     %(attempts), xbmc.LOGWARNING)
+            self.pendingItem['invoked'] = -1
+            DIALOG.notificationDialog(LANGUAGE(32000))
+            return
+        cb = self.pendingItem.get('retune_cb') or self.playingItem.get('callback')
+        if not cb:
+            self.log('_chkTransition, no retune_cb available — disarming', xbmc.LOGWARNING)
+            self.pendingItem['invoked'] = -1
+            return
+        self.pendingItem['retune_attempts'] = attempts + 1
+        self.pendingItem['invoked']         = time.time()
+        self.log('_chkTransition, recovery re-fire #%s after %ss stall — PlayMedia(%s)'
+                 %(attempts + 1, int(time.time() - inv), cb), xbmc.LOGWARNING)
+        BUILTIN.executebuiltin('PlayMedia(%s)'%(cb))
+
+
     def _onIdle(self):
-        def __chkPlayback():
-            if self.pendingItem.get('invoked',-1) > 0:
-                if not BUILTIN.isBusyDialog() and (time.time() - self.pendingItem.get('invoked',-1)) > SETTINGS.getSettingInt('Playback_Timeout'):
-                    self.onPlayBackError()
+        # imports.47: the nested __chkPlayback that used to live here has been
+        # removed — it was dead code (pendingItem['invoked'] was never positive
+        # anywhere) AND its action (onPlayBackError → _onError → _onStop on debug)
+        # would tear down the channel on a stall instead of recovering it. The
+        # replacement is Player._chkTransition() above, called from Monitor._chkIdle
+        # so it runs during the between-programmes gap (which _onIdle never could —
+        # _chkIdle only invokes _onIdle while playing).
 
         def __chkBackground():
             remaining = floor(self.getRemainingTime())
@@ -586,7 +686,6 @@ class Player(xbmc.Player):
                     with PROPERTIES.chkRunning('Player.__chkSleep'):
                         if self._onSleep(): self.stop()
         
-        __chkPlayback()
         __chkBackground()
         __chkResumeTime()
         self._chkCallback()
@@ -697,14 +796,19 @@ class Monitor(xbmc.Monitor):
             self.isRunning = True
             while not self.abortRequested():
                 if   self.service._shutdown(0.5): break
-                elif self.player.isPlayingPseudoTV(): 
+                elif self.player.isPlayingPseudoTV():
                     self.idleTime = BUILTIN.getIdle()
                     self.isIdle   = bool(self.idleTime) | self.idleTime > OSD_TIMER
                     self.log('_chkIdle, isIdle = %s, idleTime = %s'%(self.isIdle, self.idleTime))
                     if self.isIdle: self.player._onIdle()
-                elif self.service._shutdown(0.5):
-                    self.log("_chkIdle, not playing!")
-                    break # not playing loosen timing
+                else:
+                    # imports.47: not-playing branch now drives the transition supervisor
+                    # (watchdog stall-recovery + loop-breaker cooldown). _chkTransition is
+                    # a fast no-op when no transition is pending — safe to call every tick.
+                    # Keeps the second _shutdown wait so shutdown stays responsive and the
+                    # not-playing loop cadence stays ~1s (matches pre-imports.47 timing).
+                    self.player._chkTransition()
+                    if self.service._shutdown(0.5): break
             self.isRunning = False
             self.log("_chkIdle, shutdown!")
 

@@ -105,6 +105,14 @@ AUTOTUNE_CHANNEL_DEFAULT = 2
 FILLER_LIMIT        = 250
 M3U_REFRESH         = 15
 
+# imports.47: transition-supervisor tuning. The watchdog (stall recovery) and the
+# loop-breaker (runaway re-tune detector) share Player.pendingItem['invoked'] +
+# Player._chkTransition; both timed by the existing Playback_Timeout setting.
+# Constants live here rather than as @setting because they're tuning knobs, not
+# operator-facing choices — touching them changes the heuristic, not a preference.
+TRANSITION_LOOP_THRESHOLD = 3   # consecutive short-plays (< Seek_Tolerance secs) → declare a runaway
+TRANSITION_MAX_RETRIES    = 5   # watchdog re-fire cap (stall recovery only; the loop-breaker is bounded by _short_plays naturally resetting on a normal play)
+
 PRE_POST_ROLL_TYPES = ['Pre-Roll',
                        'Post-Roll']
 
