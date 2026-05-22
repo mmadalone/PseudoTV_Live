@@ -459,7 +459,7 @@ class JSONRPC(object):
             duration = 0
             if isStack(path):# handle "stacked" videos
                 for file in splitStacks(path): duration += self.__parseDuration(runtime, file)
-            else: duration = self.__parseDuration(runtime, path, item, save)
+            else: duration = self.__parseDuration(runtime, path, item, save, accurate)
             if duration > 0: runtime = duration
         self.log(f"getDuration [{runtime}] {path}, accurate = {accurate}, save ={save}")
         return runtime
@@ -471,12 +471,22 @@ class JSONRPC(object):
         return total
 
 
-    def __parseDuration(self, runtime, path, item={}, save=SETTINGS.getSettingBool('Store_Duration')):
-        self.log("__parseDuration, runtime = %s, path = %s, save = %s" % (runtime, path, save))
+    def __parseDuration(self, runtime, path, item={}, save=SETTINGS.getSettingBool('Store_Duration'), accurate=False):
+        self.log("__parseDuration, runtime = %s, path = %s, save = %s, accurate = %s" % (runtime, path, save, accurate))
         duration = self.videoParser.getVideoLength(path.replace("\\\\", "\\"), item, self)
-        if round(percentDiff(runtime, duration)) > 25: duration = runtime
-        if save and duration != runtime: self.queDuration(item, duration)
-        self.log(f"__parseDuration [{runtime}] {path}, save = {save}")
+        # imports.48: 25% sanity-check fallback retained ONLY when accurate=False (the
+        # runtime==0 code path that falls into ffprobe). When the operator opted into
+        # accurate mode via Duration_Type=1 or DurationOptions rule 500, they explicitly
+        # want the ffprobe value — the library `runtime` field is often the lie we're
+        # trying to correct (scraped "official" runtime including credits/commercials
+        # the file does not contain — e.g. movie scraped at 105 min but the file is 79
+        # min, or a TV cartoon scraped at 60 min slot but the file is 44 min). The
+        # ffprobe-failure case (duration == 0) is still handled by getDuration's
+        # `if duration > 0:` guard at the caller. Stack handling (line 461) passes no
+        # `accurate` so it keeps the default False — preserves exact prior behaviour.
+        if not accurate and round(percentDiff(runtime, duration)) > 25: duration = runtime
+        if save and duration > 0 and duration != runtime: self.queDuration(item, duration)
+        self.log(f"__parseDuration [{runtime}] {path}, save = {save}, accurate = {accurate}")
         return duration
   
   
