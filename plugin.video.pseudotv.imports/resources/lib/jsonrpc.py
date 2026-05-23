@@ -83,7 +83,14 @@ class JSONRPC(object):
 
 
     def queueJSON(self, param):
-        if hasattr(self.service,'jsonQue'): self.service.jsonQue.add(param)
+        # imports.49: serialize dict → JSON string before .add() — `jsonQue` is a `set`,
+        # and dict params (e.g. {'method':'VideoLibrary.SetEpisodeDetails','params':{...}})
+        # are unhashable, raising TypeError pre-imports.49. Mirrors the logoQue pattern at
+        # resources.py:120 which has done exactly this serialization for years. Consumer
+        # at tasks.py:1135 deserializes via FileAccess.loadJSON on pop. Set dedup is
+        # preserved (identical-shape param → identical JSON string → one entry). Exposed
+        # by Store_Duration=true after imports.48 (queDuration was the dominant caller).
+        if hasattr(self.service,'jsonQue'): self.service.jsonQue.add(FileAccess.dumpJSON(param))
         
         
     def cacheJSON(self, param, life=datetime.timedelta(minutes=5), checksum=ADDON_VERSION):

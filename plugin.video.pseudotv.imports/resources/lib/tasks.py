@@ -1132,7 +1132,9 @@ class Tasks(object):
                     self.log("chkQUES, queuing = %s\npostQue: %s"%(len(self.service.postQue),param))
                     self.service._que(requestURL,1,*param)
                 if len(self.service.jsonQue) > 0:
-                    param = self.service.jsonQue.pop()
+                    # imports.49: pop returns a JSON string (queueJSON now serializes before add
+                    # to keep dict params hashable in the set). Deserialize before dispatch.
+                    param = FileAccess.loadJSON(self.service.jsonQue.pop())
                     self.log("chkQUES, queuing = %s\njsonQue:%s"%(len(self.service.jsonQue),param))
                     self.service._que(self.jsonRPC.sendJSON,-1,param)
                 if len(self.service.logoQue) > 0:
