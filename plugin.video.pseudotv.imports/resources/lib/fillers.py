@@ -181,6 +181,18 @@ class Fillers(object):
                 if bct.get('enabled', False) and chtype not in IGNORE_CHTYPE:
                     preFileList = self.getSingle(ftype, preKeys, chanceBool(bct.get('chance', 0)))
 
+                # imports.53: hard total cap on pre-roll items when not in Auto
+                # mode. Mirrors the imports.52 post-roll cap. getSingle returns
+                # up to one item per preKey (movies: [mpaa, codec] → up to 2;
+                # TV: [chname, fgenre] → up to 2); with Enable_Preroll=1 the
+                # operator wants exactly 1, not "up to 2". Shuffle before
+                # slicing so the cap doesn't bias toward the first preKey.
+                if not bct.get('auto', False):
+                    cap = SETTINGS.getSettingInt('Enable_Preroll')
+                    if cap > 0 and len(preFileList) > cap:
+                        random.shuffle(preFileList)
+                        preFileList = preFileList[:cap]
+
                 # iterate and add pre-rolls
                 for i, item in enumerate(Globals._setDictLST(preFileList)):
                     if service._interrupt() or service._suspend():

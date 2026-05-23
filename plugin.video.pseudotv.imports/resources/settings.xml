@@ -877,20 +877,22 @@
         <category id="fillers" label="30016" help="33016">
             <group id="1" label="30163">
                 <setting id="Enable_Preroll" type="integer" label="30017" help="30018">
+                    <!-- imports.53: changed from spinner (-1/0 = Auto/Off) to integer slider -1..20. Value is the LITERAL hard cap on pre-roll items inserted per programme across ratings+bumpers ftypes combined. -1 = Auto (uncapped — getSingle returns one item per preKey, up to 2 keys). 0 = Off. N>0 = max N items. -->
                     <level>2</level>
                     <default>-1</default>
                     <constraints>
-                        <options>
-                            <option label="30022">-1</option>
-                            <option label="30021">0</option>
-                        </options>
+                        <minimum>-1</minimum>
+                        <maximum>20</maximum>
+                        <step>1</step>
                     </constraints>
                     <dependencies>
                         <dependency type="enable">
                             <condition operator="is" setting="Enable_Fillers">true</condition>
                         </dependency>
                     </dependencies>
-                    <control type="spinner" format="string"/>
+                    <control type="slider" format="integer">
+                        <popup>false</popup>
+                    </control>
                 </setting>
                 <setting id="Random_Pre_Chance" type="integer" label="30139" help="33134" parent="Enable_Preroll">
                     <level>3</level>
