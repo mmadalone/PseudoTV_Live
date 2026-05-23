@@ -29,11 +29,17 @@ In addition to the per-commit patches against the `plugin.video.pseudotv.live` u
 - **WRITER_LOCK** (`writer_lock.py`, imports.12) — process-wide RLock around M3U/XMLTV render+os.replace. Defense in depth against in-process write races. Cross-process races (context_record.py separate process, operator hand-edits) still defended by a Custom-merge-from-disk workaround at `imports.py:916-955`.
 - **Renderers module** (`renderers.py`, imports.13) — render_m3u, render_xmltv, write_atomic as module-level pure functions. Eliminates the prior duplication across m3u.py + xmltvs.py + tasks.py.
 
-**Thread-safety hardening (imports.16/17/18, this session's work):**
+**Thread-safety hardening (imports.16/17/18):**
 
 - `Player._chkCallback` CAS gate (imports.16) — protects against writer-races-writer on `self.playingItem['callback']` when an `_onPlay` worker swaps state between the idle thread's read and write.
 - `HTTP.run()` socket-release (imports.17) — adds `self._server.server_close()` after `shutdown()` to release the listening socket; without it every `chkPVRRefresh` cycle leaked the socket and forced fallback to port 50003 with a user-visible toast.
 - `Player._overlay_lock` (imports.18) — serializes `toggleOverlay`'s read-modify-write of `self.overlay`. Closes the initial-create race where two threads (idle thread + @threadit worker) both saw `self.overlay = None`, both created an Overlay, and one's `channelBug` control got orphaned in `xbmcgui.Window(12005)` — operator-visible as the previous channel's logo sticking on top of the current channel.
+
+**Channel-transition supervisor + duration accuracy (imports.47/48/49):**
+
+- `Player._chkTransition` (imports.47) — unified watchdog + loop-breaker in `services.py`, called every ~1s from `Monitor._chkIdle`'s not-playing branch. Watchdog completes the dormant `pendingItem['invoked']` mechanism (re-fires `PlayMedia` after `Playback_Timeout` if Kodi stalled between iptvsimple resolving the stream URL and `default.py` launching — recovers the ~3-min stall mode). Loop-breaker counts consecutive short plays (`< Seek_Tolerance`) and defers re-tune at threshold 3 — turns the file-shorter-than-EPG-slot flicker storm into cooldown-paced retries. `Playback_Timeout` schema default 90→45.
+- `JSONRPC.__parseDuration` accurate flag (imports.48) — the 25% sanity-check fallback at `jsonrpc.py:477` was discarding ffprobe values that disagreed with scraped library `runtime` by more than 25%, exactly blocking the cases that need fixing (library includes scraped credits the file doesn't). Threaded `accurate` flag through `getDuration` → `__parseDuration`; gate the sanity-check on `not accurate`. When operator opts into `Duration_Type=1` globally (or per-channel via `DurationOptions` rule 500), ffprobe is trusted. Default `accurate=False` preserves stacked-file behaviour.
+- `JSONRPC.queueJSON` serialize-before-add (imports.49) — latent TypeError surfaced once imports.48 + `Store_Duration=true` started actually firing `queDuration`. `self.service.jsonQue` is a `set()`; `param` is a dict; sets reject unhashable items. Two-line fix mirroring the in-codebase `logoQue` pattern at `resources.py:120`: writer `self.service.jsonQue.add(FileAccess.dumpJSON(param))`, reader at `tasks.py:1135` `FileAccess.loadJSON(self.service.jsonQue.pop())`. Set dedup preserved (identical dicts → identical JSON strings → one entry).
 
 **Maintenance posture**: the imports addon does NOT rebase against upstream — it's a one-time fork that diverged from `plugin.video.pseudotv.live` after the `madteevee-on-nightly` rebase. Forward-ports from upstream into imports/ happen manually when needed.
 
