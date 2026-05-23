@@ -235,8 +235,21 @@ class Fillers(object):
 
             if postFileList:
                 random.shuffle(postFileList)
-                post_queue = deque(postFileList)
+                # imports.52: hard total cap when neither ftype is in Auto mode.
+                # Enable_Postroll value is now the LITERAL max items inserted
+                # per programme boundary (across adverts + trailers combined),
+                # replacing the pre-fix "fetch N per ftype, fill 3-hour budget"
+                # semantics which let arbitrary numbers of items into the gap.
+                # Live-observed pre-fix: Enable_Postroll=1 → 5+ items per gap.
+                # Post-fix: Enable_Postroll=1 → exactly 1 item per gap. Auto
+                # mode (-1) unchanged. shuffle above ensures the cap doesn't
+                # bias toward one ftype's content.
                 postAuto = (self.bctTypes.get('adverts', {}).get('auto', False) or self.bctTypes.get('trailers', {}).get('auto', False))
+                if not postAuto:
+                    cap = SETTINGS.getSettingInt('Enable_Postroll')
+                    if cap > 0 and len(postFileList) > cap:
+                        postFileList = postFileList[:cap]
+                post_queue = deque(postFileList)
                 postCounter = 0
                 total_available = len(post_queue)
                 self.log('[%s] injectBCTs, post-roll current runtime %s, available content %s' % (self.citem.get('id'), runtime, total_available))
