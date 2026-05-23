@@ -429,7 +429,12 @@ class Tasks(object):
             # recognize them as duplicates. Property stays True so the next tick after the
             # build completes will retry. FORK_NOTES priority #3.
             if key == 'chkChanged' and PROPERTIES.isRunning('Builder.buildChannels'):
-                self.log('_chkPropTimer, %s deferred (Builder.buildChannels running)'%(key))
+                # imports.50: promoted to LOGINFO so operator can see why a
+                # /channels/rebuild.json kick appears to do nothing for minutes
+                # when Builder is mid-build. Default LOGDEBUG was invisible
+                # with Kodi's debug.showloginfo=false (which is the recommended
+                # operator config — debug overlay is intrusive on-screen).
+                self.log('_chkPropTimer, %s deferred (Builder.buildChannels running)'%(key), xbmc.LOGINFO)
                 return
             self.log('_chkPropTimer, key = %s'%(key))
             # imports.19: was clrEXTProperty(key) which targets the raw key, but
@@ -763,10 +768,10 @@ class Tasks(object):
         if (self.service is not None
             and getattr(self.service, '_isPlaying', None)
             and self.service._isPlaying()):
-            self.log('chkImports, deferred (Run_While_Playing=false and a video is playing)')
+            self.log('chkImports, deferred (Run_While_Playing=false and a video is playing)', xbmc.LOGINFO)  # imports.50: LOGDEBUG → LOGINFO
             return
         if PROPERTIES.isRunning('Imports.syncAll'):
-            self.log('chkImports, deferred (Imports.syncAll already running)')
+            self.log('chkImports, deferred (Imports.syncAll already running)', xbmc.LOGINFO)  # imports.50: LOGDEBUG → LOGINFO
             return
         # madteevee (imports fork, imports.14 / C#10 Follow-up B):
         # close the in-process race where this daemon would write
@@ -781,7 +786,7 @@ class Tasks(object):
         # cannot be reached by an in-process property gate. See plan
         # at /home/madalone/.claude/plans/misty-shimmying-liskov.md.
         if PROPERTIES.isRunning('Builder.buildChannels'):
-            self.log('chkImports, deferred (Builder.buildChannels running)')
+            self.log('chkImports, deferred (Builder.buildChannels running)', xbmc.LOGINFO)  # imports.50: LOGDEBUG → LOGINFO
             return
         try:
             from imports import Imports
