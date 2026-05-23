@@ -979,8 +979,30 @@ class Builder(object):
     def setTrailers(self, item):
         dur = self.jsonRPC.getDuration(item.get('trailer'), accurate=True, save=False)
         if dur > 0:
-            item.update({'label':'%s - %s'%(item.get("label",""),LANGUAGE(30187)),'episodetitle':'%s - %s'%(item.get("episodetitle",""),LANGUAGE(30187)),'episodelabel':'%s - %s'%(item.get("episodelabel",""),LANGUAGE(30187)),'duration':dur, 'runtime':dur, 'file':item.get('trailer'), 'streamdetails':{}})
-            for genre in (item.get('genre',[]) or ['resources']): self.trailerCache.setdefault(genre.lower(),[]).append(item)
+            # imports.51: COPY the item before mutating so the original movie
+            # dict stays intact for the caller's fileList.append at line 936.
+            # Pre-fix, `item.update(...)` mutated the caller's dict in place —
+            # overwriting label / duration / file with the trailer's data —
+            # then the (now-mutated) item was appended to fileList. The channel
+            # silently lost every full movie whose Kodi-library entry had a
+            # `trailer` field with a fetchable duration, replacing each with
+            # its 2-3 min trailer in the content chain. Live-observed: FFOD
+            # channel lost Throne of Blood / Yojimbo / Sanjuro / Samurai
+            # Rebellion (only 2-3 min trailers appeared in the EPG, no full
+            # films). Same bug exists upstream at plugin.video.pseudotv.live
+            # builder.py:742-746; fork-only fix per project_fork_only_no_upstream.
+            trailer_item = dict(item)
+            trailer_item.update({
+                'label'       : '%s - %s' % (item.get("label",""),       LANGUAGE(30187)),
+                'episodetitle': '%s - %s' % (item.get("episodetitle",""),LANGUAGE(30187)),
+                'episodelabel': '%s - %s' % (item.get("episodelabel",""),LANGUAGE(30187)),
+                'duration'    : dur,
+                'runtime'     : dur,
+                'file'        : item.get('trailer'),
+                'streamdetails': {},
+            })
+            for genre in (trailer_item.get('genre',[]) or ['resources']):
+                self.trailerCache.setdefault(genre.lower(),[]).append(trailer_item)
                         
                         
     def getTrailers(self, genre=None) -> dict:
