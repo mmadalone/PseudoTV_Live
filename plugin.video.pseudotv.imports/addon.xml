@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<addon id="plugin.video.pseudotv.imports" version="0.8.0+imports.54" name="PseudoTV Live (imports)" provider-name="Lunatixz, mmadalone">
+<addon id="plugin.video.pseudotv.imports" version="0.8.0+imports.55" name="PseudoTV Live (imports)" provider-name="Lunatixz, mmadalone">
     <requires>
         <import addon="xbmc.python" version="3.0.1"/>
         <import addon="script.module.six" version="1.0.0"/>
@@ -77,6 +77,11 @@
         <source>https://github.com/PseudoTV/PseudoTV_Live</source>
         <forum>https://forum.kodi.tv/showthread.php?tid=355549</forum>
         <disclaimer lang="en_GB">BETA PROJECT; SUBJECT TO BUGS</disclaimer>
+        <news>v0.8.0+imports.55
+- Fixed: channel tunes could hang on a busy spinner for 10+ minutes while hidden cache maintenance ran; maintenance now runs in the background service, never during a tune.
+- Fixed: unbounded cache.db growth — expired entries are now genuinely purged on schedule.
+- Improved: changelog popup now shows only the latest changes.
+- New!: this addon now updates through the mmadalone repository.</news>
         <reuselanguageinvoker>true</reuselanguageinvoker>
         <assets>
             <icon>resources/images/icon.png</icon>

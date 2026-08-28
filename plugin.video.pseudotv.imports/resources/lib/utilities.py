@@ -78,7 +78,14 @@ class Utilities(object):
                 
             with BUILTIN.busy_dialog():
                 with FileAccess.stream(CHANGELOG_FLE) as fle:
-                    txt = __addColor(fle.read())
+                    # imports.55: show ONLY the newest version's entry (and only
+                    # its operator-facing part — anything below the
+                    # '--- engineering notes ---' marker stays in the file as
+                    # archive but is dropped here). The full-file dump was a
+                    # wall of text on every version-change popup.
+                    from changelog_helpers import latestEntry
+                    txt = __addColor(latestEntry(fle.read()))
+                    txt += '\n\n[COLOR=dimgray]Full history: changelog.txt in the addon folder.[/COLOR]'
                 DIALOG.textviewer(txt, heading=(LANGUAGE(32045)%(ADDON_NAME,ADDON_VERSION)),usemono=True)
         except Exception as e: log('Utilities: showChangelog failed! %s'%(e), xbmc.LOGERROR)
 
