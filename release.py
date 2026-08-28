@@ -35,13 +35,14 @@ SITE_DIR = REPO_ROOT / "_site"
 # Each entry is (addon_dir_under_repo_root, addon_id)
 ADDONS = [
     ("plugin.video.pseudotv.live", "plugin.video.pseudotv.live"),
+    ("plugin.video.pseudotv.imports", "plugin.video.pseudotv.imports"),
     ("repository.mmadalone.pseudotv", "repository.mmadalone.pseudotv"),
     ("resource.images.pseudotv.logos.madteevee", "resource.images.pseudotv.logos.madteevee"),
 ]
 
 # Files/dirs to exclude from the addon zip
 EXCLUDE_FILE_SUFFIXES = (".pyc", ".pyo", ".db", ".bak", ".bak2")
-EXCLUDE_DIR_NAMES = {"__pycache__", ".git", ".idea", ".vscode", "venv", "_site"}
+EXCLUDE_DIR_NAMES = {"__pycache__", ".git", ".idea", ".vscode", "venv", "_site", "tests"}
 
 
 def read_addon_metadata(addon_dir: Path) -> tuple[str, str, ET.Element]:

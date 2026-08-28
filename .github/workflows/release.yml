@@ -15,6 +15,9 @@ on:
   push:
     tags:
       - 'v*madteevee.*'
+      # imports-addon releases (dash form: v0.8.0-imports.55). Same glob
+      # limitation as above: '+' is not a valid literal in Actions filters.
+      - 'v*imports.*'
   workflow_dispatch:
 
 # release.py builds _site/, then we push that to gh-pages. We need write access
