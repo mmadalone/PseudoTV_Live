@@ -389,6 +389,7 @@ class Tasks(object):
         self.log('chkQueTimer')
         self._chkEpochTimer('chkVersion'      , self.chkVersion       , 43200 , 1)#12HRS
         self._chkEpochTimer('chkKodiSettings' , self.chkKodiSettings  , 10800 , 1)#3HRS
+        self._chkEpochTimer('chkCacheClean'   , self.chkCacheClean    , 3600  , 1)#1HR
         self._chkEpochTimer('chkDiscovery'    , self.chkDiscovery     , 300   , 1)#5MINS
         self._chkEpochTimer('chkQUES'         , self.chkQUES          , 120   , 1)#2MINS
         
@@ -478,7 +479,20 @@ class Tasks(object):
         MIN_GUIDEDAYS = SETTINGS.setSettingInt('Min_Days' ,self.jsonRPC.getSettingValue('epg.pastdaystodisplay'     ,default=1))
         MAX_GUIDEDAYS = SETTINGS.setSettingInt('Max_Days' ,self.jsonRPC.getSettingValue('epg.futuredaystodisplay'   ,default=3))
         OSD_TIMER     = SETTINGS.setSettingInt('OSD_Timer',self.jsonRPC.getSettingValue('pvrmenu.displaychannelinfo',default=5))
-         
+
+
+    def chkCacheClean(self):
+        # imports.54: sole force=True caller of cache cleanup. Maintenance
+        # used to run inline in whichever thread constructed a Cache() first
+        # after the Max_Days window (unit = hours) — for channel tunes that
+        # meant the whole purge + VACUUM ran behind Kodi's busy spinner
+        # (observed live 2026-08-28: 15m20s on a 134 MB cache.db). Every
+        # constructor now defers; this service-queue task is the only place
+        # the purge actually runs. Hourly check is cheap — the real cadence
+        # gate (lastexecuted + Max_Days) lives in _Cache.chkCleanup.
+        self.log('chkCacheClean')
+        self.cacheDB.chkCleanup(force=True)
+
 
     def chkDirs(self):
         [(self.log('chkDirs, creating [%s]'%(folder)),FileAccess.makedirs(folder)) for folder in [LOGO_LOC,FILLER_LOC,TEMP_LOC,TEMP_IMAGE_LOC] if not FileAccess.exists(os.path.join(folder,''))]

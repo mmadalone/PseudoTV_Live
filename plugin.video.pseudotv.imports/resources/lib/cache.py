@@ -28,6 +28,11 @@ class Service(object):
     monitor = MONITOR()
     def _shutdown(self, wait=1.0) -> bool:
         return (self.monitor.waitForAbort(wait) | (Globals._getProperty('%s.pendingShutdown'%(ADDON_ID),False)))
+    def _aborted(self) -> bool:
+        # imports.54: non-blocking twin of _shutdown — same signals, no
+        # waitForAbort sleep. For per-statement gates in hot paths that
+        # must not stall (see _execute_sql).
+        return (self.monitor.abortRequested() | (Globals._getProperty('%s.pendingShutdown'%(ADDON_ID),False)))
     def _interrupt(self) -> bool:
         return (Globals._getProperty('%s.pendingShutdown'%(ADDON_ID),False) | Globals._getProperty('%s.pendingRestart'%(ADDON_ID),False) | Globals._getProperty('%s.pendingInterrupt'%(ADDON_ID),False))
     def _suspend(self, wait=1.0) -> bool:
@@ -100,6 +105,12 @@ class Cache(object):
         self.cache.clr(name)
 
 
+    def chkCleanup(self, force=False):
+        # imports.54: service task entry point (Tasks.chkCacheClean is the
+        # only force=True caller).
+        return self.cache.chkCleanup(force)
+
+
 class _Cache(object):
     _cache_idx           = deque()
     _busy_tasks          = []
@@ -119,11 +130,21 @@ class _Cache(object):
         self.monitor   = service.monitor
         self.window    = xbmcgui.Window(winID)
         self.dbfile    = FileAccess.translatePath(os.path.join(REAL_SETTINGS.getSetting('User_Folder'),'cache.db'))
+        self._auto_clean_interval = self._cleanInterval()
+        self.log('__init__, max_bytes = %s, winID = %s, dbfile = %s, auto_clean_interval = %s' % (self.max_bytes, winID, self.dbfile, self._auto_clean_interval))
+        self.chkCleanup()
+
+
+    def _cleanInterval(self):
+        # imports.54: read Max_Days at CHECK time, not construction time. The
+        # service's Settings.cacheDB instance lives for the whole Kodi session,
+        # so an interval cached in __init__ froze operator changes until
+        # restart (Max_Days is also hourly re-synced from Kodi's
+        # epg.futuredaystodisplay by Tasks.chkKodiSettings). Unit kept as
+        # hours — see the class comment above.
         try: _hours = int(REAL_SETTINGS.getSetting('Max_Days') or '3')
         except (TypeError, ValueError): _hours = 3
-        self._auto_clean_interval = datetime.timedelta(hours=_hours)
-        self.log('__init__, max_bytes = %s, winID = %s, dbfile = %s, auto_clean_hours = %s' % (self.max_bytes, winID, self.dbfile, _hours))
-        self.chkCleanup()
+        return datetime.timedelta(hours=_hours)
 
 
     def __del__(self):
@@ -143,20 +164,30 @@ class _Cache(object):
         
         
         
-    def chkCleanup(self):
+    def chkCleanup(self, force=False):
         # madteevee (imports fork): was using repr(cur_time) for writes and
         # eval(lastexecuted) for reads. Kodi window properties are visible to
         # every addon in the process — any of them could store an expression
         # that eval would execute. Switched to isoformat / fromisoformat which
         # parse only as datetime.
+        # imports.54: _cleanUP no longer runs inline here. This is called from
+        # _Cache.__init__, which executes at MODULE IMPORT time of every plugin
+        # invocation (kodi.py's Settings class body) — a channel tune paid the
+        # whole purge + VACUUM behind Kodi's busy spinner whenever the Max_Days
+        # window (unit = hours) had lapsed. Observed live 2026-08-28: 15m20s
+        # spinner on a 134 MB / 29k-row cache.db. Constructors now only stamp
+        # the baseline; the service queue task Tasks.chkCacheClean is the sole
+        # force=True caller and the only place maintenance actually runs.
         cur_time     = datetime.datetime.now()
         lastexecuted = Globals._getProperty("%s.cache.lastexecuted"%(ADDON_ID))
         if not lastexecuted: Globals._setProperty("%s.cache.lastexecuted"%(ADDON_ID), cur_time.isoformat())
         else:
+            self._auto_clean_interval = self._cleanInterval()
             try:    parsed = datetime.datetime.fromisoformat(lastexecuted)
             except (TypeError, ValueError): parsed = None
             if parsed is None or (parsed + self._auto_clean_interval) < cur_time:
-                self._cleanUP()
+                if force: self._cleanUP()
+                else:     self.log('chkCleanup, cleanup due; deferred to service task (chkCacheClean)', xbmc.LOGINFO)
 
 
     def get(self, endpoint, checksum=""):
@@ -240,30 +271,61 @@ class _Cache(object):
 
 
     def _cleanUP(self):
-        self._busy_tasks.append(__name__)
+        # imports.54: rewritten set-based, mirroring upstream 0.7.x _cleanDB.
+        # Old shape iterated EVERY row with a blocking _shutdown(CPU_CYCLE)
+        # wait + a window-property clear, then issued one DELETE per expired
+        # row — 10-15+ min of grinding at 29k rows / 134 MB, paid behind the
+        # busy spinner when a channel tune's import triggered it. Now: one
+        # SELECT of the expired ids (their mem-cache property mirrors still
+        # need clearing), one set-based DELETE, VACUUM. Fresh entries keep
+        # their warm mem-cache mirrors — _getMEM self-expires them — where
+        # the old loop wiped every row's property.
+        # lastexecuted is stamped ONLY on success: the old code stamped it
+        # even when the pass was aborted mid-loop (user cancelling the
+        # spinner killed the invoker but the stamp still landed), so expired
+        # rows were never actually purged — observed 3-week-old expired rows
+        # and unbounded DB growth making every next pass slower.
         cur_time      = datetime.datetime.now()
         cur_timestamp = self.getTimestamp(cur_time)
+        if Globals._getProperty("%s.cache.cleanbusy"%(ADDON_ID)):
+            self.log("_cleanUP, skipped (cleanup already busy)")
+            return
         self.log("_cleanUP, running _cleanUP...")
-        
-        if not Globals._getProperty("%s.cache.cleanbusy"%(ADDON_ID)):
-            Globals._setProperty("%s.cache.cleanbusy"%(ADDON_ID), "busy")
-            query = "SELECT id, expires FROM cache"
-            for cache_data in self._execute_sql(query).fetchall():
-                if self.service._shutdown(CPU_CYCLE): break
+        Globals._setProperty("%s.cache.cleanbusy"%(ADDON_ID), "busy")
+        self._busy_tasks.append(__name__)
+        completed = False
+        try:
+            expired = self._execute_sql("SELECT id FROM cache WHERE expires < ?", (cur_timestamp,))
+            if expired is not None:
+                expired_ids = [row[0] for row in expired.fetchall()]
+                if expired_ids:
+                    # _execute_sql signals EVERY failure (FileLock timeout,
+                    # exhausted retries, abort gate) by returning None — the
+                    # purge only counts as done when the DELETE returned a
+                    # cursor. A false stamp here re-opens the original
+                    # never-actually-purged growth cycle, silently.
+                    deleted = self._execute_sql('DELETE FROM cache WHERE expires < ?', (cur_timestamp,))
+                    if deleted is not None:
+                        completed = True
+                        for cache_id in expired_ids:
+                            Globals._clrProperty('%s.%s'%(ADDON_ID,cache_id))
+                        # index (upstream parity, self-heals existing DBs) and
+                        # VACUUM are best-effort space maintenance — only worth
+                        # the exclusive lock when rows actually went away, and
+                        # their failure must not force an hourly purge retry.
+                        self._execute_sql("CREATE INDEX IF NOT EXISTS idx_expires ON cache(expires)")
+                        self._execute_sql("VACUUM")
+                        self.log("_cleanUP, purged %d expired entries"%(len(expired_ids)), xbmc.LOGINFO)
+                    else:
+                        self.log("_cleanUP, DELETE failed (db contended?); %d expired entries kept, will retry next tick"%(len(expired_ids)), xbmc.LOGWARNING)
                 else:
-                    cache_id      = cache_data[0]
-                    cache_expires = cache_data[1]
-                    Globals._clrProperty('%s.%s'%(ADDON_ID,cache_id))
-                    if cache_expires < cur_timestamp:
-                        query = 'DELETE FROM cache WHERE id = ?'
-                        self._execute_sql(query, (cache_id,))
-                        self.log("_cleanUP, delete from db %s" % cache_id)
-
-            self._execute_sql("VACUUM")
-            self._busy_tasks.remove(__name__)
-            Globals._setProperty("%s.cache.lastexecuted"%(ADDON_ID), cur_time.isoformat())
+                    completed = True
+                    self.log("_cleanUP, nothing expired; skipping VACUUM", xbmc.LOGINFO)
+        finally:
+            try: self._busy_tasks.remove(__name__)
+            except ValueError: pass
+            if completed: Globals._setProperty("%s.cache.lastexecuted"%(ADDON_ID), cur_time.isoformat())
             Globals._clrProperty("%s.cache.cleanbusy"%(ADDON_ID))
-            self.log("_cleanUP, auto _cleanUP done")
 
 
     def _execute_sql(self, query, data=None):
@@ -306,21 +368,25 @@ class _Cache(object):
             return
 
         while not self.service.monitor.abortRequested() and not retries == LOCK_MAX_FILE_TIMEOUT:
-            if self.service._shutdown(CPU_CYCLE): break
-            else:
-                try:
-                    with FileLock(self.dbfile):
-                        if isinstance(data, list): result = connection.executemany(query, data)
-                        elif data:                 result = connection.execute(query, data)
-                        else:                      result = connection.execute(query)
-                        return result
-                except sqlite3.OperationalError as e:
-                    retries += 1
-                    self.log("_execute_sql, retrying DB commit...", xbmc.LOGWARNING)
-                    self.service._sleep(LOCK_MAX_FILE_DELAY)
-                except Exception as e:
-                    self.log("_execute_sql, connection ERROR ! -- %s" % str(e), xbmc.LOGERROR)
-                    break
+            # imports.54: was `if self.service._shutdown(CPU_CYCLE): break` —
+            # a BLOCKING waitForAbort(0.016) before EVERY statement, taxing
+            # every cache get/set addon-wide and turning row-by-row loops
+            # into minutes-long grinds. The shutdown gate stays, non-blocking;
+            # sleeping belongs only in the contention-retry branch below.
+            if self.service._aborted(): break
+            try:
+                with FileLock(self.dbfile):
+                    if isinstance(data, list): result = connection.executemany(query, data)
+                    elif data:                 result = connection.execute(query, data)
+                    else:                      result = connection.execute(query)
+                    return result
+            except sqlite3.OperationalError as e:
+                retries += 1
+                self.log("_execute_sql, retrying DB commit...", xbmc.LOGWARNING)
+                self.service._sleep(LOCK_MAX_FILE_DELAY)
+            except Exception as e:
+                self.log("_execute_sql, connection ERROR ! -- %s" % str(e), xbmc.LOGERROR)
+                break
                     
         if connection:
             connection.close()
