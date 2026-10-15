@@ -549,9 +549,20 @@ class Imports(object):
                 # channels for this import as the "parsed" list.
                 self.log('[%s] syncOne, source unchanged (304); preserving channels' % import_id)
                 result['status'] = 'unchanged'
+                # imports.57: a 304 means the source is identical to the last
+                # full read — the read that marked any orphans — so those are
+                # still absent and must not be handed to reconcile as "parsed".
+                # Pre-imports.57 every stored record (orphans included) went
+                # through as parsed, applyRefresh cleared is_orphan, and the
+                # channels the source had dropped came back on the next
+                # routine sync: live, 11 Movistar+ channels (outside the
+                # account's package, or gone from the catalogue) flipped in
+                # and out of the channel list. A channel the source lists
+                # again still returns through the next full (200) read.
                 result['parsed'] = [
                     c for c in existing_channels
                     if c.get('import_source') == import_id
+                    and not c.get('is_orphan')
                 ]
                 # epg_id_map for unchanged path
                 result['epg_id_map'] = {

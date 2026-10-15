@@ -1,5 +1,12 @@
 ### NOTICE: plugin.video.pseudotv.imports is a sibling fork of plugin.video.pseudotv.live, adding native M3U/XMLTV ingestion + a web dashboard at port 50002. Versions are 0.8.0+imports.NN. Pre-fork upstream history lives in plugin.video.pseudotv.live/changelog.txt. ####
 
+v.0.8.0+imports.57
+- Fixed: channels that a source stops listing kept disappearing and reappearing in the channel list: gone after a full read of the source, back after the next routine sync. This hit 11 Movistar+ channels (six movie channels outside the account's package, five discontinued pop-up channels). They now stay hidden until the source lists them again, and come back automatically if it does.
+--- engineering notes ---
+- syncOne's 304 path handed every stored record of the import (orphans included) to reconcile as "parsed", and applyRefresh then cleared `is_orphan`. A 304 means the source is identical to the last full read — the read that marked the orphans — so the 304 parsed list (and the epg_id_map built from it) now excludes `is_orphan` records. Orphans go through reconcile's orphan list exactly as on the 200 path; a channel the source lists again is un-orphaned by the next 200 read (applyRefresh unchanged). Only the 304 path changes; the G24 empty-parse path returns before reconcile and was never affected.
+- Live trigger: the Movistar+ addon exports only channels its account is entitled to; six M+ movie channels are outside the account's package and five pop-up channels left Movistar's catalogue — 21 records (11 enabled) flip-flopped between each 200 read (orphaned) and the next 304 cycle (resurrected).
+- Tests: test_imports57_orphan_stability.py (3 — multi-cycle syncAll against a persisting store; two fail on the pre-imports.57 code). 773 passing.
+
 v.0.8.0+imports.56
 - Fixed: an imported source's whole TV guide could vanish for up to 10 hours when its guide download failed (no internet, timeout, server error) while its channel list still loaded. This kept happening to Movistar+, whose channel list is local but whose guide comes from the internet. A failed download now keeps the last good guide (the cached copy, or the guide already in place), retries on the failure-retry schedule instead of waiting out the refresh interval, and shows the guide error on the dashboard.
 - Fixed: a guide download that returns an error page or a broken file no longer replaces the last good cached guide.

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<addon id="plugin.video.pseudotv.imports" version="0.8.0+imports.56" name="PseudoTV Live (imports)" provider-name="Lunatixz, mmadalone">
+<addon id="plugin.video.pseudotv.imports" version="0.8.0+imports.57" name="PseudoTV Live (imports)" provider-name="Lunatixz, mmadalone">
     <requires>
         <import addon="xbmc.python" version="3.0.1"/>
         <import addon="script.module.six" version="1.0.0"/>
@@ -77,11 +77,11 @@
         <source>https://github.com/PseudoTV/PseudoTV_Live</source>
         <forum>https://forum.kodi.tv/showthread.php?tid=355549</forum>
         <disclaimer lang="en_GB">BETA PROJECT; SUBJECT TO BUGS</disclaimer>
-        <news>v0.8.0+imports.56
-- Fixed: a source's whole TV guide could vanish for hours when its guide download failed; the last good guide is now kept and the download retried soon.
-- New!: a source whose guide went missing repairs itself at the next sync, even offline.
-- Fixed: cached channel logos now load in Kodi and follow network address changes.
-- Fixed: the "Disabled" failure-retry option now takes effect.</news>
+        <news>v0.8.0+imports.57
+- Fixed: channels a source stops listing (e.g. Movistar+ channels outside your package) no longer disappear and reappear; they stay hidden until the source lists them again.
+v0.8.0+imports.56
+- Fixed: a source's TV guide could vanish for hours when its guide download failed; failed downloads now keep the last good guide.
+- Fixed: cached channel logos now load in Kodi and follow network address changes.</news>
         <reuselanguageinvoker>true</reuselanguageinvoker>
         <assets>
             <icon>resources/images/icon.png</icon>
