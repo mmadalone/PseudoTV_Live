@@ -24,6 +24,7 @@ from globals                   import *
 from channels                  import Channels, markOverrides
 from filter_helpers             import META_ONLY_FIELDS
 from sysinfo_helpers            import resolveKodiOSVersion
+from logo_links                 import public_logo_name
 from resources                 import Resources
 from six.moves.BaseHTTPServer  import BaseHTTPRequestHandler, HTTPServer
 from six.moves.socketserver    import ThreadingMixIn
@@ -1825,6 +1826,23 @@ class MyHandler(BaseHTTPRequestHandler):
             _auth_path = self.path.split('?', 1)[0].lower()
             _PUBLIC_GET_PATHS = ('/favicon.ico', f'/{M3UFLE.lower()}',
                                  f'/{GENREFLE.lower()}', f'/{XMLTVFLE.lower()}')
+            # imports.56: cached channel logos are public too. The playlist
+            # links them as http://<lan-host>:<port>/images/<file>, and Kodi
+            # fetches its channel icons via that LAN address (not loopback),
+            # so behind the login every cached logo came back 401 — for the
+            # local Kodi as much as for peers. Only a bare image file name
+            # sitting directly inside LOGO_LOC qualifies (see
+            # logo_links.public_logo_name); every other /images/ form
+            # (nested or absolute paths, '..', special://, file://) still
+            # needs the login. A missing logo is a 404, not a 200 + empty body.
+            _logo_name = public_logo_name(self.path)
+            if _logo_name is not None:
+                _logo_root = os.path.realpath(FileAccess.translatePath(LOGO_LOC))
+                _logo_file = os.path.realpath(os.path.join(_logo_root, _logo_name))
+                if os.path.dirname(_logo_file) == _logo_root and os.path.isfile(_logo_file):
+                    self.send_response(200)
+                    return __sendFile(_logo_file, False)
+                return self.send_error(404, "Not Found")
             if _auth_path not in _PUBLIC_GET_PATHS and not self._requireAuth():
                 return
             if self.path.startswith('/logos/'): # 302 Temporary Redirect
@@ -1947,7 +1965,7 @@ class MyHandler(BaseHTTPRequestHandler):
                             # + the two new Imports_Failure_* settings.
                             try:
                                 from imports import computeRetryDelay, RETRY_CURVE_BY_CODE
-                                try:    curve = RETRY_CURVE_BY_CODE.get(int(SETTINGS.getSettingInt('Imports_Failure_Retry_Curve') or 1), 'aggressive')
+                                try:    curve = RETRY_CURVE_BY_CODE.get(int(SETTINGS.getSettingInt('Imports_Failure_Retry_Curve')), 'aggressive')  # imports.56: no `or 1` (Disabled is 0)
                                 except Exception: curve = 'aggressive'
                                 try:    abandon_hours = int(SETTINGS.getSettingInt('Imports_Failure_Abandon_Hours') or 0)
                                 except Exception: abandon_hours = 0
@@ -2412,7 +2430,50 @@ class HTTP(Thread):
         value = PROPERTIES.getEXTProperty('%s.HTTP.pendingRestart'%(ADDON_ID),False)
         PROPERTIES.clrEXTProperty('%s.HTTP.pendingRestart'%(ADDON_ID))
         return value
-       
+
+
+    # imports.56: the published address (Remote_Host + Remote_M3U/XMLTV/GENRE)
+    # used to be decided once, when this server started, and never revisited.
+    # After a network change every logo link and URL built from it kept
+    # pointing at an address the box no longer had, for the rest of the Kodi
+    # session. The server binds 0.0.0.0, so it already answers on the new
+    # address — only the published values need refreshing. Polled from the
+    # run loop's 15 s tick, acted on at most once a minute.
+    ADDRESS_CHECK_SECS = 60
+
+    def _chkAddress(self):
+        now = time.time()
+        if now - getattr(self, '_lastAddressCheck', 0) < self.ADDRESS_CHECK_SECS:
+            return False
+        self._lastAddressCheck = now
+        try:
+            published = PROPERTIES.getRemoteHost() or ''
+            old_host, sep, port = published.rpartition(':')
+            if not sep or not port:
+                return False
+            new_host = SETTINGS.getIP()
+            # Network down → Kodi reports 0.0.0.0 / loopback. Keep the last
+            # good address until a usable one comes back.
+            if (not new_host or new_host == old_host
+                or new_host == '0.0.0.0' or new_host.startswith('127.')):
+                return False
+            server = PROPERTIES.setRemoteHost('%s:%s'%(new_host,port))
+            SETTINGS.setSetting('Remote_M3U'  ,'http://%s/%s'%(server,M3UFLE))
+            SETTINGS.setSetting('Remote_XMLTV','http://%s/%s'%(server,XMLTVFLE))
+            SETTINGS.setSetting('Remote_GENRE','http://%s/%s'%(server,GENREFLE))
+            # Re-render pseudotv.m3u now (its logo links and x-tvg-url carry
+            # the address) rather than at the next natural imports cycle. The
+            # render-only kick runs a normal gated cycle — no forced downloads
+            # — and never replaces a kick that is already pending.
+            from imports import RENDER_ONLY_KICK
+            if not PROPERTIES.getEXTProperty('chkImports.kick', ''):
+                PROPERTIES.setEXTProperty('chkImports.kick', RENDER_ONLY_KICK)
+            self.log('_chkAddress, address changed %s -> %s; republished %s'%(old_host, new_host, server), xbmc.LOGINFO)
+            return True
+        except Exception as e:
+            self.log('_chkAddress, failed! %s'%(e), xbmc.LOGWARNING)
+            return False
+
 
     def run(self):  
         def __update(silent=None):
@@ -2467,10 +2528,12 @@ class HTTP(Thread):
                     except Exception as e:
                         self.log("run, http server failed! %s"%(e), xbmc.LOGERROR)
                         break
-                elif self.service._shutdown(15) or pendingRestart: 
+                elif self.service._shutdown(15) or pendingRestart:
                     self.log("run, _shutdown/pendingRestart", xbmc.LOGERROR)
                     break
-                    
+                else:
+                    self._chkAddress()
+
             try: self._server.shutdown()
             except Exception: pass
             # imports.17: release the listening socket. shutdown() above only stops

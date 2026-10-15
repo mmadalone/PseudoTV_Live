@@ -40,6 +40,7 @@ import urllib.parse
 
 from globals     import *
 from m3u         import M3U
+from logo_links  import own_logo_basename, port_set
 from xmltv       import parseExternalSource as _parse_xmltv_stream
 
 
@@ -203,6 +204,23 @@ def _isDiskMissing(import_id, scope):
             return True
 
     return False
+
+
+# madteevee (imports fork, imports.56): kick value that runs a normal, gated
+# chkImports cycle right away — no gate bypass, so no forced downloads. Used
+# when only the rendered files need refreshing (server.py:_chkAddress after
+# the box's address changes). syncAll treats it exactly like
+# force_scope=None.
+RENDER_ONLY_KICK = '__render__'
+
+# imports.56: guide self-heal. An enabled import that has had a guide before
+# (its per-import EPG cache exists) but has NO programmes in the guide data
+# about to be written gets a forced sync instead of waiting out
+# refresh_interval_min (10 h on madteevee). If that sync can't bring the
+# guide back — e.g. nothing in the source matches the channels — don't keep
+# re-forcing more often than this. Per process: a Kodi restart re-arms it.
+GUIDE_SELFHEAL_MIN_INTERVAL_SEC = 3 * 3600
+_GUIDE_SELFHEAL_LAST = {}  # {import_id: epoch of the last self-heal sync}
 
 
 def validate_source_url(url, allowed=ALLOWED_M3U_SCHEMES):
@@ -644,6 +662,15 @@ class Imports(object):
                 etag=import_cfg.get('epg_etag'),
                 last_modified=import_cfg.get('epg_last_modified'),
             )
+            # imports.56: `epg_error` records why this cycle produced no usable
+            # guide (download failed, unparseable or empty body, or a 304 with
+            # no readable cache). Pre-imports.56 each of those left
+            # epg_pairs=[] while epg_id_map was populated, and syncAll's XML
+            # branch then pruned this import's whole guide and appended
+            # nothing. Movistar+ (local M3U, guide from GitHub) lost its entire
+            # guide every time the internet dropped during a sync, and the
+            # refresh_interval_min gate then kept it gone for up to 10 h.
+            epg_error = None
             if epg_fetched['status'] == 200:
                 # Don't filter at parse time — many EPG sources (davidmuma EPG_dobleM,
                 # other regional EPGs) use human-readable display names as channel
@@ -653,21 +680,28 @@ class Imports(object):
                 # so filtering there gets the correct set.
                 # Memory cost is bounded by iterparse + elem.clear() — even a 50MB
                 # EPG processes in <100MB RSS regardless of total programme count.
+                epg_pairs = None
                 try:
                     epg_pairs = list(self.parseXMLTV(epg_fetched['content']))
+                except Exception as e:
+                    epg_error = 'guide parse failed: %s' % (e,)
+                if epg_pairs:
                     result['epg_pairs'] = epg_pairs
                     self.log('[%s] syncOne, parsed EPG: %d items' % (import_id, len(epg_pairs)))
-                except Exception as e:
-                    self.log('[%s] syncOne, EPG parse failed: %s' % (import_id, e),
-                             level=xbmc.LOGWARNING)
-                # Persist the fetched bytes to per-import cache BEFORE updating
-                # validators in updated_cfg — if the write fails we keep
-                # validators at their previous (now-mismatched) state so the
-                # next cycle force-fetches.
-                cached_ok = self._epgCacheWrite(import_id, epg_fetched['content'])
-                if cached_ok:
-                    if epg_fetched.get('etag'):          result['updated_cfg']['epg_etag']          = epg_fetched['etag']
-                    if epg_fetched.get('last_modified'): result['updated_cfg']['epg_last_modified'] = epg_fetched['last_modified']
+                    # Persist the fetched bytes to per-import cache BEFORE updating
+                    # validators in updated_cfg — if the write fails we keep
+                    # validators at their previous (now-mismatched) state so the
+                    # next cycle force-fetches.
+                    # imports.56: only a body that parsed into a usable guide may
+                    # replace the cache. The cache is the fallback below, so an
+                    # error page or a truncated download must never overwrite the
+                    # last good copy.
+                    cached_ok = self._epgCacheWrite(import_id, epg_fetched['content'])
+                    if cached_ok:
+                        if epg_fetched.get('etag'):          result['updated_cfg']['epg_etag']          = epg_fetched['etag']
+                        if epg_fetched.get('last_modified'): result['updated_cfg']['epg_last_modified'] = epg_fetched['last_modified']
+                elif epg_error is None:
+                    epg_error = 'guide download contained no guide data'
             elif epg_fetched['status'] == 304:
                 cached_pairs = self._epgCacheRead(import_id)
                 if cached_pairs is not None:
@@ -680,11 +714,27 @@ class Imports(object):
                     # force-fetches a fresh copy and rebuilds the cache file.
                     result['updated_cfg']['epg_etag']          = None
                     result['updated_cfg']['epg_last_modified'] = None
-                    self.log('[%s] syncOne, EPG 304 but cache missing/corrupt — clearing validators'
-                             % (import_id,), level=xbmc.LOGWARNING)
+                    epg_error = 'guide unchanged upstream but the cached copy is missing or unreadable'
             else:
-                # EPG failure is non-fatal — channels still work, just no programmes
-                self.log('[%s] syncOne, EPG fetch failed: %s' % (import_id, epg_fetched.get('error')),
+                epg_error = 'guide download failed: %s' % (
+                    epg_fetched.get('error') or 'status %s' % (epg_fetched.get('status'),))
+
+            if epg_error:
+                # imports.56: fall back to the last good cached guide (the 304
+                # branch already tried it). With no usable cache, flag the
+                # result so syncAll's XML branch keeps this import's previous
+                # guide instead of pruning it.
+                cached_pairs = None
+                if epg_fetched['status'] != 304:
+                    cached_pairs = self._epgCacheRead(import_id)
+                if cached_pairs:
+                    result['epg_pairs'] = cached_pairs
+                    result['epg_fallback'] = 'using the cached guide'
+                else:
+                    result['epg_keep_previous'] = True
+                    result['epg_fallback'] = 'kept the previous guide'
+                result['epg_error'] = epg_error
+                self.log('[%s] syncOne, %s — %s' % (import_id, epg_error, result['epg_fallback']),
                          level=xbmc.LOGWARNING)
 
         # Success
@@ -693,6 +743,21 @@ class Imports(object):
         result['updated_cfg']['last_status']  = result['status']
         result['updated_cfg']['last_error']   = None
         result['updated_cfg']['last_sync_at'] = int(time.time())
+        # imports.56: a guide failure leaves `status` alone — 'ok'/'unchanged'
+        # keeps the import in cascade allocation and resets the M3U failure
+        # counter — but shows on the dashboard via last_error and drives the
+        # gate's failure-retry curve through its own counter, so the guide is
+        # retried soon instead of after refresh_interval_min.
+        if result.get('epg_error'):
+            try:
+                prev_efc = int(import_cfg.get('epg_fail_count') or 0)
+            except (TypeError, ValueError):
+                prev_efc = 0
+            result['updated_cfg']['epg_fail_count'] = min(prev_efc + 1, FAIL_COUNT_CAP)
+            err = result['epg_error']
+            result['updated_cfg']['last_error'] = '%s%s (%s)' % (err[:1].upper(), err[1:], result['epg_fallback'])
+        elif import_cfg.get('epg_fail_count'):
+            result['updated_cfg']['epg_fail_count'] = 0
         return result
 
 
@@ -746,7 +811,8 @@ class Imports(object):
         # operator sees "Refresh did nothing" which is the same UX as a
         # deferred kick. The debug log line makes the typo visible without
         # spamming for the common cases (None, 'all', valid id).
-        if force_scope is not None and force_scope != 'all':
+        # imports.56: RENDER_ONLY_KICK is a deliberate no-bypass value, not a typo.
+        if force_scope is not None and force_scope not in ('all', RENDER_ONLY_KICK):
             known_ids = {imp.get('id') for imp in imports if imp.get('id')}
             if force_scope not in known_ids:
                 self.log("syncAll, force_scope=%r doesn't match any known import id (typo? known: %s)"
@@ -820,6 +886,15 @@ class Imports(object):
                     self.log('[%s] syncAll, disk-presence: forcing sync (scope=%s, file missing/stub)'
                              % (import_cfg.get('id'), scope), level=xbmc.LOGINFO)
 
+            # imports.56: guide self-heal — an import whose guide is missing
+            # from the guide data being written gets synced now rather than
+            # after refresh_interval_min. With syncOne's cache fallback this
+            # restores the guide even while the source is unreachable.
+            if not force_active and self._guideNeedsSelfHeal(import_cfg, existing_channels):
+                force_active = True
+                self.log('[%s] syncAll, guide missing from %s — forcing a sync (self-heal)'
+                         % (iid, XMLTVFLE), level=xbmc.LOGWARNING)
+
             if (import_cfg.get('enabled', True)
                 and import_cfg.get('id')):
                 try:
@@ -838,9 +913,12 @@ class Imports(object):
                 # mocks deterministic). `disabled` curve preserves pre-.28
                 # behavior exactly — gate fires at rim*60 regardless of
                 # last_status. Abandon-hours=0 means "never abandon" (default).
+                # imports.56: no `or 1` — it turned the 'Disabled' option
+                # (code 0) into 'aggressive', so Disabled never took effect.
+                # A failed read still falls back to 'aggressive' (the default).
                 try:
                     curve = RETRY_CURVE_BY_CODE.get(
-                        int(SETTINGS.getSettingInt('Imports_Failure_Retry_Curve') or 1),
+                        int(SETTINGS.getSettingInt('Imports_Failure_Retry_Curve')),
                         'aggressive',
                     )
                 except Exception:
@@ -859,6 +937,11 @@ class Imports(object):
                 except (TypeError, ValueError):
                     failed_since = None
                 last_status = import_cfg.get('last_status')
+                # imports.56: consecutive guide-only failures (see syncOne).
+                try:
+                    epg_fail_count = int(import_cfg.get('epg_fail_count') or 0)
+                except (TypeError, ValueError):
+                    epg_fail_count = 0
 
                 now = int(time.time())
 
@@ -907,6 +990,10 @@ class Imports(object):
                     effective_gate_sec = rim * 60
                     if last_status == 'failed' and fail_count > 0:
                         effective_gate_sec = computeRetryDelay(curve, fail_count, rim * 60)
+                    elif epg_fail_count > 0:
+                        # imports.56: the guide failed last time while the
+                        # channel list was fine — retry on the same curve.
+                        effective_gate_sec = computeRetryDelay(curve, epg_fail_count, rim * 60)
                     elapsed = now - last
                     # Defensive: 0 <= elapsed guards against negative values from
                     # clock skew (NTP step backwards, system time set manually,
@@ -915,6 +1002,9 @@ class Imports(object):
                         if last_status == 'failed' and fail_count > 0:
                             self.log('[%s] syncAll, retry gate: skipped (elapsed %ds < %ds backoff, fail_count=%d, curve=%s)'
                                      % (iid, elapsed, effective_gate_sec, fail_count, curve), level=xbmc.LOGINFO)
+                        elif epg_fail_count > 0:
+                            self.log('[%s] syncAll, guide retry gate: skipped (elapsed %ds < %ds backoff, epg_fail_count=%d, curve=%s)'
+                                     % (iid, elapsed, effective_gate_sec, epg_fail_count, curve), level=xbmc.LOGINFO)
                         else:
                             self.log('[%s] syncAll, refresh-interval gate: skipped (elapsed %ds < %dm)'
                                      % (iid, elapsed, rim), level=xbmc.LOGINFO)
@@ -1186,7 +1276,16 @@ class Imports(object):
                     cached_count += 1
             self._logoSaveValidators(validators)
             # Evict logos for channels no longer present
-            self._evictOrphanLogos({ch.get('id') for ch in all_imported_now.values() if ch.get('id')})
+            # imports.56: "present" means every channel known at the start of
+            # this cycle plus anything it added — not just the channels synced
+            # in it. A gated (skipped) import's channels are absent from
+            # all_imported_now, so every routine cycle used to evict their
+            # cached logos and the next full sync re-downloaded them: the
+            # playlist's /images/ links pointed at missing files most of the
+            # time. Channels removed from channels.json still get evicted.
+            present_ids = {ch.get('id') for ch in existing_channels if ch.get('id')}
+            present_ids |= {ch.get('id') for ch in all_imported_now.values() if ch.get('id')}
+            self._evictOrphanLogos(present_ids)
             self.log('syncAll, logo cache: rewrote %d channel logos to portable HTTP URLs (mode=%d)'
                      % (cached_count, refresh_mode), level=xbmc.LOGINFO)
 
@@ -1250,10 +1349,36 @@ class Imports(object):
                 and not ch.get('unallocated')
             }
 
+            def _pruneSlice(suffix, dead_only):
+                """Remove this import's entries (ids ending in `suffix`) from
+                XMLTVDATA. dead_only=True removes only entries whose channel
+                is no longer live (not in enabled_ids) and keeps the rest."""
+                xtv_c = self.xmltv.XMLTVDATA.setdefault('channels', [])
+                xtv_p = self.xmltv.XMLTVDATA.setdefault('programmes', [])
+                def _drop(cid):
+                    return (isinstance(cid, str) and cid.endswith(suffix)
+                            and (not dead_only or cid not in enabled_ids))
+                n_c, n_p = len(xtv_c), len(xtv_p)
+                xtv_c[:] = [c for c in xtv_c if not _drop(c.get('id'))]
+                xtv_p[:] = [p for p in xtv_p if not _drop(p.get('channel'))]
+                return n_c - len(xtv_c), n_p - len(xtv_p)
+
             for iid, res in per_import_results.items():
                 id_map = res['epg_id_map']
                 if not id_map:
                     continue
+                import_ns_suffix = '@%s' % iid
+
+                # imports.56: this cycle produced no usable guide and there is
+                # no cached copy (see syncOne) — keep this import's previous
+                # guide instead of pruning it to nothing. Entries for channels
+                # that are no longer live still go.
+                if res.get('epg_keep_previous'):
+                    pruned_chan, pruned_prog = _pruneSlice(import_ns_suffix, dead_only=True)
+                    self.log('syncAll, [%s] guide unavailable (%s) — keeping the previous guide (dropped %d channels + %d programmes no longer live)'
+                             % (iid, res.get('epg_error'), pruned_chan, pruned_prog), level=xbmc.LOGWARNING)
+                    continue
+
                 # Build per-import name_map for fallback. Look up by normalized
                 # name → namespaced id. Includes both source name and tvg-id-as-name
                 # since some imports (epg.best) use short codes for both.
@@ -1293,33 +1418,11 @@ class Imports(object):
                 xtv_channels   = self.xmltv.XMLTVDATA.setdefault('channels', [])
                 xtv_programmes = self.xmltv.XMLTVDATA.setdefault('programmes', [])
 
-                # madteevee (imports fork): drop ALL stale entries for this
-                # import's namespace BEFORE appending the freshly-matched ones.
-                # Without this, the existing entries (loaded from disk by
-                # XMLTVS.__init__) for channels that got disabled since the last
-                # cycle would survive forever — our append loop only filters NEW
-                # matches against enabled_ids. Stripping by namespace suffix
-                # leaves all OTHER imports' entries untouched.
-                import_ns_suffix = '@%s' % iid
-                pruned_chan = pruned_prog = 0
-                kept_chans = []
-                for c in xtv_channels:
-                    if isinstance(c.get('id'), str) and c['id'].endswith(import_ns_suffix):
-                        pruned_chan += 1
-                        continue
-                    kept_chans.append(c)
-                xtv_channels[:] = kept_chans
-                kept_progs = []
-                for p in xtv_programmes:
-                    if isinstance(p.get('channel'), str) and p['channel'].endswith(import_ns_suffix):
-                        pruned_prog += 1
-                        continue
-                    kept_progs.append(p)
-                xtv_programmes[:] = kept_progs
-                if pruned_chan or pruned_prog:
-                    self.log('syncAll, [%s] pruned %d channels + %d programmes from prior cycle (will re-append fresh matches honoring enabled-state)'
-                             % (iid, pruned_chan, pruned_prog), level=xbmc.LOGINFO)
-
+                # imports.56: match into fresh lists FIRST, decide what to do
+                # with the existing slice afterwards. Pre-imports.56 the prune
+                # ran before matching, so a cycle that matched nothing left
+                # the import with no guide at all.
+                new_chans, new_progs = [], []
                 matched_chan = matched_prog = skipped = 0
                 skipped_disabled = 0
                 for kind, item in res['epg_pairs']:
@@ -1348,7 +1451,7 @@ class Imports(object):
                         cached = ch_rec.get('logo') or ''
                         if cached and not is_remote_url(cached):
                             item['icon'] = [{'src': cached}]
-                        xtv_channels.append(item)
+                        new_chans.append(item)
                         matched_chan += 1
                     elif kind == 'programme':
                         src_id = item.get('channel')
@@ -1359,7 +1462,7 @@ class Imports(object):
                         if ns_id not in enabled_ids:
                             skipped_disabled += 1; continue
                         item['channel'] = ns_id
-                        xtv_programmes.append(item)
+                        new_progs.append(item)
                         matched_prog += 1
                 self.log('syncAll, [%s] EPG match: channels=%d programmes=%d skipped=%d skipped-disabled=%d'
                          % (iid, matched_chan, matched_prog, skipped, skipped_disabled),
@@ -1375,6 +1478,35 @@ class Imports(object):
                     res['updated_cfg']['epg_last_modified'] = None
                     self.log('syncAll, [%s] cleared EPG cache validators (0 matched of %d items)'
                              % (iid, len(res['epg_pairs'])), level=xbmc.LOGINFO)
+
+                # imports.56: nothing matched — and not because the channels
+                # are disabled, which must still prune — while the import does
+                # have a guide source: keep the previous guide rather than
+                # replacing it with nothing (e.g. the source briefly publishes
+                # a file with unusable ids). Entries for channels that are no
+                # longer live still go. An import whose guide source was
+                # REMOVED falls through to the full prune below, as before.
+                epg_configured = bool(res['updated_cfg'].get('epg_url')
+                                      or res['updated_cfg'].get('epg_path'))
+                if epg_configured and matched_chan == 0 and matched_prog == 0 and skipped_disabled == 0:
+                    pruned_chan, pruned_prog = _pruneSlice(import_ns_suffix, dead_only=True)
+                    self.log('syncAll, [%s] no guide entries matched — keeping the previous guide (dropped %d channels + %d programmes no longer live)'
+                             % (iid, pruned_chan, pruned_prog), level=xbmc.LOGWARNING)
+                    continue
+
+                # madteevee (imports fork): drop ALL stale entries for this
+                # import's namespace before appending the freshly-matched ones.
+                # Without this, the existing entries (loaded from disk by
+                # XMLTVS.__init__) for channels that got disabled since the last
+                # cycle would survive forever — the match loop only filters NEW
+                # matches against enabled_ids. Stripping by namespace suffix
+                # leaves all OTHER imports' entries untouched.
+                pruned_chan, pruned_prog = _pruneSlice(import_ns_suffix, dead_only=False)
+                if pruned_chan or pruned_prog:
+                    self.log('syncAll, [%s] pruned %d channels + %d programmes from prior cycle (will re-append fresh matches honoring enabled-state)'
+                             % (iid, pruned_chan, pruned_prog), level=xbmc.LOGINFO)
+                xtv_channels.extend(new_chans)
+                xtv_programmes.extend(new_progs)
 
         # Force-flush merged XMLTVDATA when running under a writable XMLTVS
         # (Builder.buildChannels path). Builder's per-channel addProgramme
@@ -1972,6 +2104,15 @@ class Imports(object):
             return None
         existing = self._findLogoFile(channel_id)
 
+        # imports.56: never download one of our OWN /images/ links. A channel
+        # whose source stopped supplying a logo keeps the portable URL as its
+        # `logo`, and fetching it meant this addon calling itself over the
+        # LAN address — refused (401) by the auth gate, or a 30 s timeout when
+        # the host part was stale. The file is either already cached (reuse
+        # it) or gone (nothing to fetch).
+        if own_logo_basename(source_url, self._ownLogoPorts()) is not None:
+            return existing
+
         if refresh_mode == 0 and existing:
             # Fetch if missing — already present, no work
             return existing
@@ -2024,6 +2165,16 @@ class Imports(object):
         if not host:
             return local
         return 'http://%s/images/%s' % (host, Globals._quoteString(os.path.basename(local)))
+
+    def _ownLogoPorts(self):
+        """imports.56: ports that mark a logo URL as one of our own
+        /images/ links — the current server port plus the configured
+        TCP_PORT (see logo_links.port_set)."""
+        try:
+            tcp_port = SETTINGS.getSettingInt('TCP_PORT')
+        except Exception:
+            tcp_port = None
+        return port_set(PROPERTIES.getRemoteHost(), tcp_port)
 
     def _evictOrphanLogos(self, active_channel_ids):
         """Remove cache/logos/ files for channel ids no longer present.
@@ -2158,6 +2309,55 @@ class Imports(object):
                      % (import_id,), level=xbmc.LOGWARNING)
             return None
         return pairs
+
+    def _hasCachedGuide(self, import_id):
+        """imports.56: True when the per-import guide cache holds a non-stub
+        file — i.e. this import has had a guide before. Stat only; the
+        parse happens in the sync this enables."""
+        try:
+            path = self._epgCachePath(import_id)
+            return os.path.exists(path) and os.path.getsize(path) >= _DISK_PRESENCE_EPG_MIN_BYTES
+        except Exception:
+            return False
+
+    def _guideNeedsSelfHeal(self, import_cfg, existing_channels):
+        """imports.56: True when this import should be force-synced because
+        its guide is missing from the guide data about to be written.
+
+        Requires all of: the import is enabled and has a guide source; it
+        has at least one live channel (enabled, allocated, not orphaned —
+        a guide for nothing is legitimately empty); NOT ONE of its
+        programmes is in self.xmltv; it has had a guide before (cache file
+        present — rules out imports that never matched anything); and no
+        self-heal for it in the last GUIDE_SELFHEAL_MIN_INTERVAL_SEC.
+        Cheap checks run first; the programme scan stops at the first hit.
+        """
+        iid = import_cfg.get('id')
+        if not iid or not import_cfg.get('enabled', True):
+            return False
+        if not (import_cfg.get('epg_url') or import_cfg.get('epg_path')):
+            return False
+        if self.xmltv is None:
+            return False
+        if not any(c.get('import_source') == iid
+                   and c.get('enabled', True)
+                   and not c.get('is_orphan')
+                   and not c.get('unallocated')
+                   for c in (existing_channels or [])):
+            return False
+        suffix = '@%s' % iid
+        for p in (self.xmltv.XMLTVDATA.get('programmes') or []):
+            ch = p.get('channel')
+            if isinstance(ch, str) and ch.endswith(suffix):
+                return False
+        if not self._hasCachedGuide(iid):
+            return False
+        now = time.time()
+        last = _GUIDE_SELFHEAL_LAST.get(iid)
+        if last and 0 <= now - last < GUIDE_SELFHEAL_MIN_INTERVAL_SEC:
+            return False
+        _GUIDE_SELFHEAL_LAST[iid] = now
+        return True
 
     def cascadeAllocate(self, parsed_imports, existing_channels):
         """

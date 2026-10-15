@@ -43,6 +43,7 @@ import re
 from globals     import *
 from fileaccess  import FileAccess
 from writer_lock import held, WriterTimeout
+from logo_links  import port_set, repoint_own_logo
 
 
 def _log(msg, level=xbmc.LOGDEBUG):
@@ -131,6 +132,18 @@ def render_m3u(m3udata):
     # guarantees uniqueness across imports.
     line_template = '#EXTINF:-1 channel-id="%s" tvg-chno="%s" tvg-id="%s" tvg-name="%s" tvg-logo="%s" group-title="%s" radio="%s" catchup="%s" %s,%s\n'
 
+    # imports.56: point the addon's own cached-logo links at the CURRENT
+    # Remote_Host on every render (see logo_links.py). Stored channel records
+    # keep whatever host was current when the logo was cached; without this
+    # an address change left those links stale until each channel's next
+    # full sync. Other logo URLs pass through untouched.
+    logo_host = PROPERTIES.getRemoteHost()
+    try:
+        tcp_port = SETTINGS.getSettingInt('TCP_PORT')
+    except Exception:
+        tcp_port = None
+    logo_ports = port_set(logo_host, tcp_port)
+
     stations = sorted(
         list(m3udata.get('recordings') or []) + list(m3udata.get('stations') or []),
         key=lambda s: s.get('number', 0),
@@ -183,7 +196,7 @@ def render_m3u(m3udata):
                 station.get('number', 0),
                 _m3u_attr_escape(station.get('id', '')),
                 _m3u_attr_escape(station.get('name', '')),
-                _m3u_attr_escape(station.get('logo', '')),
+                _m3u_attr_escape(repoint_own_logo(station.get('logo', ''), logo_host, logo_ports)),
                 _m3u_attr_escape(';'.join(group_sorted)),
                 station.get('radio', False),
                 _m3u_attr_escape(station.get('catchup', '')),

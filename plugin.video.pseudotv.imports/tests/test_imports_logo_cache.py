@@ -428,10 +428,10 @@ class _StubProperties:
 
 def test_portableLogoURL_wraps_when_host_set(tmp_path, monkeypatch):
     monkeypatch.setattr('imports.CACHE_LOC', str(tmp_path))
-    monkeypatch.setattr('imports.PROPERTIES', _StubProperties('192.168.2.217:50002'))
+    monkeypatch.setattr('imports.PROPERTIES', _StubProperties('192.0.2.10:50002'))
     imp = Imports()
     local = os.path.join(str(tmp_path), 'logos', 'TVE.png')
-    assert imp._portableLogoURL(local) == 'http://192.168.2.217:50002/images/TVE.png'
+    assert imp._portableLogoURL(local) == 'http://192.0.2.10:50002/images/TVE.png'
 
 
 def test_portableLogoURL_falls_back_when_host_empty(tmp_path, monkeypatch):
@@ -494,7 +494,7 @@ def test_evictOrphanLogos_recognizes_imports44_url_form(tmp_path, monkeypatch):
     (logos_dir / 'TVE@movistarplus.png').write_bytes(b'IMPORT_CACHE')
     _stub_channels(imp, [
         {'id': 'TVE@movistarplus',
-         'logo': 'http://192.168.2.217:50002/images/TVE%40movistarplus.png'},
+         'logo': 'http://192.0.2.10:50002/images/TVE%40movistarplus.png'},
     ])
     # Empty active set — simulates a 304-only cycle where no records
     # were synthesized into all_imported_now. The imports.46 reference-
