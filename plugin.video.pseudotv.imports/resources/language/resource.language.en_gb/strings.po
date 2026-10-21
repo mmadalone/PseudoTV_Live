@@ -2609,7 +2609,7 @@ msgid "Logo refresh policy"
 msgstr ""
 
 msgctxt "#33914"
-msgid "Choose how often cached logos are re-downloaded. 'If missing' is fastest and lowest bandwidth; 'Conditional GET' catches upstream updates with one round-trip per channel per cycle; 'Refetch every cycle' is wasteful for ~100 channels."
+msgid "Choose how often cached logos are re-downloaded. 'If missing' is fastest and lowest bandwidth; 'Conditional GET' catches upstream updates with one round-trip per channel per cycle; 'Refetch every cycle' is wasteful for ~100 channels. A logo is always downloaded again when its address changes."
 msgstr ""
 
 msgctxt "#33915"

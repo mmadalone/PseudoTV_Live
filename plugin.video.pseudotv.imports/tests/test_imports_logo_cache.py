@@ -4,12 +4,19 @@ Exercises Imports._logoCachePath / _logoExtForUrl / _cacheLogo /
 _evictOrphanLogos / validators round-trip. Uses tmp_path + monkeypatched
 imports.CACHE_LOC so the real addon_data is untouched.
 """
+import hashlib
 import json
 import os
 
 import pytest
 
 from imports import Imports
+
+
+def _versioned(tmp_path, channel_id, content, ext):
+    """imports.58 cache name for `content`: <channel_id>~<md5[:8]>.<ext>."""
+    return os.path.join(str(tmp_path), 'logos', '%s~%s.%s'
+                        % (channel_id, hashlib.md5(content).hexdigest()[:8], ext))
 
 
 def _stub_fetch_logo(status, content=b'', etag=None, last_modified=None,
@@ -69,13 +76,17 @@ def test_cacheLogo_mode0_fetches_when_missing(tmp_path, monkeypatch):
                                          content_type='image/png'))
     validators = {}
     result = imp._cacheLogo('chA@s1', 'https://example.com/logo.png', 0, validators)
-    assert result == os.path.join(str(tmp_path), 'logos', 'chA@s1.png')
+    # imports.58: versioned name, and the record names the address + file
+    assert result == _versioned(tmp_path, 'chA@s1', b'PNG_BYTES', 'png')
     with open(result, 'rb') as f:
         assert f.read() == b'PNG_BYTES'
     assert validators['chA@s1']['etag'] == '"e"'
+    assert validators['chA@s1']['url'] == 'https://example.com/logo.png'
+    assert validators['chA@s1']['file'] == os.path.basename(result)
 
 
 def test_cacheLogo_mode0_skips_when_present(tmp_path, monkeypatch):
+    """imports.58: 'present' means a copy downloaded from this same address."""
     monkeypatch.setattr('imports.CACHE_LOC', str(tmp_path))
     imp = Imports()
     # Pre-create a cached file
@@ -87,7 +98,7 @@ def test_cacheLogo_mode0_skips_when_present(tmp_path, monkeypatch):
     def _fail_fetch(*a, **k):
         raise AssertionError('fetch should not be called in mode 0 when cached')
     monkeypatch.setattr(imp, '_fetchLogo', _fail_fetch)
-    validators = {}
+    validators = {'chB@s1': {'url': 'https://example.com/logo.png'}}
     result = imp._cacheLogo('chB@s1', 'https://example.com/logo.png', 0, validators)
     assert result == str(existing)
     # Bytes untouched
@@ -101,15 +112,23 @@ def test_cacheLogo_mode1_conditional_get_304_keeps_existing(tmp_path, monkeypatc
     logos_dir.mkdir()
     existing = logos_dir / 'chC@s1.jpg'
     existing.write_bytes(b'JPEG_BYTES')
-    monkeypatch.setattr(imp, '_fetchLogo', _stub_fetch_logo(304))
-    validators = {'chC@s1': {'etag': '"prev"', 'last_modified': 'old'}}
+    sent = []
+    def _fetch(url, etag=None, last_modified=None, **kw):
+        sent.append((etag, last_modified))
+        return _stub_fetch_logo(304)()
+    monkeypatch.setattr(imp, '_fetchLogo', _fetch)
+    validators = {'chC@s1': {'etag': '"prev"', 'last_modified': 'old',
+                             'url': 'https://example.com/logo.jpg'}}
     result = imp._cacheLogo('chC@s1', 'https://example.com/logo.jpg', 1, validators)
     assert result == str(existing)
+    assert sent == [('"prev"', 'old')]   # same address: validators sent
     # Validators preserved (304 → no update)
     assert validators['chC@s1']['etag'] == '"prev"'
 
 
 def test_cacheLogo_mode1_200_overwrites_and_updates_validators(tmp_path, monkeypatch):
+    """imports.58: a new picture is saved under a new (versioned) name and
+    the old file goes — Kodi gets a new link for a new picture."""
     monkeypatch.setattr('imports.CACHE_LOC', str(tmp_path))
     imp = Imports()
     logos_dir = tmp_path / 'logos'
@@ -120,11 +139,15 @@ def test_cacheLogo_mode1_200_overwrites_and_updates_validators(tmp_path, monkeyp
                         _stub_fetch_logo(200, b'NEW_PNG', etag='"new"',
                                          last_modified='now',
                                          content_type='image/png'))
-    validators = {'chD@s1': {'etag': '"old"', 'last_modified': 'then'}}
+    validators = {'chD@s1': {'etag': '"old"', 'last_modified': 'then',
+                             'url': 'https://example.com/logo.png'}}
     result = imp._cacheLogo('chD@s1', 'https://example.com/logo.png', 1, validators)
-    assert result == str(existing)
-    assert existing.read_bytes() == b'NEW_PNG'
+    assert result == _versioned(tmp_path, 'chD@s1', b'NEW_PNG', 'png')
+    with open(result, 'rb') as f:
+        assert f.read() == b'NEW_PNG'
+    assert not existing.exists()
     assert validators['chD@s1']['etag'] == '"new"'
+    assert validators['chD@s1']['file'] == os.path.basename(result)
 
 
 def test_cacheLogo_mode2_always_fetches(tmp_path, monkeypatch):
@@ -142,10 +165,13 @@ def test_cacheLogo_mode2_always_fetches(tmp_path, monkeypatch):
                 'error': None}
     monkeypatch.setattr(imp, '_fetchLogo', _record_fetch)
     # Mode 2 should NOT send validators (always full fetch)
-    validators = {'chE@s1': {'etag': '"prev"', 'last_modified': 'old'}}
+    validators = {'chE@s1': {'etag': '"prev"', 'last_modified': 'old',
+                             'url': 'https://example.com/logo.png'}}
     result = imp._cacheLogo('chE@s1', 'https://example.com/logo.png', 2, validators)
-    assert result == str(existing)
-    assert existing.read_bytes() == b'FRESH'
+    assert result == _versioned(tmp_path, 'chE@s1', b'FRESH', 'png')
+    with open(result, 'rb') as f:
+        assert f.read() == b'FRESH'
+    assert not existing.exists()
     assert calls and calls[0]['etag'] is None
     assert calls[0]['last_modified'] is None
 

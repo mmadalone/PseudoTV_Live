@@ -289,6 +289,28 @@ def is_remote_url(url_or_path):
     return (parsed.scheme or '').lower() in {'http', 'https'}
 
 
+# madteevee (imports fork, imports.58): cached logo file names. A downloaded
+# logo is saved as `<channel_id>~<version>.<ext>`, <version> being the first
+# LOGO_VERSION_LEN hex chars of the MD5 of the picture (naming only, as in
+# fallback_channel_id). A changed picture gets a new file name and so a new
+# /images/ link: Kodi never re-checks a web image it has already cached
+# (TextureCacheJob treats http(s) images as not updateable), so rewriting the
+# file in place left Kodi on the old picture. `~` never occurs in a channel id
+# (namespaced_channel_id keeps alnum + `_-.` around the `@`), so the id splits
+# back off unambiguously. Pre-imports.58 files are `<channel_id>.<ext>`; they
+# stay in use until their picture or address changes.
+LOGO_VERSION_SEP = '~'
+LOGO_VERSION_LEN = 8
+
+
+def logo_file_channel_id(name):
+    """Channel id a cache/logos/ file name belongs to — `<id>~<version>.<ext>`
+    (imports.58) or the pre-imports.58 `<id>.<ext>`."""
+    if LOGO_VERSION_SEP in name:
+        return name.split(LOGO_VERSION_SEP, 1)[0]
+    return name.rsplit('.', 1)[0]
+
+
 # --------------------------------------------------------------------------
 # Imports class
 # --------------------------------------------------------------------------
@@ -1256,11 +1278,22 @@ class Imports(object):
             self.log('syncAll, setImports failed: %s' % e, level=xbmc.LOGWARNING)
 
         # Per-channel logo cache (Imports_Cache_Logos toggle).
-        # Rewrites channel['logo'] from a remote URL to an absolute fs path
-        # so IPTV Simple/Kodi PVR loads logos locally instead of re-fetching
-        # from upstream every refresh. Walk runs BEFORE the M3U push below
-        # so the rewritten path lands in pseudotv.m3u. Failures fall back
-        # to the original URL — no regression vs the no-cache path.
+        # Publishes the cached copy of each channel's remote logo
+        # (`_portableLogoURL`) so IPTV Simple/Kodi PVR loads logos from us
+        # instead of re-fetching from upstream every refresh. Walk runs
+        # BEFORE the M3U push and the XML branch below so both publish the
+        # cached copy. Failures fall back to the original URL — no
+        # regression vs the no-cache path.
+        #
+        # imports.58: the published address goes into `published_logos`, not
+        # into the channel record. Pre-imports.58 this step overwrote
+        # ch['logo'] in place — the same dicts the channels store holds — so
+        # the addon's own /images/ link could be saved into channels.json
+        # (seen live on five records). For a logo the operator set, that
+        # would have replaced their address with a link to the old picture
+        # for good. Records now keep only what the operator or the source
+        # chose.
+        published_logos = {}  # {channel_id: address to publish this cycle}
         cache_logos = False
         try:
             cache_logos = SETTINGS.getSettingBool('Imports_Cache_Logos')
@@ -1283,7 +1316,7 @@ class Imports(object):
                 local = self._cacheLogo(cid, src, refresh_mode, validators)
                 if local:
                     # imports.44: portable URL wrap — see _portableLogoURL.
-                    ch['logo'] = self._portableLogoURL(local)
+                    published_logos[cid] = self._portableLogoURL(local)
                     cached_count += 1
             self._logoSaveValidators(validators)
             # Evict logos for channels no longer present
@@ -1297,7 +1330,7 @@ class Imports(object):
             present_ids = {ch.get('id') for ch in existing_channels if ch.get('id')}
             present_ids |= {ch.get('id') for ch in all_imported_now.values() if ch.get('id')}
             self._evictOrphanLogos(present_ids)
-            self.log('syncAll, logo cache: rewrote %d channel logos to portable HTTP URLs (mode=%d)'
+            self.log('syncAll, logo cache: publishing %d channel logos from the cache (mode=%d)'
                      % (cached_count, refresh_mode), level=xbmc.LOGINFO)
 
         # Push imported channels into in-memory M3U/XMLTV
@@ -1313,7 +1346,7 @@ class Imports(object):
                     try: self.m3u.delStation(ch)
                     except Exception: pass
                     continue
-                station = self._channelToStation(ch)
+                station = self._channelToStation(ch, logo=published_logos.get(ch.get('id')))
                 try: self.m3u.addStation(station)
                 except Exception as e:
                     self.log('syncAll, addStation [%s] failed: %s' % (ch.get('id'), e),
@@ -1374,6 +1407,18 @@ class Imports(object):
                 xtv_p[:] = [p for p in xtv_p if not _drop(p.get('channel'))]
                 return n_c - len(xtv_c), n_p - len(xtv_p)
 
+            def _applyGuideIcons(suffix):
+                """imports.58: apply the `_guideIcon` rule to this import's
+                entries that are kept from a previous cycle (guide
+                unavailable, or nothing matched), so a logo set while the
+                guide is down still reaches Kodi."""
+                for c in self.xmltv.XMLTVDATA.setdefault('channels', []):
+                    cid = c.get('id')
+                    if isinstance(cid, str) and cid.endswith(suffix):
+                        icon = self._guideIcon(all_imported_now.get(cid), published_logos.get(cid))
+                        if icon:
+                            c['icon'] = [{'src': icon}]
+
             for iid, res in per_import_results.items():
                 id_map = res['epg_id_map']
                 if not id_map:
@@ -1386,6 +1431,7 @@ class Imports(object):
                 # that are no longer live still go.
                 if res.get('epg_keep_previous'):
                     pruned_chan, pruned_prog = _pruneSlice(import_ns_suffix, dead_only=True)
+                    _applyGuideIcons(import_ns_suffix)
                     self.log('syncAll, [%s] guide unavailable (%s) — keeping the previous guide (dropped %d channels + %d programmes no longer live)'
                              % (iid, res.get('epg_error'), pruned_chan, pruned_prog), level=xbmc.LOGWARNING)
                     continue
@@ -1451,17 +1497,15 @@ class Imports(object):
                         if ns_id not in enabled_ids:
                             skipped_disabled += 1; continue
                         item['id'] = ns_id
-                        # Logo-cache reach into XMLTV: if the matched
-                        # channel's M3U logo was rewritten to a local fs
-                        # path (cache_logos toggle), point the XMLTV <icon>
-                        # at the same path. Kodi's EPG-guide view loads
+                        # Logo reach into XMLTV: Kodi's EPG-guide view loads
                         # icons from XMLTV separately from the M3U
                         # tvg-logo, and upstream URLs (e.g. Wikimedia)
-                        # often fail under Kodi's default UA.
-                        ch_rec = all_imported_now.get(ns_id) or {}
-                        cached = ch_rec.get('logo') or ''
-                        if cached and not is_remote_url(cached):
-                            item['icon'] = [{'src': cached}]
+                        # often fail under Kodi's default UA. imports.58:
+                        # the rule lives in _guideIcon (operator-set logos
+                        # always win; local logos as before).
+                        icon = self._guideIcon(all_imported_now.get(ns_id), published_logos.get(ns_id))
+                        if icon:
+                            item['icon'] = [{'src': icon}]
                         new_chans.append(item)
                         matched_chan += 1
                     elif kind == 'programme':
@@ -1501,6 +1545,7 @@ class Imports(object):
                                       or res['updated_cfg'].get('epg_path'))
                 if epg_configured and matched_chan == 0 and matched_prog == 0 and skipped_disabled == 0:
                     pruned_chan, pruned_prog = _pruneSlice(import_ns_suffix, dead_only=True)
+                    _applyGuideIcons(import_ns_suffix)
                     self.log('syncAll, [%s] no guide entries matched — keeping the previous guide (dropped %d channels + %d programmes no longer live)'
                              % (iid, pruned_chan, pruned_prog), level=xbmc.LOGWARNING)
                     continue
@@ -1684,7 +1729,7 @@ class Imports(object):
         return per_import_results
 
 
-    def _channelToStation(self, ch):
+    def _channelToStation(self, ch, logo=None):
         """Map an imported channel record → M3U station dict for `m3u.addStation`.
 
         Mirrors the M3U_TEMP shape (m3u.py:26) plus `url` and `label`.
@@ -1692,6 +1737,10 @@ class Imports(object):
         (`<source_tvg_id>@<import_id>`) — this prevents IPTV Simple's tvg-id
         dedup from silently dropping channels with same source-side tvg-id
         across multiple imports (plan G1).
+
+        imports.58: `logo` — the address to publish when it differs from the
+        record's own (the cached copy's link, see syncAll's logo cache step);
+        the record itself is never rewritten.
 
         CRITICAL — bool/empty-string semantics:
         M3U._save's optional-attrs loop (m3u.py:226-232) emits ANY key with
@@ -1717,7 +1766,7 @@ class Imports(object):
             'id'                : ch.get('id', ''),  # NAMESPACED — already from parseM3U
             'number'            : ch.get('number', 0),
             'name'              : ch.get('name', ''),
-            'logo'              : ch.get('logo', ''),
+            'logo'              : logo or ch.get('logo', ''),
             'group'             : list(ch.get('group') or []),
             # `radio` and `catchup` are positional in m3u.py:218 line template; always emitted.
             'radio'             : bool(ch.get('radio', False)),
@@ -1960,26 +2009,32 @@ class Imports(object):
     # Per-channel logo cache (step 5)
     # ------------------------------------------------------------------
     # When `Imports_Cache_Logos` is on, fetched M3U `tvg-logo` URLs are
-    # downloaded into CACHE_LOC/logos/ and the channel record's `logo`
-    # field is rewritten to the absolute fs path before the M3U is written.
-    # IPTV Simple / Kodi PVR then loads logos from disk instead of
+    # downloaded into CACHE_LOC/logos/ and the playlist and guide publish
+    # the cached copy (`_portableLogoURL`) instead of the upstream URL.
+    # IPTV Simple / Kodi PVR then loads logos from us instead of
     # re-fetching from upstream every refresh.
     #
     # Refresh policy (`Imports_Logo_Refresh`):
-    #   0 = Fetch if missing  — write once, reuse forever
+    #   0 = Fetch if missing  — write once, reuse until the logo's address changes
     #   1 = Conditional GET   — re-check each cycle via ETag/Last-Modified
     #   2 = Refetch every cycle — always download (~60 MB/hr; not recommended)
     #
-    # Validators (etag/last-modified per channel) live alongside the cache
-    # files at CACHE_LOC/logos/.validators.json. Loaded once per syncAll
-    # cycle, mutated as we go, written back at end.
+    # Per-channel records live alongside the cache files at
+    # CACHE_LOC/logos/.validators.json: {channel_id: {url, file, etag,
+    # last_modified}} — the address the cached copy came from, its file name
+    # (imports.58) and its validators. Loaded once per syncAll cycle,
+    # mutated as we go, written back at end.
 
     def _logoCacheDir(self):
         return FileAccess.translatePath(os.path.join(CACHE_LOC, 'logos'))
 
-    def _logoCachePath(self, channel_id, ext='img'):
+    def _logoCachePath(self, channel_id, ext='img', version=None):
         # Channel IDs already use safe chars (alnum + `_-.@`); @ is fine on
-        # ext4/NTFS/APFS. Add ext for human inspection.
+        # ext4/NTFS/APFS. Add ext for human inspection. imports.58: with a
+        # `version` the name is `<channel_id>~<version>.<ext>` (see
+        # LOGO_VERSION_SEP).
+        if version:
+            return os.path.join(self._logoCacheDir(), '%s%s%s.%s' % (channel_id, LOGO_VERSION_SEP, version, ext))
         return os.path.join(self._logoCacheDir(), '%s.%s' % (channel_id, ext))
 
     def _logoExtForUrl(self, url, content_type=None):
@@ -2030,18 +2085,59 @@ class Imports(object):
             except Exception: pass
 
     def _findLogoFile(self, channel_id):
-        """Return the existing on-disk cache path for channel_id, or None."""
+        """Return the existing on-disk cache path for channel_id, or None.
+
+        imports.58: matches the file name's channel id exactly (the old
+        `<channel_id>.` prefix test also matched a channel whose id merely
+        starts that way) and knows both name forms; the newest file wins."""
         try:
             cache_dir = self._logoCacheDir()
             if not os.path.isdir(cache_dir):
                 return None
-            prefix = channel_id + '.'
+            found = []
             for name in os.listdir(cache_dir):
-                if name.startswith(prefix) and not name.endswith('.tmp'):
-                    return os.path.join(cache_dir, name)
+                if name.startswith('.') or name.endswith('.tmp'):
+                    continue
+                if logo_file_channel_id(name) == channel_id:
+                    path = os.path.join(cache_dir, name)
+                    try: found.append((os.path.getmtime(path), path))
+                    except OSError: continue   # removed while listing
+            if found:
+                return max(found)[1]
         except Exception:
             pass
         return None
+
+    def _currentLogoFile(self, channel_id, record=None):
+        """imports.58: the cached copy currently in use for channel_id — the
+        file named in its .validators.json record, else whatever
+        `_findLogoFile` finds (records written before imports.58 carry no
+        file name) — or None."""
+        name = (record or {}).get('file')
+        if isinstance(name, str) and name and logo_file_channel_id(name) == channel_id:
+            path = os.path.join(self._logoCacheDir(), name)
+            if os.path.isfile(path):
+                return path
+        return self._findLogoFile(channel_id)
+
+    def _dropOtherLogoFiles(self, channel_id, keep):
+        """imports.58: after a new copy of channel_id's logo is saved, remove
+        the channel's other cache files (an older picture, or the same
+        picture under its pre-imports.58 name)."""
+        try:
+            cache_dir = self._logoCacheDir()
+            for name in os.listdir(cache_dir):
+                if name.startswith('.') or name.endswith('.tmp'):
+                    continue
+                path = os.path.join(cache_dir, name)
+                if path != keep and logo_file_channel_id(name) == channel_id:
+                    try: os.unlink(path)
+                    except Exception as e:
+                        self.log('_dropOtherLogoFiles, [%s] could not remove %s: %s'
+                                 % (channel_id, name, e), level=xbmc.LOGWARNING)
+        except Exception as e:
+            self.log('_dropOtherLogoFiles, [%s] failed: %s' % (channel_id, e),
+                     level=xbmc.LOGWARNING)
 
     def _fetchLogo(self, url, etag=None, last_modified=None, timeout=15):
         """
@@ -2108,12 +2204,31 @@ class Imports(object):
     def _cacheLogo(self, channel_id, source_url, refresh_mode, validators):
         """
         Apply refresh policy and return the absolute fs path of the cached
-        logo on success, or None on any failure (caller keeps the original URL).
-        Mutates `validators` dict in place when fetches succeed.
+        logo on success, or None when there is no copy to use (caller then
+        publishes `source_url` as-is). Mutates `validators` dict in place
+        when fetches succeed.
+
+        imports.58: a cached copy belongs to the address it was downloaded
+        from (`validators[channel_id]['url']`). Pre-imports.58 mode 0 reused
+        any file named after the channel, so a logo whose address changed —
+        an operator edit in the dashboard, or a source switching pictures —
+        kept the old picture forever, and mode 1 sent the old address's
+        validators to the new one. Now a copy is reused, or revalidated,
+        only for the address it came from; a changed address is downloaded.
+        If that download fails the new address is published as-is (Kodi
+        tries it directly) and the old copy stays on disk; a copy with no
+        recorded address (validators used to be written only when the server
+        sent ETag/Last-Modified) is downloaded once and kept if that fails.
+        New pictures are saved under a versioned name (LOGO_VERSION_SEP), so
+        Kodi gets a new link for a new picture and the same link for the
+        same one.
         """
         if not source_url or not is_remote_url(source_url):
             return None
-        existing = self._findLogoFile(channel_id)
+        if not isinstance(validators, dict):
+            validators = {}
+        cv = validators.get(channel_id) or {}
+        existing = self._currentLogoFile(channel_id, cv)
 
         # imports.56: never download one of our OWN /images/ links. A channel
         # whose source stopped supplying a logo keeps the portable URL as its
@@ -2124,37 +2239,42 @@ class Imports(object):
         if own_logo_basename(source_url, self._ownLogoPorts()) is not None:
             return existing
 
-        if refresh_mode == 0 and existing:
+        recorded_url    = cv.get('url')
+        same_source     = bool(existing) and recorded_url == source_url
+        keep_on_failure = same_source or (bool(existing) and not recorded_url)
+
+        if refresh_mode == 0 and same_source:
             # Fetch if missing — already present, no work
             return existing
 
-        cv = (validators.get(channel_id) or {}) if isinstance(validators, dict) else {}
-        send_etag = cv.get('etag')          if refresh_mode == 1 else None
-        send_lm   = cv.get('last_modified') if refresh_mode == 1 else None
+        send_etag = cv.get('etag')          if (refresh_mode == 1 and same_source) else None
+        send_lm   = cv.get('last_modified') if (refresh_mode == 1 and same_source) else None
 
         fetched = self._fetchLogo(source_url, etag=send_etag, last_modified=send_lm)
-        if fetched['status'] == 304 and existing:
+        if fetched['status'] == 304 and same_source:
             return existing
         if fetched['status'] != 200 or not fetched.get('content'):
             self.log('_cacheLogo, [%s] skipped (status=%s, error=%s, url=%s)'
                      % (channel_id, fetched.get('status'),
                         fetched.get('error'), source_url),
                      level=xbmc.LOGWARNING)
-            return existing  # may be None; caller falls back to URL
-        ext      = self._logoExtForUrl(source_url, fetched.get('content_type'))
-        target   = self._logoCachePath(channel_id, ext)
-        # If a previous cycle wrote with a different ext, drop the old file.
-        if existing and existing != target:
-            try: os.unlink(existing)
-            except Exception: pass
-        if not self._logoWriteAtomic(target, fetched['content']):
-            return existing
-        if fetched.get('etag') or fetched.get('last_modified'):
-            validators[channel_id] = {
-                'etag'         : fetched.get('etag'),
-                'last_modified': fetched.get('last_modified'),
-                'url'          : source_url,
-            }
+            return existing if keep_on_failure else None  # None: caller falls back to URL
+        content = fetched['content']
+        ext     = self._logoExtForUrl(source_url, fetched.get('content_type'))
+        version = hashlib.md5(content).hexdigest()[:LOGO_VERSION_LEN]
+        target  = self._logoCachePath(channel_id, ext, version=version)
+        if target != existing:
+            if not self._logoWriteAtomic(target, content):
+                return existing if keep_on_failure else None
+            # Drop the channel's previous copy (other picture, or the same
+            # picture under its pre-imports.58 name).
+            self._dropOtherLogoFiles(channel_id, keep=target)
+        validators[channel_id] = {
+            'etag'         : fetched.get('etag'),
+            'last_modified': fetched.get('last_modified'),
+            'url'          : source_url,
+            'file'         : os.path.basename(target),
+        }
         return target
 
     def _portableLogoURL(self, local):
@@ -2186,6 +2306,35 @@ class Imports(object):
         except Exception:
             tcp_port = None
         return port_set(PROPERTIES.getRemoteHost(), tcp_port)
+
+    def _guideIcon(self, ch_rec, published=None):
+        """imports.58: the logo to write into an imported channel's guide
+        <icon>, or None to keep the icon the guide source supplied.
+
+        The addon configures iptvsimple with "Channel logos from XMLTV" =
+        Prefer XMLTV (kodi.py _IPTV_SIMPLE_SETTINGS, logoFromEpg='2'), so the
+        guide's <icon> is the logo Kodi shows whenever the guide has one.
+        `published` is the address the playlist uses for this channel this
+        cycle (the cached copy's link), when it has one.
+          - A logo the operator set ('logo' in operator_overrides) always
+            wins — pre-imports.58 one typed as a web address never reached
+            Kodi.
+          - A local logo (logo pack, upload, special://) replaces the guide's
+            icon, as before. (The pre-imports.58 rule was "not a web
+            address"; once imports.44 published cached copies as http://
+            links it only ever matched local files.)
+          - Every other channel keeps the guide source's icon (operator
+            decision 2026-10-20).
+        """
+        ch_rec = ch_rec or {}
+        logo = published or ch_rec.get('logo') or ''
+        if not isinstance(logo, str) or not logo:
+            return None
+        if 'logo' in (ch_rec.get('operator_overrides') or []):
+            return logo
+        if not is_remote_url(logo):
+            return logo
+        return None
 
     def _evictOrphanLogos(self, active_channel_ids):
         """Remove cache/logos/ files for channel ids no longer present.
@@ -2270,8 +2419,9 @@ class Imports(object):
             for name in os.listdir(cache_dir):
                 if name.startswith('.') or name.endswith('.tmp'):
                     continue
-                # filename = <channel_id>.<ext>
-                cid = name.rsplit('.', 1)[0]
+                # filename = <channel_id>~<version>.<ext> (imports.58) or
+                # <channel_id>.<ext>
+                cid = logo_file_channel_id(name)
                 if cid and cid in active:
                     continue
                 # imports.35: keep if any channel record references this file.

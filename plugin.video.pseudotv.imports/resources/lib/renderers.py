@@ -91,6 +91,46 @@ _EXPLICIT_M3U_KEYS = frozenset({'id', 'number', 'name', 'logo', 'group',
                                 'radio', 'catchup', 'label', 'url'})
 
 
+def _own_logo_target():
+    """(host, ports) for re-pointing the addon's own cached-logo links at
+    render time — the current Remote_Host plus the configured TCP_PORT
+    (see logo_links.port_set). Shared by render_m3u and render_xmltv; never
+    raises (an empty host turns re-pointing off)."""
+    try:
+        logo_host = PROPERTIES.getRemoteHost() or ''
+    except Exception:
+        logo_host = ''
+    try:
+        tcp_port = SETTINGS.getSettingInt('TCP_PORT')
+    except Exception:
+        tcp_port = None
+    return logo_host, port_set(logo_host, tcp_port)
+
+
+def _repoint_channel_icons(channel, logo_host, logo_ports):
+    """imports.58: a guide <channel> whose <icon> is one of the addon's own
+    cached-logo links, re-pointed at the current host. Returns `channel`
+    itself when nothing changes, otherwise a copy — XMLTVDATA is never
+    mutated. Only channel icons: programme icons are not logo links."""
+    icons = channel.get('icon')
+    if not logo_host or not isinstance(icons, list):
+        return channel
+    out_icons = []
+    changed = False
+    for icon in icons:
+        if isinstance(icon, dict) and icon.get('src'):
+            src = repoint_own_logo(icon['src'], logo_host, logo_ports)
+            if src != icon['src']:
+                icon = dict(icon, src=src)
+                changed = True
+        out_icons.append(icon)
+    if not changed:
+        return channel
+    out = dict(channel)
+    out['icon'] = out_icons
+    return out
+
+
 def render_m3u(m3udata):
     """Build M3U file content from in-memory M3UDATA. Pure function.
 
@@ -137,12 +177,7 @@ def render_m3u(m3udata):
     # keep whatever host was current when the logo was cached; without this
     # an address change left those links stale until each channel's next
     # full sync. Other logo URLs pass through untouched.
-    logo_host = PROPERTIES.getRemoteHost()
-    try:
-        tcp_port = SETTINGS.getSettingInt('TCP_PORT')
-    except Exception:
-        tcp_port = None
-    logo_ports = port_set(logo_host, tcp_port)
+    logo_host, logo_ports = _own_logo_target()
 
     stations = sorted(
         list(m3udata.get('recordings') or []) + list(m3udata.get('stations') or []),
@@ -264,7 +299,11 @@ def render_xmltv(xmltvdata):
 
     Does NOT sort, cleanChannels, or orphan-prune. Caller is expected
     to have pre-processed XMLTVDATA. Matches today's Tasks._renderXMLTV
-    behavior byte-for-byte (chkImports + Imports.syncAll paths unchanged).
+    behavior byte-for-byte (chkImports + Imports.syncAll paths unchanged),
+    except that channel icons which are the addon's own cached-logo links
+    are re-pointed at the current host (imports.58 — the same imports.56
+    rule render_m3u applies to tvg-logo; since imports.58 the guide carries
+    such links for operator-set logos).
     """
     import xmltv as _xmltv_lib
     # madteevee (imports fork): refuse to render empty XMLTVDATA.
@@ -290,8 +329,9 @@ def render_xmltv(xmltvdata):
             generator_info_url  = data.get('generator-info-url')  or ADDON_ID,
             generator_info_name = data.get('generator-info-name') or ('%s Imports' % (ADDON_NAME,)),
         )
+        logo_host, logo_ports = _own_logo_target()
         for ch in (xmltvdata.get('recordings') or []) + (xmltvdata.get('channels') or []):
-            try: writer.addChannel(ch)
+            try: writer.addChannel(_repoint_channel_icons(ch, logo_host, logo_ports))
             except Exception as e:
                 _log('render_xmltv, addChannel skip [%s]: %s' % (ch.get('id'), e), xbmc.LOGDEBUG)
         for prog in (xmltvdata.get('programmes') or []):
