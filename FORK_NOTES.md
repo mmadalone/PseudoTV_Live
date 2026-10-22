@@ -76,6 +76,7 @@ In addition to the per-commit patches against the `plugin.video.pseudotv.live` u
 - Symptom: imported-channel logos set in the dashboard as web addresses never showed in Kodi, across restarts; logo-pack (local) picks did. Causes: (1) the addon configures iptvsimple with `logoFromEpg=2` (Prefer XMLTV, `kodi.py` `_IPTV_SIMPLE_SETTINGS`, inherited from upstream), so the guide `<icon>` beats `tvg-logo`, and syncAll only copied the channel logo into `<icon>` when it was not a web address — dead for cached logos since imports.44; (2) `_cacheLogo` mode 0 reused any file named after the channel without comparing the recorded source address, and mode 1 sent the old address's validators to a new one; (3) a re-downloaded picture kept its file name, and Kodi never re-checks a cached http(s) image (TextureCacheJob: not updateable); (4) the cache step wrote the addon's own `/images/` link into the channel records themselves (5 orphaned records had it on disk).
 - Fix: `_guideIcon` — an operator-set logo becomes the guide `<icon>` (cached link, else as typed); local logos as before; every other channel keeps the guide source's icon (operator decision). Also applied to slices kept by keep-previous / zero-match. Cache copies are reused or revalidated only for the address they came from; records always carry `url` + `file`; new pictures are saved as `<channel_id>~<md5[:8]>.<ext>` so a new picture gets a new link (old `<channel_id>.<ext>` files stay until they change). The published address lives in a per-cycle `published_logos` map, never in the records. render_xmltv re-points own-link channel icons at the current host (as render_m3u does since imports.56).
 - Live-verified 2026-10-20/21: after the restart a dashboard Refresh synced Autonomiques; TV3 and À Punt got new versioned files, the guide and playlist links pointed at them, and Kodi's TV DB stored the new links (no user-set icons). No channels.json logo changed, and no other channel's guide icon changed (one Movistar+ channel newly got a guide entry, with the guide source's icon). Note: the import's 10 h refresh interval gates a plain restart, so a logo edit needs the Save kick (or Refresh); iptvsimple then reloads within its 5 min refresh — no addon toggle needed. 799 pytest.
+- Released 2026-10-21 (tag `v0.8.0-imports.58`): the Kodi repo went from imports.55 straight to .58 — .56 and .57 were committed but never tagged. The release page attached the wrong addon; see "Imports releases" under Release / Kodi repo.
 
 **Maintenance posture**: the imports addon does NOT rebase against upstream — it's a one-time fork that diverged from `plugin.video.pseudotv.live` after the `madteevee-on-nightly` rebase. Forward-ports from upstream into imports/ happen manually when needed.
 
@@ -184,7 +185,7 @@ GitHub denies enabling Pages on repos forked from `PseudoTV/PseudoTV_Live` ("Pag
 
 ### Cutting a new release (after making patches)
 
-The release pipeline is automated via `.github/workflows/release.yml`. Pushing a tag matching `v*madteevee.*` triggers a workflow that runs `release.py`, publishes `_site/` to the `gh-pages` branch, and creates a GitHub Release object. Workflow can also be triggered manually from the Actions tab (`workflow_dispatch`) for republishing without a tag.
+The release pipeline is automated via `.github/workflows/release.yml`. Pushing a tag matching `v*madteevee.*` (or `v*imports.*`, see "Imports releases" below) triggers a workflow that runs `release.py`, publishes `_site/` to the `gh-pages` branch, and creates a GitHub Release object. Workflow can also be triggered manually from the Actions tab (`workflow_dispatch`) for republishing without a tag.
 
 > **NOTE (2026-04-29):** The trigger pattern was previously `v*-madteevee.*` plus `v*+madteevee.*`. GitHub Actions' workflow parser rejects `+` as a literal in tag glob patterns (HTTP 422 "invalid tags patterns") — every push since v.25 produced 0-second "workflow file issue" failures. Replaced with the single pattern `v*madteevee.*` which absorbs both `-` and `+` separators (`*` matches any non-`/` char). Tag with whichever separator is convenient.
 
@@ -215,6 +216,29 @@ git push fork v0.7.3-madteevee.2
 GitHub then runs the workflow: builds zips + `addons.xml`, force-replaces `gh-pages` with the new `_site/`, creates a Release in the Releases tab. Within ~5 min (raw.githubusercontent.com CDN cache), Kodi will see the new version on **Add-ons → Check for updates**.
 
 The tag uses `-` instead of `+` because some git tooling chokes on `+` in tag names; the addon version itself stays `0.7.3+madteevee.2` per PEP-440 local-version semantics.
+
+#### Imports releases
+
+`plugin.video.pseudotv.imports` ships the same way, from `madteevee-on-nightly`, with its own tag form. The release page is titled "PseudoTV Live (imports)" and carries the imports zip plus the repository zip (release.yml's "Pick the released addon" step chooses the addon from the tag).
+
+```bash
+# after the imports.NN fix commit is pushed to fork/madteevee-on-nightly:
+
+# 1. build locally first — the zip is made from the working tree, so check
+#    that only the imports addon changes version and that every file in its
+#    zip is git-tracked (nothing local or private slips in)
+python3 release.py
+
+# 2. tag and push the tag
+git tag -a v0.8.0-imports.NN -m "fork release v0.8.0+imports.NN"
+git push fork v0.8.0-imports.NN
+
+# 3. after the workflow (~1 min): check both the Kodi repo and the release page
+curl -s https://raw.githubusercontent.com/mmadalone/PseudoTV_Live/gh-pages/addons.xml | grep -o 'id="plugin.video.pseudotv.imports"[^>]*version="[^"]*"'
+gh release view v0.8.0-imports.NN --repo mmadalone/PseudoTV_Live --json name,assets
+```
+
+A committed imports.NN is not released until it is tagged: .56 and .57 never reached the Kodi repo.
 
 #### Manual release (fallback if Actions disabled / for testing)
 
@@ -311,6 +335,7 @@ This was the dominant problem area — UC Remote 3 channel logos broke after the
 |---|---|---|
 | `madteevee.25` | `release.yml` only matched `v*-madteevee.*` (legacy dash); plus-form tags didn't trigger | Added `v*+madteevee.*` to triggers — but GitHub's workflow parser rejected `+` as a literal in glob patterns (HTTP 422), which created a separate breakage in v.25 itself |
 | (post-v.41 ci-only commit) | Every push since v.25 produced 0-second "workflow file issue" failures because of the rejected pattern | Replaced the two-pattern union with single broader `v*madteevee.*` (the `*` matches `/` exclusion only, so it absorbs both `-` and `+` separators). Verified: `gh workflow run --ref madteevee-on-nightly` runs cleanly in 41s, publishes `_site/` to `gh-pages`. |
+| imports.55 → .58 (fixed in `f190ac47`, 2026-10-22) | "Create GitHub Release" always attached the Live zip and used a "PseudoTV Live (madteevee)" title, so the `v*imports.*` release pages offered `plugin.video.pseudotv.live-0.7.3+madteevee.46.zip` instead of the imports addon. gh-pages (what Kodi installs from) was correct throughout | New "Pick the released addon" step maps the tag to the addon (`*imports.*` → imports, else Live) and sets the title; the tag reaches the shell through `env`; `fail_on_unmatched_files: true`. The .55 and .58 pages were repaired by hand (`gh release upload` of the zip gh-pages published — .55's from gh-pages history — then `delete-asset` the Live zip and `edit --title`); the downloads were checked byte-identical to gh-pages. |
 
 ## Pending items / future forward-ports
 
