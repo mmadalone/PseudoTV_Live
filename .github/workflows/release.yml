@@ -58,15 +58,34 @@ jobs:
           user_name: 'github-actions[bot]'
           user_email: 'github-actions[bot]@users.noreply.github.com'
 
+      # The addon a tag releases: v*imports.* tags release
+      # plugin.video.pseudotv.imports, every other tag plugin.video.pseudotv.live.
+      # Until 2026-10-21 every release attached the Live zip under a Live title,
+      # so the imports.55 and imports.58 release pages offered the wrong addon.
+      - name: Pick the released addon
+        if: startsWith(github.ref, 'refs/tags/')
+        id: released
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          case "$TAG" in
+            *imports.*) echo "addon=plugin.video.pseudotv.imports" >> "$GITHUB_OUTPUT"
+                        echo "title=PseudoTV Live (imports)"       >> "$GITHUB_OUTPUT" ;;
+            *)          echo "addon=plugin.video.pseudotv.live"    >> "$GITHUB_OUTPUT"
+                        echo "title=PseudoTV Live (madteevee)"     >> "$GITHUB_OUTPUT" ;;
+          esac
+
       # Only on tag pushes: also create a GitHub Release object (the formal
-      # "Releases" tab on the repo). Attaches both addon zips for visibility.
+      # "Releases" tab on the repo). Attaches the released addon's zip plus the
+      # repository addon's zip (the bootstrap for first-time installs).
       # Skipped on workflow_dispatch since there's no tag to attach the release to.
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            _site/plugin.video.pseudotv.live/*.zip
+            _site/${{ steps.released.outputs.addon }}/*.zip
             _site/repository.mmadalone.pseudotv/*.zip
+          fail_on_unmatched_files: true
           generate_release_notes: true
-          name: "PseudoTV Live (madteevee) ${{ github.ref_name }}"
+          name: "${{ steps.released.outputs.title }} ${{ github.ref_name }}"
