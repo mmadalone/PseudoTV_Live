@@ -185,7 +185,8 @@ class Channels(object):
             # the operator just tombstoned via the "🗑 Orphans" delete endpoint.
             deleted = set(deleted_ids or [])
             try:
-                disk_channels = {c.get('id'): c for c in (self._load().get('channels',[]) or [])}
+                disk = self._load()
+                disk_channels = {c.get('id'): c for c in (disk.get('channels',[]) or [])}
                 in_memory_ids = {c.get('id') for c in channels}
                 merged = []
                 for c in channels:
@@ -204,6 +205,7 @@ class Channels(object):
                 if deleted:
                     self.log('setChannels, applied %d explicit deletes'%(len(deleted)), xbmc.LOGINFO)
                 channels = merged
+                self._adoptDiskImports(disk)
             except Exception as e:
                 self.log('setChannels, modified_ids merge failed, falling back to direct write: %s'%(e), xbmc.LOGWARNING)
         elif self.writable:
@@ -215,7 +217,8 @@ class Channels(object):
             # on a single Cartoon Cartoons edit). Preserve disk-only import-type channels;
             # in-memory list still wins for everything it contains.
             try:
-                disk_channels = {c.get('id'): c for c in (self._load().get('channels',[]) or []) if c.get('id')}
+                disk = self._load()
+                disk_channels = {c.get('id'): c for c in (disk.get('channels',[]) or []) if c.get('id')}
                 in_memory_ids = {c.get('id') for c in channels if c.get('id')}
                 preserved = [c for cid, c in disk_channels.items()
                              if cid not in in_memory_ids and c.get('type') == 'import']
@@ -223,13 +226,28 @@ class Channels(object):
                     channels = list(channels) + preserved
                     self.log('setChannels, preserved %d disk-only import channels (caller passed no modified_ids)'
                              % len(preserved), xbmc.LOGINFO)
+                self._adoptDiskImports(disk)
             except Exception as e:
                 self.log('setChannels, defensive import-preserve failed: %s'%(e), xbmc.LOGWARNING)
         self.channelDATA['uuid']     = SETTINGS.getMYUUID()
         self.channelDATA['channels'] = self.sortChannels(channels)
         PROPERTIES.setHasChannels(len(channels)>0)
         return self._save()
-        
+
+
+    def _adoptDiskImports(self, disk: dict):
+        # imports.59 (S5): only setImports writes the import list. _save
+        # writes the whole channelDATA, and a long-lived instance
+        # (Builder.channels for the Kodi session, the Channel Manager window)
+        # would otherwise write back the import list it loaded at start-up,
+        # reverting tombstones, validators, last_sync_at and the replay-link
+        # bookkeeping saved since. `disk` is the copy setChannels just
+        # re-read; when that read failed (getJSON returns {}) the in-memory
+        # list is kept, as before.
+        imports = disk.get('imports') if isinstance(disk, dict) else None
+        if isinstance(imports, list):
+            self.channelDATA['imports'] = imports
+
 
     def getImports(self) -> list:
         return self.channelDATA.get('imports',[])

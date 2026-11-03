@@ -295,7 +295,8 @@ def render_xmltv(xmltvdata):
     Uses xmltv.Writer (low-level format library). Returns bytes.
     Returns None for empty input — caller skips the write on None
     to preserve disk content (refuse-empty guard avoids self-closing
-    `<tv/>` corruption).
+    `<tv/>` corruption). imports.59: also None when the render fails,
+    and programmes without a start, stop or channel are left out.
 
     Does NOT sort, cleanChannels, or orphan-prune. Caller is expected
     to have pre-processed XMLTVDATA. Matches today's Tasks._renderXMLTV
@@ -334,16 +335,43 @@ def render_xmltv(xmltvdata):
             try: writer.addChannel(_repoint_channel_icons(ch, logo_host, logo_ports))
             except Exception as e:
                 _log('render_xmltv, addChannel skip [%s]: %s' % (ch.get('id'), e), xbmc.LOGDEBUG)
+        # imports.59: a programme without a start, stop or channel (not
+        # non-empty text) can't be shown by IPTV Simple, and one with a None
+        # stop used to fail the whole document at serialise time (the fatal
+        # branch below then replaced the guide with '<tv/>'). Skip such
+        # programmes and say so once per render.
+        unplaceable = 0
         for prog in (xmltvdata.get('programmes') or []):
+            if not _placeable(prog):
+                unplaceable += 1
+                continue
             try: writer.addProgramme(prog)
             except Exception as e:
                 _log('render_xmltv, addProgramme skip [%s]: %s' % (prog.get('channel'), e), xbmc.LOGDEBUG)
+        if unplaceable:
+            _log('render_xmltv, skipped %d programmes without a start, stop or channel' % (unplaceable,),
+                 xbmc.LOGWARNING)
         buf = io.BytesIO()
         writer.write(buf, pretty_print=True)
         return buf.getvalue()
     except Exception as e:
-        _log('render_xmltv, fatal: %s' % (e,), xbmc.LOGERROR)
-        return b'<?xml version="1.0" encoding="utf-8"?>\n<tv/>\n'
+        # imports.59: return None (every caller then keeps the file on disk)
+        # instead of a '<tv/>' stub, which callers wrote over the whole guide
+        # -- kept replay history exists only in that file.
+        _log('render_xmltv, fatal (file on disk kept): %s' % (e,), xbmc.LOGERROR)
+        return None
+
+
+def _placeable(prog):
+    """imports.59: True when a programme has non-empty text for start, stop
+    and channel -- what IPTV Simple needs to place it in the guide."""
+    if not isinstance(prog, dict):
+        return False
+    for key in ('start', 'stop', 'channel'):
+        value = prog.get(key)
+        if not isinstance(value, str) or not value.strip():
+            return False
+    return True
 
 
 # madteevee (imports fork, imports.42): size circuit-breaker thresholds for

@@ -31,6 +31,10 @@ from seasonal   import Seasonal
 from rules      import RulesList
 from seasonal   import Seasonal
 
+# imports.59 (S16): longest a non-preview build waits for a running import
+# sync before loading the guide files (Builder._waitForImportsSync).
+IMPORTS_SYNC_WAIT_MAX_SECS = 300
+
 class Service(object):
     from jsonrpc import JSONRPC
     jsonRPC = JSONRPC()
@@ -188,6 +192,40 @@ class Builder(object):
         paths so self._build_snapshots doesn't accumulate stale entries within
         a single Builder lifetime."""
         self._build_snapshots.pop(citem.get('id'), None)
+
+
+    def _waitForImportsSync(self, max_wait=IMPORTS_SYNC_WAIT_MAX_SECS) -> bool:
+        """imports.59 (S16): before a non-preview build loads pseudotv.m3u /
+        pseudotv.xml, wait in 1-second steps while chkImports' import sync
+        runs ('Imports.syncAll' is a cross-thread window property), so this
+        build doesn't save the pre-sync guide over the sync's result.
+
+        Builder has already raised its own 'Builder.buildChannels' flag, and
+        chkImports re-checks that flag after raising its own, so the two can
+        never both go ahead. Same wait pattern as Properties.interruptActivity.
+
+        Returns False only when the wait stopped because Kodi is shutting
+        down or the service interrupted it: the build must not go on to load
+        the guide files while the sync is still running (buildChannels skips
+        the build). True when no sync is running (any more), and also when it
+        gave up after max_wait seconds: the build then proceeds, as before."""
+        waited = 0
+        while PROPERTIES.isRunning('Imports.syncAll'):
+            # Abort/interrupt is checked before the limit, so one that comes
+            # during the last second still skips the build.
+            if self.service._interrupt() or self.monitor.abortRequested():
+                self.log('buildChannels, stopped waiting for the running import sync after %ds (abort/interrupt)' % (waited), xbmc.LOGINFO)
+                return False
+            if waited >= max_wait:
+                self.log('buildChannels, import sync still running after %ds -- building anyway' % (waited), xbmc.LOGWARNING)
+                return True
+            if self.monitor.waitForAbort(1.0):
+                self.log('buildChannels, stopped waiting for the running import sync after %ds (abort/interrupt)' % (waited), xbmc.LOGINFO)
+                return False
+            waited += 1
+        if waited:
+            self.log('buildChannels, waited %ds for the running import sync to finish' % (waited), xbmc.LOGINFO)
+        return True
 
 
     def getVerifiedChannels(self, channels=None):
@@ -404,6 +442,22 @@ class Builder(object):
                 # Same applies to v.24 snapshot/restore at builder.py:138-182.
                 # FORK_NOTES priority #4 (small-fix scope).
                 if not preview:
+                    # imports.59 (S16): let a running import sync finish
+                    # before loading the guide files. chkImports defers while
+                    # Builder runs, but Builder never checked the other way: a
+                    # build that loaded pseudotv.m3u/xml mid-sync wrote the
+                    # pre-sync guide back afterwards (the newest replay-link
+                    # merge undone for up to the import's refresh interval).
+                    if not self._waitForImportsSync():
+                        # imports.59 (S16): Kodi is shutting down or the
+                        # service interrupted the wait while the sync still
+                        # runs -- skip this build before loading the guide
+                        # files. Re-queued like the per-channel interrupt
+                        # below; the queue holds it while the interrupt lasts.
+                        self.log('buildChannels, build skipped (import sync still running; abort/interrupt)', xbmc.LOGINFO)
+                        if channels and not self.monitor.abortRequested() and hasattr(self.service,'_que'):
+                            self.service._que(self.service.tasks.chkChannels,3,*(channels,silent))
+                        return
                     self.m3u   = M3U(writable=True)
                     self.xmltv = XMLTVS(writable=True, m3u=self.m3u)
                 channels = self.getVerifiedChannels(channels)
@@ -614,9 +668,21 @@ class Builder(object):
                             sync_progress = None
                         try:
                             from imports import Imports
-                            if list(self.channels.getImports() or []):
-                                Imports(channels=self.channels, m3u=self.m3u,
+                            # imports.59 (S16): the import sync starts from a
+                            # fresh channels.json read, as chkImports does each
+                            # cycle. self.channels is loaded once per Kodi
+                            # session; syncAll writes its import records back
+                            # (memory wins) plus the whole import list, so a
+                            # dashboard edit to an imported channel or an
+                            # import's settings saved since start-up was
+                            # reverted by the next build of a Custom channel.
+                            # Builder's own Custom-channel save above still
+                            # goes through self.channels.
+                            sync_channels = Channels(writable=True)
+                            if list(sync_channels.getImports() or []):
+                                Imports(channels=sync_channels, m3u=self.m3u,
                                         xmltv=self.xmltv, service=self.service).syncAll()
+                            del sync_channels
                         except Exception as e:
                             self.log('buildChannels, imports.syncAll failed: %s'%(e), xbmc.LOGERROR)
                         finally:

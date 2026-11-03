@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<addon id="plugin.video.pseudotv.imports" version="0.8.0+imports.58" name="PseudoTV Live (imports)" provider-name="Lunatixz, mmadalone">
+<addon id="plugin.video.pseudotv.imports" version="0.8.0+imports.59" name="PseudoTV Live (imports)" provider-name="Lunatixz, mmadalone">
     <requires>
         <import addon="xbmc.python" version="3.0.1"/>
         <import addon="script.module.six" version="1.0.0"/>
@@ -77,10 +77,11 @@
         <source>https://github.com/PseudoTV/PseudoTV_Live</source>
         <forum>https://forum.kodi.tv/showthread.php?tid=355549</forum>
         <disclaimer lang="en_GB">BETA PROJECT; SUBJECT TO BUGS</disclaimer>
-        <news>v0.8.0+imports.58
-- Fixed: a logo you set for an imported channel as a web address never showed in Kodi; it now does, and a changed logo shows within minutes.
-v0.8.0+imports.57
-- Fixed: channels a source stops listing (e.g. Movistar+ channels outside your package) no longer disappear and reappear; they stay hidden until the source lists them again.</news>
+        <news>v0.8.0+imports.59
+- New!: past Movistar+ shows in the guide replay from their start, with most of the guide's descriptions kept and up to 7 days of past shows.
+- Fixed: several ways the guide or your import settings could be lost or reverted.
+v0.8.0+imports.58
+- Fixed: a logo you set for an imported channel as a web address never showed in Kodi; it now does, and a changed logo shows within minutes.</news>
         <reuselanguageinvoker>true</reuselanguageinvoker>
         <assets>
             <icon>resources/images/icon.png</icon>

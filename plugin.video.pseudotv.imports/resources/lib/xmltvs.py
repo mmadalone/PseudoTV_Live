@@ -20,6 +20,7 @@
 import xmltv
 import io
 import os
+import replay_helpers
 
 from globals     import *
 from m3u         import M3U
@@ -44,6 +45,12 @@ def _stripXmltvTzSuffix(s):
     if len(s) >= 6 and s[-6] == ' ' and s[-5] in '+-' and s[-4:].isdigit():
         return s[:-6]
     return s
+
+
+def _programmeSortKey(program):
+    """imports.59: sortProgrammes key -- channel, then start. None-safe: a
+    missing or None value sorts as ''."""
+    return (program.get('channel') or '', program.get('start') or '')
 
 
 #todo check for empty recordings/channel meta and trigger refresh/rebuild empty xmltv via Kodi json rpc?
@@ -326,10 +333,26 @@ class XMLTVS(object):
         # marker is how this writer tells them apart inside a single mixed
         # input list. Imports never produce recordings, so the recording
         # predicate intentionally rejects import suffixes.
+        #
+        # imports.59 (S2): `channels_known` is False when the channel list
+        # can't be read -- the lookup raises, or channels.json comes back
+        # with no channels and no imports at all (FileAccess.getJSON returns
+        # {} on any read error). Every writer loads pseudotv.xml through
+        # here, so rejecting every import entry on such a read (unknown
+        # import ids) lost them -- kept replay history included -- at the
+        # next save. Custom entries already failed open. Now that load keeps
+        # every entry of ours as loaded: no cross-reference, no age trim.
+        # `keep_days` ({channel id: days}) are the replay-history windows of
+        # the live link-replay channels (replay_helpers.link_replay_days),
+        # used by cleanProgrammes' age trim.
+        channels_known = True
+        keep_days = {}
         try:
             from channels import Channels as _C
             _chans = _C()
-            import_slugs = {'@%s' % (i.get('id'),) for i in (_chans.getImports() or []) if i.get('id')}
+            _imports = _chans.getImports() or []
+            _records = _chans.getChannels() or []
+            import_slugs = {'@%s' % (i.get('id'),) for i in (_imports) if i.get('id')}
             # madteevee (imports fork, imports.15 / C#10 Follow-up E):
             # capture the live channel-id set from channels.json so cleanSelf
             # can drop XMLTV channels (and via the programmes branch, their
@@ -347,13 +370,36 @@ class XMLTVS(object):
             # channels' <channel> elements and their programmes survive
             # cleanSelf-on-load — pvr.iptvsimple keeps showing stale EPG
             # for them. Symmetric with the parallel m3u.py:_verify change.
-            live_channel_ids = {c.get('id') for c in (_chans.getChannels() or [])
+            live_channel_ids = {c.get('id') for c in (_records)
                                 if c.get('id') and c.get('enabled', True)}
-        except Exception:
+            if not _imports and not _records:
+                channels_known = False
+            elif key == 'channel':
+                # One record at a time, so one odd record can't break the lookup.
+                for _rec in _records:
+                    try:
+                        keep_days.update(replay_helpers.link_replay_days([_rec]))
+                    except Exception as e:
+                        self.log('cleanSelf, replay window skipped for one channel record: %s' % (e,), xbmc.LOGWARNING)
+        except Exception as e:
             import_slugs = set()
             live_channel_ids = None
+            channels_known = False
+            self.log('cleanSelf, channel list lookup failed: %s' % (e,), xbmc.LOGERROR)
+        if not channels_known:
+            live_channel_ids = None
+            keep_days = {}
+            self.log('cleanSelf, key = %s: channel list unavailable -- keeping every entry as loaded '
+                     '(no cross-reference, no age trim)' % (key,), xbmc.LOGERROR)
+        def _owned(s):
+            # imports.59 (S2): with the channel list unknown the import ids
+            # are unknown too, so any namespaced id ('<id>@<import id>') counts
+            # as ours for this load (pseudotv.xml is only written by us).
+            if not channels_known and isinstance(s, str) and 0 < s.rfind('@') < len(s) - 1:
+                return True
+            return isOwnedID(s, slug, import_slugs)
         def _id_ok_channel(s):
-            if not isOwnedID(s, slug, import_slugs): return False
+            if not _owned(s): return False
             if slug and s.endswith(slug):
                 # PseudoTV-suffixed: must be 32-char hash AND in channels.json.
                 if len(s.replace(slug, '')) != 32: return False
@@ -379,7 +425,11 @@ class XMLTVS(object):
             self.log('cleanSelf, slug = %s, import_slugs = %s, key = %s: returning channels = %s, recordings = %s'%(slug,sorted(import_slugs),key,len(channels),len(recordings)))
             return self.sortChannels(Globals._setDictLST(channels)), self.sortChannels(Globals._setDictLST(recordings))
         elif key == 'channel': #programmes
-            programmes = self.cleanStations(self.cleanProgrammes(channels)) +  self.cleanRecordings(recordings)
+            # imports.59: no age trim while the channel list is unknown (S2);
+            # otherwise the trim keeps linked history in its replay window (S10.4).
+            if channels_known: kept = self.cleanProgrammes(channels, keep_days=keep_days)
+            else:              kept = channels
+            programmes = self.cleanStations(kept) +  self.cleanRecordings(recordings)
             self.log('cleanSelf, slug = %s, import_slugs = %s, key = %s: returning programmes = %s'%(slug,sorted(import_slugs),key,len(programmes)))
             return self.sortProgrammes(programmes)
         
@@ -391,18 +441,47 @@ class XMLTVS(object):
         return tmpChannels
 
 
-    def cleanProgrammes(self, programmes: list=[]) -> list:
+    def cleanProgrammes(self, programmes: list=[], keep_days=None) -> list:
         now     = (epochTime(float(getUTCstamp()),tz=False) - datetime.timedelta(days=MIN_GUIDEDAYS)) #allow some old programmes to avoid empty cells
         holiday = Seasonal().getHoliday()
-        
+        # imports.59 (S10.4): keep_days = {channel id: days} for the live
+        # link-replay channels (cleanSelf, replay_helpers.link_replay_days).
+        # A programme of such a channel that carries a replay link is kept
+        # while its stop is within that many days; everything else follows
+        # the Min_Days rule below. Movistar+'s guide export starts at its own
+        # day's 00:00, so older linked shows exist only in this file.
+        keep_days     = keep_days or {}
+        now_epoch     = time.time()
+        pseudotv_slug = '@%s' % (PSEUDOTV_SLUG)
+
         def __filterProgrammes(program):
-            citem    = Globals._decodePlot(program.get('desc',([{}],''))[0][0]).get('citem',{})
-            seasonal = citem.get('rules',{}).get(800,{}).get('values',{}).get(0,[{}])[0].get('holiday',{})
+            # imports.59 (R2C-8): only our own Custom programmes carry the
+            # citem payload (holiday rule) in their description; decoding it
+            # unpickles data, so imported programmes are no longer decoded.
+            channel = program.get('channel')
+            if isinstance(channel, str) and channel.endswith(pseudotv_slug):
+                citem    = Globals._decodePlot(program.get('desc',([{}],''))[0][0]).get('citem',{})
+                seasonal = citem.get('rules',{}).get(800,{}).get('values',{}).get(0,[{}])[0].get('holiday',{})
+            else:
+                citem    = {}
+                seasonal = {}
             stopTime = program.get('stop',now)
             if isinstance(stopTime, str): stopTime = stopTime.rstrip()
             if seasonal and seasonal.get('name',str(random.random())) != holiday.get('name'):
                 self.log('[%s] cleanProgrammes, __filterProgrammes removing expired holiday (%s)'%(citem.get('id'),seasonal))
                 return None
+            # imports.59 (S1.4): a stop that isn't text (missing / None) is
+            # unparseable -- kept, per the rule below, without calling
+            # strpTime (whose TypeError fallback can't take a non-string).
+            if not isinstance(stopTime, str):
+                return program
+            days = keep_days.get(channel) if isinstance(channel, str) else None
+            if days:
+                link = program.get('catchup-id')
+                if isinstance(link, str) and link.strip():
+                    stop_epoch = replay_helpers.xmltv_to_epoch(stopTime)
+                    if stop_epoch is not None and stop_epoch >= now_epoch - days * 86400:
+                        return program
             # madteevee (imports fork): strpTime returns '' on parse failure
             # (globals.py:119). Comparing '' < datetime raises TypeError —
             # crashed the addon at startup once the cleanSelf patch let
@@ -430,14 +509,20 @@ class XMLTVS(object):
         
 
     def sortProgrammes(self, programmes: list=[]) -> list:
+        # imports.59: one stable sort on (channel, start) -- the same order
+        # as the previous sort-by-start-then-by-channel for valid data -- with
+        # a None-safe key. It runs on every load and save: a programme
+        # without a start used to make it return [] and empty the guide. The
+        # result still goes into the same list object (as list.sort did); on
+        # any other error that list is returned unchanged, since sorted()
+        # builds a new list and the slice assignment never happens.
         try:
-            programmes.sort(key=itemgetter('start'))
-            programmes.sort(key=itemgetter('channel'))
+            programmes[:] = sorted(programmes, key=_programmeSortKey)
             self.log('sortProgrammes, programmes = %s'%(len(programmes)))
             return programmes
         except Exception as e:
             self.log("sortProgrammes, failed! %s"%(e), xbmc.LOGERROR)
-            return []
+            return programmes
 
 
     def getRecordings(self) -> list:

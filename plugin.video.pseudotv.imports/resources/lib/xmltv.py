@@ -318,7 +318,7 @@ def read_programmes(fp=None, tree=None):
             read_error('read_programmes', fp, e)
             return []
             
-def parseExternalSource(source, channel_id_filter=None, log_callback=None):
+def parseExternalSource(source, channel_id_filter=None, log_callback=None, strict=False):
     """
     Streaming-parse an external XMLTV source for live-import use.
 
@@ -327,6 +327,15 @@ def parseExternalSource(source, channel_id_filter=None, log_callback=None):
                         whose `channel=` is not in this set are skipped (saves
                         memory when most of the source's channels aren't needed)
     log_callback      : optional callable(msg) for diagnostic logging
+    strict            : imports.59 -- False (default) is the lenient live-import
+                        behaviour: empty input yields nothing and a broken or
+                        truncated document yields what was read before the
+                        error, both without raising. True raises ParseError for
+                        empty input and re-raises the ParseError of a broken or
+                        truncated document, so the caller can tell a half-
+                        written file from a complete one (a playlist add-on's
+                        guide export, rewritten in place, whose replay links
+                        must never be replaced by a partial read).
 
     Yields (kind, dict) tuples where kind is 'channel' or 'programme'.
     Auto-detects gzip via magic bytes (`b'\\x1f\\x8b'`) — not URL extension or
@@ -351,6 +360,8 @@ def parseExternalSource(source, channel_id_filter=None, log_callback=None):
                 data = f.read()
         except (IOError, OSError) as e:
             _log('parseExternalSource, file open failed: %s' % e)
+            if strict:
+                raise
             return
     elif hasattr(source, 'read'):
         data = source.read()
@@ -361,6 +372,8 @@ def parseExternalSource(source, channel_id_filter=None, log_callback=None):
 
     if not data:
         _log('parseExternalSource, empty source')
+        if strict:
+            raise ParseError('empty file')
         return
 
     # Magic-byte gzip detection — authoritative; not URL extension or Content-Type.
@@ -391,6 +404,8 @@ def parseExternalSource(source, channel_id_filter=None, log_callback=None):
                 elem.clear()  # clear regardless of filter to keep tree small
     except ParseError as e:
         _log('parseExternalSource, ParseError: %s' % e)
+        if strict:
+            raise
         return
 
 
@@ -461,6 +476,15 @@ class Writer:
 
         Set 'attr' in 'node' to 'value'
         """
+        # imports.59: leave out a None value and write any other non-text
+        # value as text. ElementTree accepts both at set() time but raises
+        # when the whole document is serialised, so one programme with a
+        # None/int catchup-id or stop used to make render_xmltv replace the
+        # entire guide with an empty '<tv/>'. Text values are unchanged.
+        if value is None:
+            return
+        if not isinstance(value, str):
+            value = str(value)
         node.set(attr, value)
 
     def settext(self, node, text, with_lang=True):
@@ -529,11 +553,21 @@ class Writer:
 
           'programme' -- A dict representing XMLTV data
         """
-        p = SubElement(self.root, 'programme')
+        # imports.59: build the <programme> detached and attach it to the
+        # document only once it is complete (end of this method). It used to
+        # be created with SubElement(self.root, ...), so a programme that
+        # failed half-way (no title, a bad icon...) left a half-written
+        # element in the guide. `prog` keeps the element itself: `p` is
+        # re-bound inside the audio block below (pre-existing behaviour,
+        # kept so valid data renders byte-identical).
+        prog = Element('programme')
+        p = prog
 
         # programme attributes
         for attr in ('start', 'channel'):
-            if attr in programme:
+            # imports.59: a None value counts as missing -- setattr leaves
+            # None out, which would otherwise write a programme without it.
+            if programme.get(attr) is not None:
                 self.setattr(p, attr, programme[attr])
             else:
                 raise ValueError("'programme' must contain '%s' attribute" % attr)
@@ -683,6 +717,8 @@ class Writer:
                 v = SubElement(r, 'value')
                 self.settext(v, review['value'], with_lang=False)
 
+        self.root.append(prog)
+
     def addChannel(self, channel):
         """
         add a single XMLTV 'channel'
@@ -691,9 +727,13 @@ class Writer:
 
           'channel' -- A dict representing XMLTV data
         """
-        c = SubElement(self.root, 'channel')
+        # imports.59: same as addProgramme -- built detached, attached only
+        # once complete, so a channel that fails half-way leaves nothing.
+        c = Element('channel')
+        if channel['id'] is None:
+            raise ValueError("'channel' must contain 'id' attribute")
         self.setattr(c, 'id', channel['id'])
-        
+
         # Display Name
         for display_name in channel['display-name']:
             dn = SubElement(c, 'display-name')
@@ -708,7 +748,9 @@ class Writer:
             for url in channel['url']:
                 u = SubElement(c, 'url')
                 self.settext(u, url, with_lang=False)
-        
+
+        self.root.append(c)
+
     def write(self, file, pretty_print=False):
         """
         write(file, pretty_print=False) -> None

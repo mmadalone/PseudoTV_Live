@@ -1,0 +1,12 @@
+#EXTM3U
+## Synthetic playlist in the shape plugin.video.movistarplus 0.11.9 exports
+## (catchup="default" catchup-source="{catchup-id}" catchup-days="7" on every
+## line). Ids, names and addresses are made up.
+#EXTINF:-1 tvg-id="CH1" tvg-name="Canal Uno" tvg-logo="https://example.invalid/logos/ch1.png" tvg-chno="1" group-title="Movistar+" catchup="default" catchup-source="{catchup-id}" catchup-days="7",Canal Uno
+plugin://plugin.video.movistarplus/?action=play&stype=tv&id=CH1
+
+#EXTINF:-1 tvg-id="CH2" tvg-name="Canal Dos" tvg-logo="https://example.invalid/logos/ch2.png" tvg-chno="2" group-title="Movistar+" catchup="default" catchup-source="{catchup-id}" catchup-days="7",Canal Dos
+plugin://plugin.video.movistarplus/?action=play&stype=tv&id=CH2
+
+#EXTINF:-1 tvg-id="CH3" tvg-name="Canal Tres HD" tvg-logo="https://example.invalid/logos/ch3.png" tvg-chno="3" group-title="Movistar+" catchup="default" catchup-source="{catchup-id}" catchup-days="7",Canal Tres HD
+plugin://plugin.video.movistarplus/?action=play&stype=tv&id=CH3

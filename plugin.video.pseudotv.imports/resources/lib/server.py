@@ -25,6 +25,7 @@ from channels                  import Channels, markOverrides
 from filter_helpers             import META_ONLY_FIELDS
 from sysinfo_helpers            import resolveKodiOSVersion
 from logo_links                 import public_logo_name
+from replay_helpers             import xmltv_to_epoch
 from resources                 import Resources
 from six.moves.BaseHTTPServer  import BaseHTTPRequestHandler, HTTPServer
 from six.moves.socketserver    import ThreadingMixIn
@@ -134,23 +135,9 @@ def _prewarm_epg_grid(xml_mtime, window_h=4):
         if not s: return s
         return _KODI_MARKUP_RE.sub('', s).strip()
     def _xmltv_to_ts(s):
-        if not s: return 0
-        s = s.strip()
-        parts = s.split(' ', 1)
-        base = parts[0]
-        tz_suffix = parts[1].strip() if len(parts) > 1 else ''
-        if len(base) < 14: return 0
-        try:
-            st = time.strptime(base[:14], '%Y%m%d%H%M%S')
-            if tz_suffix and len(tz_suffix) >= 5 and tz_suffix[0] in '+-':
-                import calendar as _cal
-                sign = 1 if tz_suffix[0] == '+' else -1
-                hours = int(tz_suffix[1:3])
-                mins  = int(tz_suffix[3:5])
-                return _cal.timegm(st) - sign * (hours * 3600 + mins * 60)
-            return int(time.mktime(st))
-        except Exception:
-            return 0
+        # imports.59: one shared parser (replay_helpers.xmltv_to_epoch, same
+        # rules: +HHMM offset, no offset = local time); 0 when unparseable.
+        return xmltv_to_epoch(s) or 0
     now = int(time.time())
     start_ts = (now // 60) * 60
     end_ts   = start_ts + window_h * 3600
@@ -2101,25 +2088,9 @@ class MyHandler(BaseHTTPRequestHandler):
                                 # would shift the whole grid by 2 hours, causing the EPG
                                 # to disagree with what's actually airing on TV.
                                 def _xmltv_to_ts(s):
-                                    if not s: return 0
-                                    s = s.strip()
-                                    parts = s.split(' ', 1)
-                                    base = parts[0]
-                                    tz_suffix = parts[1].strip() if len(parts) > 1 else ''
-                                    if len(base) < 14: return 0
-                                    try:
-                                        st = time.strptime(base[:14], '%Y%m%d%H%M%S')
-                                        if tz_suffix and len(tz_suffix) >= 5 and tz_suffix[0] in '+-':
-                                            import calendar as _cal
-                                            sign = 1 if tz_suffix[0] == '+' else -1
-                                            hours = int(tz_suffix[1:3])
-                                            mins  = int(tz_suffix[3:5])
-                                            offset_sec = sign * (hours * 3600 + mins * 60)
-                                            return _cal.timegm(st) - offset_sec
-                                        # No suffix → local time of the addon's environment.
-                                        return int(time.mktime(st))
-                                    except Exception:
-                                        return 0
+                                    # imports.59: shared parser (replay_helpers.xmltv_to_epoch,
+                                    # same rules; no suffix = local time); 0 when unparseable.
+                                    return xmltv_to_epoch(s) or 0
                                 # Step 6 Phase 7 polish (madteevee): EPG titles/descs from some
                                 # providers embed Kodi BBcode markup ([COLOR tomato]T8[/COLOR],
                                 # [B]bold[/B], [LIGHT]...[/LIGHT], etc). Some providers (movistar+)

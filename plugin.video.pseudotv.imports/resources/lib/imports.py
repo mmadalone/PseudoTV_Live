@@ -35,13 +35,16 @@ the instance.
 
 import hashlib
 import json
+import os
 import random
+import time
 import urllib.parse
 
 from globals     import *
 from m3u         import M3U
 from logo_links  import own_logo_basename, port_set
 from xmltv       import parseExternalSource as _parse_xmltv_stream
+import replay_helpers
 
 
 # Allowlist for source URL schemes (plan H2 — basic SSRF/path-traversal mitigation).
@@ -72,6 +75,23 @@ RETRY_CURVES = {
 # anyway, so further growth is cosmetic — bounding the integer keeps
 # tests/dashboard predictable and the channels.json record clean.
 FAIL_COUNT_CAP = 20
+
+# madteevee (imports fork, imports.59): bump when the fields we derive from a
+# playlist change. An import whose stored `playlist_rev` is older reads its
+# playlist in full once (validators ignored), so its channel records pick up
+# the new fields even while the source answers "unchanged" (304), which
+# would otherwise reuse the stored records. Rev 1: the playlist's own
+# catch-up values (the Movistar+ catch-up row is gone) and `source_name`.
+PLAYLIST_REREAD_REV = 1
+
+
+def _playlistRev(import_cfg):
+    """imports.59: the import's stored `playlist_rev` (0 when missing or not
+    a number)."""
+    try:
+        return int(import_cfg.get('playlist_rev') or 0)
+    except (TypeError, ValueError):
+        return 0
 
 # Mapping from settings.xml integer codes to curve names. settings.xml uses
 # type="integer" with int-keyed <option> values (consistent with the
@@ -221,6 +241,36 @@ RENDER_ONLY_KICK = '__render__'
 # re-forcing more often than this. Per process: a Kodi restart re-arms it.
 GUIDE_SELFHEAL_MIN_INTERVAL_SEC = 3 * 3600
 _GUIDE_SELFHEAL_LAST = {}  # {import_id: epoch of the last self-heal sync}
+
+# madteevee (imports fork, imports.59, S12): dashboard messages for an import
+# whose replay needs per-show links from its playlist add-on's guide export
+# (replay_helpers.KNOWN_EXPORTERS). `name` is the exporter's name. Shown as
+# last_error only while there is no other error; last_status and the failure
+# counters are never touched. A guide export at least LINKS_OLD_AFTER_DAYS
+# old leaves about 2 days of links ahead (it covers about a week).
+LINKS_MSG_UNREADABLE = ("%(name)s guide file can't be read (%(reason)s). "
+                        "Replay keeps using the links already saved. Restart Kodi or press "
+                        "Export channels and EPG now in %(name)s settings, and check %(name)s is still logged in.")
+LINKS_MSG_NO_LINKS   = "%(name)s guide file has no replay links, so replay is off."
+LINKS_MSG_OUTDATED   = ("%(name)s guide file is out of date, so replay is paused. Restart Kodi or press "
+                        "Export channels and EPG now in %(name)s settings, and check %(name)s is still logged in.")
+LINKS_MSG_OLD        = ("%(name)s guide file is %(days)d days old. Restart Kodi or press Export channels "
+                        "and EPG now in %(name)s settings, and check %(name)s is still logged in.")
+LINKS_MSG_DECLARED   = ("%(name)s changed how it declares replay; replay may misbehave until this "
+                        "add-on is updated.")
+LINKS_OLD_AFTER_DAYS = 4
+# imports.59 (S12/S17): Movistar+ writes its guide export in place with one
+# write(), and Linux sets the mtime when that write starts. A stable read
+# that can't be parsed, of a file modified less than this many seconds
+# before the read, may have caught a writer that stalled mid-write: it is
+# retried at the next cycle instead of being recorded as damaged.
+LINKS_SETTLE_SECS = 120
+
+
+def _ofImport(value, suffix):
+    """imports.59: True when `value` is a namespaced id ending in `suffix`
+    ('@<import id>') -- the same test the XML branch's slice helpers use."""
+    return isinstance(value, str) and value.endswith(suffix)
 
 
 def validate_source_url(url, allowed=ALLOWED_M3U_SCHEMES):
@@ -417,13 +467,26 @@ class Imports(object):
                            if c.get('type') == 'import' and c.get('enabled', True)]
         if not import_channels:
             return 0
+        # imports.59 (S9): the same replay rule as syncAll, decided from the
+        # guide _eagerImportsRender loaded into self.xmltv: a link-replay
+        # channel whose show on air has no link is published without
+        # catch-up. Applied to copies -- the records keep their values.
+        offers = self._replayOffers(import_channels)
+        stations = []
+        for rec in import_channels:
+            if offers.get(rec.get('id')) is False:
+                rec = dict(rec)
+                rec['catchup'] = ''
+                rec['catchup-source'] = ''
+                rec['catchup-days'] = ''
+            stations.append(rec)
         # Direct stations-list assignment matches the shape M3U._save
         # expects (M3UDATA dict with 'stations' + 'recordings' keys per
         # m3u.py:75). Builder.__setStation does the same kind of mutation
         # per-channel; we just do it bulk for imports. Recordings stay
         # untouched (they're a different concept — DVR-style local
         # recordings, not live imports).
-        self.m3u.M3UDATA['stations'] = list(import_channels)
+        self.m3u.M3UDATA['stations'] = stations
         saved = self.m3u._save()   # imports.42 plumbs channel_count for breaker + INFO log
         if saved:
             return len(import_channels)
@@ -464,6 +527,14 @@ class Imports(object):
                 'source_url'    : entry.get('url', ''),
                 # Source-side fields preserved verbatim (caller may override)
                 'name'          : entry.get('name', ''),
+                # imports.59 (S18): the playlist's own name, refreshed on every
+                # full read even when the operator renamed the channel ('name'
+                # in operator_overrides). syncAll's guide matcher also tries it,
+                # so a renamed channel keeps matching a guide whose channel ids
+                # are display names (davidmuma) on an unchanged (304) sync.
+                # render_m3u emits only M3U_TEMP keys, so it never reaches
+                # pseudotv.m3u.
+                'source_name'   : entry.get('name', ''),
                 'logo'          : entry.get('logo', ''),
                 'group'         : list(entry.get('group', [])),
                 'catchup'       : entry.get('catchup', ''),
@@ -486,7 +557,7 @@ class Imports(object):
             })
         return out
 
-    def parseXMLTV(self, source, channel_id_filter=None):
+    def parseXMLTV(self, source, channel_id_filter=None, strict=False):
         """
         Yield (kind, dict) tuples from an external XMLTV source.
 
@@ -495,6 +566,10 @@ class Imports(object):
         of source-side XMLTV channel ids; programmes whose `channel=` attr is
         not in the filter are skipped (saves memory when most of the source's
         channels aren't needed by this import).
+
+        imports.59: `strict` is passed through. False (default) keeps the
+        lenient behaviour every guide source uses; True raises on an empty or
+        truncated document (the replay-links read, see _readLinks).
 
         Note: yielded dicts contain SOURCE-SIDE channel ids. Caller (step 3)
         is responsible for rewriting `id` / `channel` to the namespaced form
@@ -506,6 +581,7 @@ class Imports(object):
             source,
             channel_id_filter=channel_id_filter,
             log_callback=lambda m: self.log(m),
+            strict=strict,
         )
 
     # ------------------------------------------------------------------
@@ -559,10 +635,19 @@ class Imports(object):
         # ---- M3U fetch + parse ----
         m3u_source = import_cfg.get('m3u_url') or import_cfg.get('m3u_path')
         if m3u_source:
+            # imports.59 (S8): an import whose playlist_rev predates
+            # PLAYLIST_REREAD_REV reads its playlist in full once (no
+            # validators, so no 304). The rev is stored only after that read
+            # parses into channels (200 branch below); a failed or empty read
+            # tries again next sync.
+            reread = _playlistRev(import_cfg) < PLAYLIST_REREAD_REV
+            if reread:
+                self.log('[%s] syncOne, reading the playlist in full once (playlist_rev %d < %d)'
+                         % (import_id, _playlistRev(import_cfg), PLAYLIST_REREAD_REV), level=xbmc.LOGINFO)
             fetched = self.fetchSource(
                 m3u_source,
-                etag=import_cfg.get('etag'),
-                last_modified=import_cfg.get('last_modified'),
+                etag=None if reread else import_cfg.get('etag'),
+                last_modified=None if reread else import_cfg.get('last_modified'),
             )
             if fetched['status'] == 304:
                 # Source unchanged — but we still need to know what's there
@@ -652,6 +737,9 @@ class Imports(object):
                 }
                 if fetched.get('etag'):          result['updated_cfg']['etag']          = fetched['etag']
                 if fetched.get('last_modified'): result['updated_cfg']['last_modified'] = fetched['last_modified']
+                # imports.59 (S8): a full read parsed into channels -- the records
+                # now carry every field derived at this rev.
+                result['updated_cfg']['playlist_rev'] = PLAYLIST_REREAD_REV
 
         # If neither m3u_url nor m3u_path: this is an EPG-only import
         # (plan G7). Caller's existing channels with epg_id set are the
@@ -793,6 +881,118 @@ class Imports(object):
             result['updated_cfg']['epg_fail_count'] = 0
         return result
 
+    def _readLinks(self, import_id, exporter, updated_cfg, tvg_ids):
+        """imports.59 (S10.2/S12): read the exporter add-on's guide export --
+        the replay links -- for an import that uses link-based replay.
+
+        `exporter` is replay_helpers.exporter_for's (addon id, spec, links
+        path); `tvg_ids` the source ids of the import's link-replay channels
+        (only their programmes are parsed). Returns {'pairs', 'warning'}:
+        the parsed (kind, dict) pairs (source-side ids) and the dashboard
+        message for the state of the file, or None.
+
+        A full read every sync (fetchSource with no validators: the safe
+        local read of _fetchLocal) and a strict parse, so an empty, cut-off
+        or broken file is rejected as a whole: no links from it, and the
+        links already in the guide stay. There is no cache file -- the export
+        is local and stays on disk, and the published guide keeps the links
+        when it can't be read.
+
+        updated_cfg['links_mtime_ns'] records the file's st_mtime_ns after
+        every read during which the file did not change, parsed or not, so
+        the new-links trigger (_linksChanged) forces a sync only for a NEW
+        file and a damaged one isn't re-read every hour. It is stored as a
+        decimal string: the number is above JavaScript's 2^53, and the
+        dashboard posts the import list back after an edit, rounded. A
+        stored value means "this file was read", not "its links reached the
+        guide": if the merge then fails (logged as an error), the trigger
+        doesn't force a re-read; the import's next sync (at most its
+        refresh interval), a dashboard Refresh or a new export reads and
+        merges the file again. The links already in the guide cover the
+        coming days, and a repeating error must not force a sync every
+        hour.
+
+        Nothing is stored and nothing shown (the trigger retries) for a read
+        during which the file changed, and for a stable read that can't be
+        parsed of a file modified less than LINKS_SETTLE_SECS before: the
+        exporter may still be writing it.
+        """
+        addon_id, spec, path = exporter
+        name = spec.get('name') or addon_id
+        out = {'pairs': [], 'warning': None}
+        fetched = self.fetchSource(path)
+        if fetched.get('transient'):
+            self.log('[%s] syncAll, replay links file changed while reading; will retry' % (import_id,),
+                     level=xbmc.LOGINFO)
+            return out
+        mtime_ns = fetched.get('mtime_ns')
+        reason = detail = None
+        if fetched.get('status') != 200:
+            reason = 'missing' if mtime_ns is None else 'unreadable'
+            detail = fetched.get('error')
+        else:
+            try:
+                out['pairs'] = list(self.parseXMLTV(fetched.get('content'),
+                                                    channel_id_filter=tvg_ids, strict=True))
+            except Exception as e:
+                out['pairs'] = []
+                reason = 'damaged' if fetched.get('content') else 'empty file'
+                detail = str(e) or e.__class__.__name__
+        if reason in ('damaged', 'empty file') and isinstance(mtime_ns, int):
+            # imports.59 (S12/S17): Linux sets the mtime when the exporter's
+            # single write() starts, so a stable but cut-off read of a file
+            # this young may be a stalled writer; its final mtime wouldn't
+            # change again. Retried like a read the file changed during. A
+            # future mtime (clock change) proves nothing and is recorded.
+            age_s = time.time() - mtime_ns / 1e9
+            if 0 <= age_s < LINKS_SETTLE_SECS:
+                self.log('[%s] syncAll, replay links file %s, modified %.0fs ago -- may still be being written; will retry'
+                         % (import_id, reason, age_s), level=xbmc.LOGINFO)
+                return out
+        if isinstance(mtime_ns, int):
+            updated_cfg['links_mtime_ns'] = str(mtime_ns)
+        if reason is not None:
+            self.log("[%s] syncAll, replay links file can't be used (%s): %s -- the links already in the guide stay"
+                     % (import_id, reason, detail), level=xbmc.LOGWARNING)
+            out['warning'] = LINKS_MSG_UNREADABLE % {'name': name, 'reason': reason}
+            return out
+
+        now = time.time()
+        stops = []
+        for kind, item in out['pairs']:
+            if kind != 'programme':
+                continue
+            link = item.get('catchup-id')
+            if isinstance(link, str) and link.strip():
+                stop = replay_helpers.xmltv_to_epoch(item.get('stop'))
+                if stop is not None:
+                    stops.append(stop)
+        age_days = int((now - mtime_ns / 1e9) // 86400) if isinstance(mtime_ns, int) else 0
+        if not stops:
+            out['warning'] = LINKS_MSG_NO_LINKS % {'name': name}
+        elif max(stops) <= now:
+            out['warning'] = LINKS_MSG_OUTDATED % {'name': name}
+        elif age_days >= LINKS_OLD_AFTER_DAYS:
+            out['warning'] = LINKS_MSG_OLD % {'name': name, 'days': age_days}
+        self.log('[%s] syncAll, replay links file read: %d links%s'
+                 % (import_id, len(stops), (' (%s)' % out['warning']) if out['warning'] else ''),
+                 level=xbmc.LOGINFO if out['warning'] else xbmc.LOGDEBUG)
+        return out
+
+    @staticmethod
+    def _declaredReplayWarning(exporter, link_records):
+        """imports.59 (S12): the dashboard message when the import's
+        link-replay channels (as just merged) declare catch-up differently
+        from the exporter's verified form (KNOWN_EXPORTERS 'catchup'), else
+        None. Only link-based records count, so a non-link catch-up (e.g. the
+        old Movistar+ row restored) never triggers it."""
+        addon_id, spec = exporter[0], exporter[1]
+        want = spec.get('catchup')
+        declared = {(c.get('catchup') or '', c.get('catchup-source') or '') for c in link_records or ()}
+        if want and declared and declared != {tuple(want)}:
+            return LINKS_MSG_DECLARED % {'name': spec.get('name') or addon_id}
+        return None
+
 
     def syncAll(self, force_scope=None):
         """
@@ -927,6 +1127,19 @@ class Imports(object):
                 force_active = True
                 self.log('[%s] syncAll, guide missing from %s — forcing a sync (self-heal)'
                          % (iid, XMLTVFLE), level=xbmc.LOGWARNING)
+
+            # imports.59 (S17): the playlist add-on wrote a new guide export
+            # (the replay links) since the one last read -- sync now, so the
+            # new links reach the guide within the hour instead of after
+            # refresh_interval_min (10 h on madteevee). Same force pattern as
+            # the two checks above, so the abandon check and the failure
+            # backoff below still rule a failing import.
+            if (not force_active and import_cfg.get('enabled', True)
+                    and import_cfg.get('last_status') != 'failed'
+                    and self._linksChanged(import_cfg, existing_channels)):
+                force_active = True
+                self.log('[%s] syncAll, new replay links file — forcing a sync' % (iid,),
+                         level=xbmc.LOGINFO)
 
             if (import_cfg.get('enabled', True)
                 and import_cfg.get('id')):
@@ -1103,36 +1316,29 @@ class Imports(object):
         # madteevee (imports fork): catchup attribute derivation per import.
         # Operator can set `catchup_mode` + `catchup_query_format` + `catchup_days`
         # per import in channels.json's `imports` array (via the import-config
-        # edit endpoint). When unset, fall back to known-host defaults — currently
-        # just movistar+. To extend to another catchup-capable plugin, add an
-        # entry to KNOWN_CATCHUP_DEFAULTS. The data flow is: import config →
-        # _resolveCatchup → per-channel `catchup` + `catchup-source` fields,
-        # which get emitted into pseudotv.m3u and pvr.iptvsimple uses them to
-        # offer "Play this program" + invoke the source plugin directly with
-        # `&start_time=...&end_time=...` appended. Live playback still routes
-        # through pseudotv.imports' plugin handler; only catchup bypasses us.
+        # edit endpoint). When unset, a host listed in KNOWN_CATCHUP_DEFAULTS
+        # supplies them; any other channel keeps the catch-up its playlist
+        # declares (parseM3U stores it, applyRefresh refreshes it). The data
+        # flow is: import config → _resolveCatchup → per-channel `catchup` +
+        # `catchup-source` fields, which get emitted into pseudotv.m3u and
+        # pvr.iptvsimple uses them to offer "Play programme" + invoke the
+        # source plugin directly. Live playback still routes through
+        # pseudotv.imports' plugin handler; only catchup bypasses us.
         KNOWN_CATCHUP_DEFAULTS = {
             # source_url prefix → (catchup_mode, catchup_query_format, catchup_days)
-            # catchup_mode="default" (NOT "vod"). For "vod" mode, pvr.iptvsimple
-            # only substitutes `{catchup-id}` in catchup-source — `{utc}` /
-            # `{utcend}` placeholders stay literal. movistarplus then receives
-            # an invalid URL like `?...&start_time={utc}&end_time={utcend}`,
-            # parses no valid time window, and falls back to live. The user-
-            # visible symptom: past-EPG clicks load live instead of catchup.
-            # "default" mode appends the INSTANCE-LEVEL `catchupQueryFormat`
-            # (operator-set in pvr.iptvsimple instance-settings.xml) to the
-            # channel's main URL at catchup time, with `{utc}/{utcend}`
-            # substituted from the clicked EPG event. This is what movistar+'s
-            # OWN auto-generated iptvsimple instance uses, and is what worked
-            # for the operator pre-migration. The per-channel catchup-source
-            # we emit is harmless in "default" mode (iptvsimple ignores it).
-            # Operator action required: in pvr.iptvsimple/instance-settings-
-            # 50002.xml, set catchupQueryFormat to
-            # `&start_time={utc}&end_time={utcend}`. Custom-channel catchup
-            # (which uses catchup="vod" + per-channel catchup-source with
-            # `{catchup-id}` token) is unaffected — those channels use vod
-            # mode independently.
-            'plugin://plugin.video.movistarplus/': ('default', '&start_time={utc}&end_time={utcend}', 5),
+            # for a host whose playlist doesn't declare usable catch-up itself.
+            #
+            # imports.59: the 'plugin://plugin.video.movistarplus/' row
+            # ('default', '&start_time={utc}&end_time={utcend}', 5) is gone.
+            # Movistar+ 0.11.9 declares catchup="default"
+            # catchup-source="{catchup-id}" catchup-days="7" on every playlist
+            # line. In default mode IPTV Simple uses a non-empty catchup-source
+            # as the full replay address (its README: "Use catchup source as
+            # the full catchup URL, if there is no catchup source use Append
+            # mode") -- here each show's own link, the guide's catchup-id. The
+            # row blanked that source, so IPTV Simple appended the instance's
+            # query format to the live address instead and every past show
+            # played live. Movistar+ channels now keep the playlist's values.
         }
         def _resolveCatchup(import_cfg, source_url):
             """Return (catchup_mode, catchup_source_url, catchup_days) for a single channel.
@@ -1185,16 +1391,16 @@ class Imports(object):
                 _cm, _cs, _cd = _resolveCatchup(import_cfg, new.get('source_url', ''))
                 if _cm:
                     new['catchup']        = _cm
-                    # madteevee (imports fork): for "default" catchup mode,
-                    # explicitly CLEAR catchup-source. pvr.iptvsimple's mode-
-                    # detection treats any channel with a non-empty
-                    # catchup-source as VOD mode regardless of the channel's
-                    # `catchup` attribute. For "default" mode to actually
-                    # use the instance-level catchupQueryFormat (with {utc}/
-                    # {utcend} substitution), the per-channel catchup-source
-                    # must be EMPTY. iptvsimple then composes the catchup URL
-                    # at play-time as: channel.url + instance.catchupQueryFormat.
-                    # For "vod"/"shift"/"fs"/"xc" modes we still emit the
+                    # madteevee (imports fork): for a configured "default"
+                    # catchup mode, CLEAR catchup-source. In default mode
+                    # pvr.iptvsimple uses a non-empty catchup-source as the
+                    # full replay address; with an empty one it appends the
+                    # instance-level catchupQueryFormat (with {utc}/{utcend}
+                    # substituted from the clicked guide entry) to the
+                    # channel URL -- what a configured query format relies
+                    # on. (imports.59: the earlier note here, "any non-empty
+                    # catchup-source means VOD mode", was wrong.) For
+                    # "vod"/"shift"/"fs"/"xc" modes we still emit the
                     # per-channel catchup-source so iptvsimple uses it directly.
                     if _cm == 'default':
                         new['catchup-source'] = ''
@@ -1218,7 +1424,9 @@ class Imports(object):
                 _cm, _cs, _cd = _resolveCatchup(import_cfg, existing.get('source_url', ''))
                 if _cm and 'catchup' not in overrides:
                     existing['catchup']        = _cm
-                    # Same default-mode catchup-source clearing as new-channel arm
+                    # Same default-mode catchup-source clearing as the
+                    # new-channel arm (configured mode only; a playlist's own
+                    # catch-up, refreshed by applyRefresh, is left as declared)
                     if _cm == 'default':
                         existing['catchup-source'] = ''
                     else:
@@ -1238,6 +1446,44 @@ class Imports(object):
                         if 'number' not in (orphan.get('operator_overrides') or []):
                             orphan['number'] = n
                     all_imported_now[cid] = orphan
+
+        # imports.59 (S10.2/S12): replay links. An import whose playlist is a
+        # known exporter's own file (replay_helpers.exporter_for) and whose
+        # live channels -- as just merged, every catch-up setting applied --
+        # use link-based replay reads that add-on's guide export: in full on
+        # every sync of the import, through the same safe local read as the
+        # playlist. The XML branch below merges the links. Read before
+        # setImports, so links_mtime_ns and any dashboard message are saved
+        # with this sync's results. Without guide data (self.xmltv) there is
+        # nothing to merge into, so the file isn't read (or recorded) at
+        # all. A stored links_mtime_ns means the file was read for a merge;
+        # if that merge fails, its links wait for the import's next sync or
+        # a new export (see _readLinks).
+        for iid, res in per_import_results.items():
+            if self.xmltv is None or res.get('status') not in ('ok', 'unchanged'):
+                continue
+            exporter = replay_helpers.exporter_for(import_cfg_by_id.get(iid))
+            if exporter is None:
+                continue
+            records = [c for c in all_imported_now.values() if c.get('import_source') == iid]
+            link_days = replay_helpers.link_replay_days(records)
+            if not link_days:
+                continue
+            link_records = [c for c in records if c.get('id') in link_days]
+            tvg_ids = {c.get('epg_id') for c in link_records if c.get('epg_id')}
+            try:
+                res['links'] = self._readLinks(iid, exporter, res['updated_cfg'], tvg_ids)
+            except Exception as e:
+                # Still merge, with no new links: the merge is what keeps the
+                # linked history (the fresh path's prune would drop it).
+                self.log('[%s] syncAll, replay links read failed: %s' % (iid, e), level=xbmc.LOGERROR)
+                res['links'] = {'pairs': [], 'warning': None}
+            warning = res['links'].get('warning') or self._declaredReplayWarning(exporter, link_records)
+            # Shown only while there is no other error to show; last_status
+            # and the failure counters stay as they are (a 'warning' status
+            # would drop the import from allocation).
+            if warning and not res['updated_cfg'].get('last_error'):
+                res['updated_cfg']['last_error'] = warning
 
         # Build merged channel list: keep all non-import channels as-is,
         # replace/add imported channels.
@@ -1333,25 +1579,8 @@ class Imports(object):
             self.log('syncAll, logo cache: publishing %d channel logos from the cache (mode=%d)'
                      % (cached_count, refresh_mode), level=xbmc.LOGINFO)
 
-        # Push imported channels into in-memory M3U/XMLTV
-        if self.m3u is not None:
-            for ch in all_imported_now.values():
-                # madteevee (imports fork): disabled / orphan / unallocated
-                # channels must be EXPLICITLY removed from M3UDATA, not just
-                # skipped. Skipping leaves stale entries (e.g., a channel
-                # disabled in channels.json with number=9036 keeps its old
-                # live-range #57 entry in pseudotv.m3u indefinitely, and
-                # Kodi PVR keeps showing it). delStation removes by id.
-                if ch.get('is_orphan') or ch.get('unallocated') or not ch.get('enabled', True):
-                    try: self.m3u.delStation(ch)
-                    except Exception: pass
-                    continue
-                station = self._channelToStation(ch, logo=published_logos.get(ch.get('id')))
-                try: self.m3u.addStation(station)
-                except Exception as e:
-                    self.log('syncAll, addStation [%s] failed: %s' % (ch.get('id'), e),
-                             level=xbmc.LOGWARNING)
-
+        # Push imported channels into in-memory XMLTV (the M3U push follows
+        # the XML branch -- imports.59, see there)
         if self.xmltv is not None:
             # Per-import EPG: rewrite source-side IDs to namespaced before adding.
             # Match strategy mirrors IPTV Simple's documented chain:
@@ -1431,6 +1660,9 @@ class Imports(object):
                 # that are no longer live still go.
                 if res.get('epg_keep_previous'):
                     pruned_chan, pruned_prog = _pruneSlice(import_ns_suffix, dead_only=True)
+                    # imports.59 (S10.3): this sync's replay links still reach
+                    # the kept guide (it serves as the details source).
+                    self._mergeLinksIntoKept(iid, res, all_imported_now, published_logos)
                     _applyGuideIcons(import_ns_suffix)
                     self.log('syncAll, [%s] guide unavailable (%s) — keeping the previous guide (dropped %d channels + %d programmes no longer live)'
                              % (iid, res.get('epg_error'), pruned_chan, pruned_prog), level=xbmc.LOGWARNING)
@@ -1447,6 +1679,19 @@ class Imports(object):
                         n = _norm(cand)
                         if n and n not in name_map:
                             name_map[n] = cid
+                # imports.59 (S18): then each channel's playlist name
+                # (`source_name`), for names no channel claimed above. On an
+                # unchanged (304) sync `parsed` holds the stored records, whose
+                # `name` is the operator's after a rename, so the channel lost
+                # its guide wherever the guide's ids are display names
+                # (davidmuma). A second pass keeps every match made today --
+                # operator names and tvg-ids first -- and only fills gaps.
+                for ch in (res['parsed'] or []):
+                    cid = ch.get('id')
+                    src_name = ch.get('source_name')
+                    n = _norm(src_name) if isinstance(src_name, str) else ''
+                    if cid and n and n not in name_map:
+                        name_map[n] = cid
                 self.log('syncAll, [%s] EPG matcher built id_map=%d name_map=%d (sample names: %s)'
                          % (iid, len(id_map), len(name_map), list(name_map.keys())[:5]),
                          level=xbmc.LOGINFO)
@@ -1545,10 +1790,34 @@ class Imports(object):
                                       or res['updated_cfg'].get('epg_path'))
                 if epg_configured and matched_chan == 0 and matched_prog == 0 and skipped_disabled == 0:
                     pruned_chan, pruned_prog = _pruneSlice(import_ns_suffix, dead_only=True)
+                    # imports.59 (S10.3): as on the guide-unavailable path.
+                    self._mergeLinksIntoKept(iid, res, all_imported_now, published_logos)
                     _applyGuideIcons(import_ns_suffix)
                     self.log('syncAll, [%s] no guide entries matched — keeping the previous guide (dropped %d channels + %d programmes no longer live)'
                              % (iid, pruned_chan, pruned_prog), level=xbmc.LOGWARNING)
                     continue
+
+                # imports.59 (S10.3): merge this sync's replay links into the
+                # fresh guide, with the replay history kept from the guide data
+                # as loaded (pseudotv.xml) -- read before the prune below, which
+                # removes it. The export starts at its own day's 00:00, so older
+                # linked shows exist only there. If the merge fails, this
+                # import keeps its previous guide (as when the guide is
+                # unavailable) rather than lose that history; this file's
+                # links then wait for the import's next sync or a new export
+                # (links_mtime_ns is already recorded, see _readLinks).
+                if res.get('links') is not None:
+                    try:
+                        merged = self._mergeReplayLinks(iid, res, all_imported_now, published_logos,
+                                                        new_chans, new_progs)
+                    except Exception as e:
+                        pruned_chan, pruned_prog = _pruneSlice(import_ns_suffix, dead_only=True)
+                        _applyGuideIcons(import_ns_suffix)
+                        self.log('syncAll, [%s] replay links merge failed (%s) — keeping the previous guide (dropped %d channels + %d programmes no longer live)'
+                                 % (iid, e, pruned_chan, pruned_prog), level=xbmc.LOGERROR)
+                        continue
+                    if merged is not None:
+                        new_chans, new_progs = merged
 
                 # madteevee (imports fork): drop ALL stale entries for this
                 # import's namespace before appending the freshly-matched ones.
@@ -1563,6 +1832,38 @@ class Imports(object):
                              % (iid, pruned_chan, pruned_prog), level=xbmc.LOGINFO)
                 xtv_channels.extend(new_chans)
                 xtv_programmes.extend(new_progs)
+
+        # imports.59 (S9): a channel whose replay needs per-show links offers
+        # replay only while the show on air in the guide about to be
+        # published carries one. IPTV Simple offers every started show within
+        # catchup-days without checking for a link, and plays an unfilled
+        # '{catchup-id}' ("Playback failed") when there is none. Decided here,
+        # after the XML branch, so it sees the final guide (keep-previous
+        # paths included). The record keeps the playlist's values, so replay
+        # comes back by itself once links return.
+        replay_links = self._replayOffers(all_imported_now.values())
+
+        # Push imported channels into in-memory M3U. imports.59: moved after
+        # the XML branch for the rule above; the XML branch never reads
+        # M3UDATA, and the M3U force-flush below runs after this, as before.
+        if self.m3u is not None:
+            for ch in all_imported_now.values():
+                # madteevee (imports fork): disabled / orphan / unallocated
+                # channels must be EXPLICITLY removed from M3UDATA, not just
+                # skipped. Skipping leaves stale entries (e.g., a channel
+                # disabled in channels.json with number=9036 keeps its old
+                # live-range #57 entry in pseudotv.m3u indefinitely, and
+                # Kodi PVR keeps showing it). delStation removes by id.
+                if ch.get('is_orphan') or ch.get('unallocated') or not ch.get('enabled', True):
+                    try: self.m3u.delStation(ch)
+                    except Exception: pass
+                    continue
+                station = self._channelToStation(ch, logo=published_logos.get(ch.get('id')),
+                                                 replay_links=replay_links.get(ch.get('id')))
+                try: self.m3u.addStation(station)
+                except Exception as e:
+                    self.log('syncAll, addStation [%s] failed: %s' % (ch.get('id'), e),
+                             level=xbmc.LOGWARNING)
 
         # Force-flush merged XMLTVDATA when running under a writable XMLTVS
         # (Builder.buildChannels path). Builder's per-channel addProgramme
@@ -1628,8 +1929,9 @@ class Imports(object):
                 if rendered is None:
                     # Empty-data guard fired in render_xmltv; skip write
                     # so we don't overwrite disk with the self-closing
-                    # `<tv/>` corruption shape.
-                    self.log('syncAll, force-flush skipped (empty XMLTVDATA); disk content preserved',
+                    # `<tv/>` corruption shape. imports.59: render_xmltv also
+                    # returns None when the render itself fails.
+                    self.log('syncAll, force-flush skipped (empty XMLTVDATA or render failed); disk content preserved',
                              level=xbmc.LOGWARNING)
                 else:
                     # imports.42: pass channel_count for write_atomic's
@@ -1729,7 +2031,22 @@ class Imports(object):
         return per_import_results
 
 
-    def _channelToStation(self, ch, logo=None):
+    def _replayOffers(self, records):
+        """imports.59 (S9): {channel id: bool} for the live records whose
+        replay needs per-show links (replay_helpers.link_replay_days): True
+        while the guide data in self.xmltv carries a link for the show on
+        air -- with none on air, the latest show that has started -- else
+        False (replay_helpers.channels_with_links). Other records are absent
+        (their catch-up is published as recorded). {} without guide data."""
+        if self.xmltv is None:
+            return {}
+        link_ids = set(replay_helpers.link_replay_days(records))
+        if not link_ids:
+            return {}
+        return replay_helpers.channels_with_links(self.xmltv.XMLTVDATA.get('programmes') or [],
+                                                  link_ids, int(time.time()))
+
+    def _channelToStation(self, ch, logo=None, replay_links=None):
         """Map an imported channel record → M3U station dict for `m3u.addStation`.
 
         Mirrors the M3U_TEMP shape (m3u.py:26) plus `url` and `label`.
@@ -1741,6 +2058,12 @@ class Imports(object):
         imports.58: `logo` — the address to publish when it differs from the
         record's own (the cached copy's link, see syncAll's logo cache step);
         the record itself is never rewritten.
+
+        imports.59 (S9): `replay_links` — for a channel whose replay needs
+        per-show links, whether the show on air in the guide carries one
+        (`_replayOffers`). False publishes catchup="" and no catchup-source /
+        catchup-days, so IPTV Simple offers no replay; None (any other
+        channel) publishes the record's values. The record is never changed.
 
         CRITICAL — bool/empty-string semantics:
         M3U._save's optional-attrs loop (m3u.py:226-232) emits ANY key with
@@ -1762,6 +2085,7 @@ class Imports(object):
         def _opt_str(k):
             v = ch.get(k)
             return v if v else ''
+        replay_off = replay_links is False
         return {
             'id'                : ch.get('id', ''),  # NAMESPACED — already from parseM3U
             'number'            : ch.get('number', 0),
@@ -1770,7 +2094,7 @@ class Imports(object):
             'group'             : list(ch.get('group') or []),
             # `radio` and `catchup` are positional in m3u.py:218 line template; always emitted.
             'radio'             : bool(ch.get('radio', False)),
-            'catchup'           : ch.get('catchup', ''),
+            'catchup'           : '' if replay_off else ch.get('catchup', ''),
             'label'             : ch.get('name', ''),
             'url'               : ch.get('source_url', '') or ch.get('url', ''),
             # OPTIONAL attrs — empty-string when missing/False so M3U._save's
@@ -1781,8 +2105,8 @@ class Imports(object):
             'media-dir'         : _opt_str('media-dir'),
             'media-size'        : _opt_str('media-size'),
             'tvg-shift'         : _opt_str('tvg-shift'),
-            'catchup-source'    : _opt_str('catchup-source'),
-            'catchup-days'      : _opt_str('catchup-days'),
+            'catchup-source'    : '' if replay_off else _opt_str('catchup-source'),
+            'catchup-days'      : '' if replay_off else _opt_str('catchup-days'),
             'catchup-correction': _opt_str('catchup-correction'),
             'provider'          : _opt_str('provider'),
             'provider-type'     : _opt_str('provider-type'),
@@ -1807,6 +2131,9 @@ class Imports(object):
             'last_modified': str or None,   # remote: HTTP header value
                                             # local:  str(stat.st_mtime)
             'error'        : str or None,   # populated on failure
+            # local only (imports.59, see _fetchLocal):
+            'mtime_ns'     : int or None,   # st_mtime_ns of a stable read
+            'transient'    : True,          # only on a read the file changed during
         }
 
         Local file (`special://`, absolute path): stat mtime; if mtime <=
@@ -1830,8 +2157,105 @@ class Imports(object):
         else:
             return self._fetchLocal(url_or_path, last_modified)
 
+    @staticmethod
+    def _localRealPath(path):
+        """imports.59 (S4): the real filesystem path of a local source, or None
+        when it doesn't translate to a local file (Kodi's VFS reads those).
+        special:// paths are translated; any other path is used as given, as
+        _fetchLocal always did (FileAccess.translatePath would cut a plain
+        path at an '@')."""
+        if not isinstance(path, str) or not path:
+            return None
+        real_path = FileAccess.translatePath(path) if path.startswith('special://') else path
+        if not isinstance(real_path, str) or not real_path or '://' in real_path:
+            return None
+        return real_path
+
+    @staticmethod
+    def _localFileState(path):
+        """imports.59 (S4/S17): (size, mtime_ns) of a local file -- os.stat on
+        the translated path, never xbmcvfs.Stat -- or None when it can't be
+        stat'ed (missing, inaccessible, or not a local file). The local read
+        (_fetchLocal) and the new-links trigger (_linksChanged) both use it,
+        so the stored links_mtime_ns and the value compared with it are the
+        same unit."""
+        real_path = Imports._localRealPath(path)
+        if real_path is None:
+            return None
+        try:
+            st = os.stat(real_path)
+        except (OSError, ValueError):
+            return None
+        return (st.st_size, st.st_mtime_ns)
+
     def _fetchLocal(self, path, last_modified):
-        """Read a local file; honor mtime for conditional fetch."""
+        """Read a local file; honor mtime for conditional fetch.
+
+        imports.59 (S4): a path that translates to a local file is read with
+        plain Python file I/O -- _localFileState (os.stat) before and after,
+        open(..., 'rb') in between -- never through xbmcvfs.Stat, which once
+        wedged the imports thread on another add-on's special:// file during
+        playback (tasks.py chkImports note). Kodi's VFS reads only a path
+        that doesn't translate to a local file (_fetchLocalVFS, as before).
+          - The validator stays str(st_mtime), now with sub-second precision
+            (xbmcvfs.Stat gave whole seconds), so each local source is read
+            in full once after this update.
+          - The result also carries 'mtime_ns', the file's st_mtime_ns.
+          - Movistar+ rewrites its playlist and guide export in place. When
+            the size or mtime_ns changed during the read, the result is a
+            failure marked 'transient' with no content: nothing is parsed or
+            stored from it (validators untouched, no channel orphaned) and
+            the next sync tries again.
+        """
+        try:
+            real_path = self._localRealPath(path)
+        except Exception as e:
+            return {'status': 0, 'content': None, 'etag': None,
+                    'last_modified': None, 'mtime_ns': None,
+                    'error': 'local fetch failed: %s' % e}
+        if real_path is None:
+            return self._fetchLocalVFS(path, last_modified)
+
+        before = self._localFileState(path)
+        if before is None:
+            return {'status': 0, 'content': None, 'etag': None,
+                    'last_modified': None, 'mtime_ns': None,
+                    'error': 'local source not found: %s' % path}
+        mtime = before[1] / 1e9
+        if last_modified is not None:
+            try:
+                if mtime <= float(last_modified):
+                    return {'status': 304, 'content': None, 'etag': None,
+                            'last_modified': str(mtime), 'mtime_ns': before[1], 'error': None}
+            except (ValueError, TypeError):
+                # imports.59 (S4): an invalid stored validator -- read in full.
+                self.log('_fetchLocal, %s: stored last_modified %r is not a number; reading in full'
+                         % (path, last_modified), level=xbmc.LOGDEBUG)
+
+        content, error = None, None
+        try:
+            with open(real_path, 'rb') as f:
+                content = f.read()
+        except OSError as e:
+            error = 'local fetch failed: %s' % e
+        after = self._localFileState(path)
+        if after != before:
+            self.log('_fetchLocal, %s changed while reading; will retry' % (path,), level=xbmc.LOGINFO)
+            return {'status': 0, 'content': None, 'etag': None,
+                    'last_modified': None, 'mtime_ns': None, 'transient': True,
+                    'error': 'file changed while reading; will retry'}
+        if error is not None:
+            # Stable but unreadable (e.g. permissions): mtime_ns still tells
+            # the replay-links read this file was seen as it is.
+            return {'status': 0, 'content': None, 'etag': None,
+                    'last_modified': None, 'mtime_ns': after[1], 'error': error}
+        return {'status': 200, 'content': content, 'etag': None,
+                'last_modified': str(mtime), 'mtime_ns': after[1], 'error': None}
+
+    def _fetchLocalVFS(self, path, last_modified):
+        """Read a local source through Kodi's VFS (pre-imports.59 _fetchLocal,
+        unchanged): only for a path that doesn't translate to a local file,
+        e.g. a special:// folder mapped to a network share."""
         try:
             # Resolve special:// via FileAccess
             real_path = FileAccess.translatePath(path) if path.startswith('special://') else path
@@ -2492,6 +2916,11 @@ class Imports(object):
         present — rules out imports that never matched anything); and no
         self-heal for it in the last GUIDE_SELFHEAL_MIN_INTERVAL_SEC.
         Cheap checks run first; the programme scan stops at the first hit.
+
+        imports.59 (S11): only a programme that hasn't ended counts (an
+        unreadable stop still counts). Linked replay history is now kept for
+        up to 7 days, and a slice holding only past shows must not hide a
+        missing guide.
         """
         iid = import_cfg.get('id')
         if not iid or not import_cfg.get('enabled', True):
@@ -2507,18 +2936,139 @@ class Imports(object):
                    for c in (existing_channels or [])):
             return False
         suffix = '@%s' % iid
+        now = time.time()
         for p in (self.xmltv.XMLTVDATA.get('programmes') or []):
             ch = p.get('channel')
             if isinstance(ch, str) and ch.endswith(suffix):
-                return False
+                stop = replay_helpers.xmltv_to_epoch(p.get('stop'))
+                if stop is None or stop > now:
+                    return False
         if not self._hasCachedGuide(iid):
             return False
-        now = time.time()
         last = _GUIDE_SELFHEAL_LAST.get(iid)
         if last and 0 <= now - last < GUIDE_SELFHEAL_MIN_INTERVAL_SEC:
             return False
         _GUIDE_SELFHEAL_LAST[iid] = now
         return True
+
+    def _linksChanged(self, import_cfg, existing_channels):
+        """imports.59 (S17): True when an import that uses link-based replay
+        has a replay-links file (its playlist add-on's guide export) other
+        than the one last read: the exporter is known (replay_helpers.
+        exporter_for), the import's stored channel records use link-based
+        replay (link_replay_days), and the file's mtime_ns differs from the
+        stored links_mtime_ns. Compared as decimal text: _readLinks stores a
+        string, and a number stored before (or rounded by the dashboard's
+        JavaScript) differs from the file's only when its digits do. Nothing
+        stored differs too. One os.stat per cycle (_localFileState, never
+        xbmcvfs.Stat). A missing file or any error gives False."""
+        try:
+            exporter = replay_helpers.exporter_for(import_cfg)
+            if exporter is None:
+                return False
+            iid = import_cfg.get('id')
+            if not iid:
+                return False
+            records = [c for c in (existing_channels or ())
+                       if isinstance(c, dict) and c.get('import_source') == iid]
+            if not replay_helpers.link_replay_days(records):
+                return False
+            state = self._localFileState(exporter[2])
+            if state is None:
+                return False
+            return str(state[1]) != str(import_cfg.get('links_mtime_ns'))
+        except Exception as e:
+            self.log('[%s] _linksChanged, check failed: %s' % (import_cfg.get('id'), e),
+                     level=xbmc.LOGWARNING)
+            return False
+
+    def _mergeLinksIntoKept(self, iid, res, all_imported_now, published_logos):
+        """imports.59 (S10.3, R2C-2): on the keep-previous paths (guide
+        unavailable, nothing matched), this sync's replay links are still
+        merged -- into the kept slice, which serves as both the details
+        source and the history -- and the import's slice is replaced with the
+        result. Without this, a links file read on these paths would not
+        reach the guide until the import's next sync: its links_mtime_ns is
+        saved, so the new-links trigger doesn't read it again. On a merge
+        error the kept slice stays as it is, and that file's links wait for
+        the import's next sync or a new export (see _readLinks)."""
+        if res.get('links') is None or self.xmltv is None:
+            return
+        suffix = '@%s' % iid
+        xtv_c = self.xmltv.XMLTVDATA.setdefault('channels', [])
+        xtv_p = self.xmltv.XMLTVDATA.setdefault('programmes', [])
+        kept_c = [c for c in xtv_c if _ofImport(c.get('id'), suffix)]
+        kept_p = [p for p in xtv_p if _ofImport(p.get('channel'), suffix)]
+        try:
+            merged = self._mergeReplayLinks(iid, res, all_imported_now, published_logos, kept_c, kept_p)
+        except Exception as e:
+            self.log('syncAll, [%s] replay links merge into the kept guide failed (%s) — kept guide unchanged'
+                     % (iid, e), level=xbmc.LOGERROR)
+            return
+        if merged is None:
+            return
+        new_chans, new_progs = merged
+        xtv_c[:] = [c for c in xtv_c if not _ofImport(c.get('id'), suffix)]
+        xtv_p[:] = [p for p in xtv_p if not _ofImport(p.get('channel'), suffix)]
+        xtv_c.extend(new_chans)
+        xtv_p.extend(new_progs)
+
+    def _mergeReplayLinks(self, iid, res, all_imported_now, published_logos, guide_chans, guide_progs):
+        """imports.59 (S10.3): merge this sync's replay links (res['links'],
+        _readLinks) into one import's guide with replay_helpers.
+        merge_replay_guide. Returns (channel elements, programmes) to publish
+        for the import, or None when it has no live link-replay channel.
+
+        guide_chans / guide_progs -- the guide source's matched entries (the
+            fresh path) or the kept slice (keep-previous paths); ids already
+            namespaced. Not modified.
+        The export's programmes and channels are mapped to namespaced ids by
+        the exact tvg-id (res['epg_id_map']) -- only the import's live
+        link-replay channels (link_replay_days, which also gives each one's
+        replay window). The replay history is this import's programmes in
+        the guide data as loaded (self.xmltv), read before any prune.
+
+        Channel element of a merged channel: the guide source's (davidmuma),
+        else the export's (e.g. a channel only the export covers), else the
+        kept one -- with the imports.58 _guideIcon rule."""
+        records = [c for c in all_imported_now.values() if c.get('import_source') == iid]
+        days_by_channel = replay_helpers.link_replay_days(records)
+        if not days_by_channel:
+            return None
+        id_map = res.get('epg_id_map') or {}
+        links = []
+        link_chans = {}
+        for kind, item in (res.get('links') or {}).get('pairs') or ():
+            if kind == 'programme':
+                ns_id = id_map.get(item.get('channel'))
+                if ns_id in days_by_channel:
+                    links.append(dict(item, channel=ns_id))
+            elif kind == 'channel':
+                ns_id = id_map.get(item.get('id'))
+                if ns_id in days_by_channel:
+                    link_chans[ns_id] = dict(item, id=ns_id)
+        previous = [p for p in (self.xmltv.XMLTVDATA.get('programmes') or [])
+                    if p.get('channel') in days_by_channel]
+        prev_chans = {c.get('id'): c for c in (self.xmltv.XMLTVDATA.get('channels') or [])
+                      if c.get('id') in days_by_channel}
+        programmes, stats = replay_helpers.merge_replay_guide(guide_progs, links, previous,
+                                                              days_by_channel, int(time.time()))
+        have = {c.get('id') for c in guide_chans}
+        extra = []
+        for cid in sorted({p.get('channel') for p in programmes if p.get('channel') in days_by_channel} - have):
+            chan = link_chans.get(cid) or prev_chans.get(cid)
+            if chan is None:
+                continue
+            icon = self._guideIcon(all_imported_now.get(cid), published_logos.get(cid))
+            if icon:
+                chan['icon'] = [{'src': icon}]
+            extra.append(chan)
+        self.log('syncAll, [%s] replay links merged: channels=%d linked=%d with-details=%d kept-details=%d '
+                 'overlap-details=%d titles-only=%d export=%d history=%d history-kept=%d unlinked=%d replaced=%d'
+                 % (iid, stats['channels'], stats['linked'], stats['with_content'], stats['kept_details'],
+                    stats['overlap_details'], stats['plain'], stats['links_in'], stats['history_in'],
+                    stats['history_kept'], stats['fresh_kept'], stats['fresh_dropped']), level=xbmc.LOGINFO)
+        return list(guide_chans) + extra, programmes
 
     def cascadeAllocate(self, parsed_imports, existing_channels):
         """
@@ -2766,9 +3316,9 @@ class Imports(object):
 
         Returns the merged dict (mutates `existing_channel` in place too).
 
-        Source-side ALWAYS refreshed: source_url, source_tvg_chno,
-        catchup-source, catchup-days, catchup-correction, provider,
-        provider-type, provider-logo, kodiprops, extvlcopt, webprops.
+        Source-side ALWAYS refreshed: source_url, source_name (imports.59),
+        source_tvg_chno, catchup-source, catchup-days, catchup-correction,
+        provider, provider-type, provider-logo, kodiprops, extvlcopt, webprops.
 
         Display fields refreshed ONLY if NOT in operator_overrides:
         name, logo, group, catchup, radio.
@@ -2778,8 +3328,10 @@ class Imports(object):
         """
         overrides = set(existing_channel.get('operator_overrides') or [])
 
-        # Always-refreshed (source-side identity / playback fields)
-        for k in ('source_url', 'source_tvg_chno', 'catchup-source',
+        # Always-refreshed (source-side identity / playback fields).
+        # imports.59 (S18): source_name too -- the playlist's own name, kept
+        # current even when the operator renamed the channel.
+        for k in ('source_url', 'source_name', 'source_tvg_chno', 'catchup-source',
                   'catchup-days', 'catchup-correction', 'provider',
                   'provider-type', 'provider-logo', 'kodiprops',
                   'extvlcopt', 'webprops', 'tvg-shift', 'media-dir',

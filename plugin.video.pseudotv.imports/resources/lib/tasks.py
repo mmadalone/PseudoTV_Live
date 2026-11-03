@@ -30,6 +30,7 @@ from wizard         import Wizard
 from server         import HTTP, Discovery
 from renderers      import render_m3u, render_xmltv, write_atomic
 from filter_helpers import RENDER_KEYS, _renderStateDrift
+import replay_helpers
 
 from context_create import _auto
 
@@ -69,6 +70,9 @@ class Tasks(object):
         """
         if getattr(self, '_imports_thread', None) is not None and self._imports_thread.is_alive():
             return
+        # imports.59 (S13): service start time (monotonic) for the daily
+        # export refresh's "running for 15 minutes" check.
+        self._imports_started_at = time.monotonic()
         import threading
         KICK_POLL_SECS = 3          # how often to check the UI-set kick property
         # imports.23: auto-sync interval is now operator-configurable via the
@@ -187,6 +191,14 @@ class Tasks(object):
                         if self.monitor.waitForAbort(KICK_POLL_SECS):
                             return
                         elapsed += KICK_POLL_SECS
+                        # imports.59 (S13): daily guide-export refresh for
+                        # playlist add-ons like Movistar+. Evaluated from this
+                        # 3-second poll; the method itself runs at most every
+                        # 5 minutes and does nothing while anyone is watching.
+                        try:
+                            self._maybeRefreshAddonExports()
+                        except Exception as e:
+                            self.log('imports thread, _maybeRefreshAddonExports failed: %s'%(e), xbmc.LOGWARNING)
                         if interval_secs > 0 and elapsed >= interval_secs:
                             break  # time-based auto-sync interval expired
                         try:
@@ -302,6 +314,111 @@ class Tasks(object):
             except Exception as e:
                 self.log('PVR scan probe: fatal: %s'%(e), xbmc.LOGERROR)
         threading.Thread(target=_probe_and_fire, name='pseudotv-pvr-scan', daemon=True).start()
+
+
+    def _maybeRefreshAddonExports(self):
+        """imports.59 (S13): ask a playlist add-on that exports its own guide
+        (replay_helpers.KNOWN_EXPORTERS -- Movistar+) for a fresh export about
+        once a day, while nobody is watching.
+
+        Movistar+ re-exports only at Kodi start (and only when its files are
+        over 6 h old), and this box runs for days without a restart, so its
+        replay links would run out. RunPlugin of the export action is what
+        Movistar+'s own settings button and start-up service do. Fire-and-
+        forget: the import sync picks the new file up at its next cycle.
+
+        Called from the imports thread's kick-poll loop; evaluates at most
+        every EXPORT_CHECK_INTERVAL_S. Cheap checks come first -- nothing
+        loaded in the player, screensaver on, no input for 30 min, service up
+        for 15 min, not every eligible import fired within 20 h (in-memory,
+        per import id) -- and only then is channels.json read. An import
+        fires when it is enabled, has a known exporter, at least one of its
+        live channels uses link-based catch-up (link_replay_days, so a
+        restored non-link catch-up row stops this too), the add-on is
+        installed and enabled, its own export setting is on, and its guide
+        file is at least 20 h old or missing. replay_helpers.export_due makes
+        the time decision. The file's age comes from Imports._localFileState
+        (os.stat), the same check the import sync's local read and its
+        new-links trigger use, so all three look at the same file. Uses
+        getInfoBool('HasAddon(...)'), never the install/enable-capable
+        Settings.hasAddon.
+        """
+        now = time.monotonic()
+        last = getattr(self, '_export_checked_at', None)
+        if last is not None and now - last < replay_helpers.EXPORT_CHECK_INTERVAL_S:
+            return
+        self._export_checked_at = now
+        fired = getattr(self, '_export_fired_at', None)   # {import id: monotonic time of the last request}
+        if fired is None:
+            fired = self._export_fired_at = {}
+
+        has_media = BUILTIN.getInfoBool('HasMedia', 'Player')   # playing or paused
+        if has_media:
+            return
+        screensaver_on = BUILTIN.getInfoBool('ScreenSaverActive', 'System')
+        if not screensaver_on:
+            return
+        idle_s = BUILTIN.getIdle()
+        if idle_s < replay_helpers.EXPORT_MIN_IDLE_S:
+            return
+        uptime_s = now - getattr(self, '_imports_started_at', now)
+        if uptime_s < replay_helpers.EXPORT_MIN_UPTIME_S:
+            return
+        known = getattr(self, '_export_candidates', None)
+        if known and all(iid in fired and now - fired[iid] < replay_helpers.EXPORT_MIN_REFIRE_S for iid in known):
+            return
+
+        channels = Channels()
+        imports  = list(channels.getImports() or [])
+        records_by_import = {}
+        for rec in channels.getChannels() or []:
+            if isinstance(rec, dict):
+                records_by_import.setdefault(rec.get('import_source'), []).append(rec)
+        del channels
+        from imports import Imports
+
+        candidates = set()
+        requested  = set()   # add-on ids whose export was requested in this pass
+        for cfg in imports:
+            if not isinstance(cfg, dict) or not cfg.get('id') or not cfg.get('enabled', True):
+                continue
+            exporter = replay_helpers.exporter_for(cfg)
+            if exporter is None:
+                continue
+            iid = cfg['id']
+            if not replay_helpers.link_replay_days(records_by_import.get(iid)):
+                continue
+            candidates.add(iid)
+            since = (now - fired[iid]) if iid in fired else None
+            if since is not None and since < replay_helpers.EXPORT_MIN_REFIRE_S:
+                continue
+            addon_id, spec, links_path = exporter
+            if addon_id in requested:
+                fired[iid] = now   # the same add-on's export was just requested for another import
+                continue
+            if not (BUILTIN.getInfoBool('HasAddon(%s)'%(addon_id), 'System')
+                    and BUILTIN.getInfoBool('AddonIsEnabled(%s)'%(addon_id), 'System')):
+                continue
+            try:
+                export_on = xbmcaddon.Addon(addon_id).getSettingBool(spec['setting'])
+            except Exception as e:
+                self.log('[%s] _maybeRefreshAddonExports, could not read %s setting %s: %s'%(iid, addon_id, spec['setting'], e), xbmc.LOGWARNING)
+                continue
+            if not export_on:
+                continue
+            # imports.59 (S13): None = missing or can't be stat'ed -- due too
+            # (export_due), still at most once per 20 h.
+            state = Imports._localFileState(links_path)
+            file_age_s = (time.time() - state[1] / 1e9) if state is not None else None
+            if not replay_helpers.export_due(file_age_s, uptime_s, has_media, screensaver_on, idle_s, since):
+                continue
+            BUILTIN.executebuiltin(spec['action'])
+            fired[iid] = now
+            requested.add(addon_id)
+            age_text = 'file missing' if file_age_s is None else 'file %.1f h old' % (file_age_s / 3600.0)
+            self.log('[%s] _maybeRefreshAddonExports, asked %s for a fresh guide export (%s)'
+                     %(iid, spec.get('name') or addon_id, age_text), xbmc.LOGINFO)
+        self._export_candidates = candidates
 
 
     def log(self, msg, level=xbmc.LOGDEBUG):
@@ -761,6 +878,21 @@ class Tasks(object):
             del channels
 
 
+    def _keepImportsKick(self, force_scope):
+        """imports.59 (S16/A1): chkImports deferred on Builder after the
+        imports thread's poll loop had already taken a dashboard kick
+        (force_scope) off 'chkImports.kick'. Put it back, unless a newer kick
+        is pending, so it isn't lost: the poll loop holds kicks while Builder
+        runs and fires this one about 3 s after the build. A pending kick
+        wins even when its scope is narrower -- the same last-writer-wins
+        rule as the web server's own kick setters, which overwrite each
+        other (two kicks within the same few seconds as a build start)."""
+        if not force_scope or PROPERTIES.getEXTProperty('chkImports.kick', ''):
+            return
+        PROPERTIES.setEXTProperty('chkImports.kick', force_scope)
+        self.log('chkImports, kick (%s) kept for after Builder.buildChannels'%(force_scope), xbmc.LOGINFO)
+
+
     def chkImports(self, silent=None, force_scope=None):
         """imports fork (madteevee): periodic live-imports sync.
 
@@ -801,6 +933,7 @@ class Tasks(object):
         # at /home/madalone/.claude/plans/misty-shimmying-liskov.md.
         if PROPERTIES.isRunning('Builder.buildChannels'):
             self.log('chkImports, deferred (Builder.buildChannels running)', xbmc.LOGINFO)  # imports.50: LOGDEBUG → LOGINFO
+            self._keepImportsKick(force_scope)
             return
         try:
             from imports import Imports
@@ -811,6 +944,15 @@ class Tasks(object):
                 self.log('chkImports, no imports configured; skipping')
                 return
             with PROPERTIES.chkRunning('Imports.syncAll'):
+                # imports.59 (S16/A1): re-check Builder now that our own flag
+                # is up. Builder raises its flag and then waits for this one
+                # (Builder._waitForImportsSync), so with both sides "raise
+                # own flag, then check the other's" they can't both go ahead
+                # -- closes the gap between the defer check above and here.
+                if PROPERTIES.isRunning('Builder.buildChannels'):
+                    self.log('chkImports, deferred (Builder.buildChannels running)', xbmc.LOGINFO)
+                    self._keepImportsKick(force_scope)
+                    return
                 # writable=False: we'll do our OWN atomic write below.
                 # XMLTVS.__del__ would otherwise try _save() on GC (unreliable
                 # timing) AND _save itself is wrapped in @debounceit which

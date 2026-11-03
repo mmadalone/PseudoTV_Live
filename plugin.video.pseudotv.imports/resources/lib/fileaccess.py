@@ -17,7 +17,7 @@
 # along with PseudoTV Live.  If not, see <http://www.gnu.org/licenses/>.
 #
 # -*- coding: utf-8 -*-
-import codecs, shutil, errno
+import codecs, shutil, errno, threading
 
 from variables   import *
 from logger      import log
@@ -131,15 +131,80 @@ class FileAccess(object):
 
     @staticmethod
     def setJSON(file, data):
+        # imports.59 (S3): atomic and honest. getJSON reads without the lock
+        # while the old in-place write truncated the file first, so a reader
+        # (every Channels() construction) could catch a half-written
+        # channels.json, and a dumpJSON error ('' result) was written over
+        # the file while still returning True.
+        #   1. Serialise first -- same indent and separators as dumpJSON, but
+        #      errors raise. Unserialisable or empty data returns False
+        #      before the file is touched.
+        #   2. Local files: write a temp file in the same folder, flush +
+        #      fsync, os.replace onto the real path (renderers.write_atomic
+        #      pattern), all inside the existing FileLock (it locks a
+        #      separate <name>.lock file). True only after the replace.
+        #      The temp name is per writer, <file>.<pid>.<thread id>.tmp:
+        #      FileLock only serialises threads of one Python interpreter,
+        #      and the service and a Kodi script (Channel Manager, context
+        #      menu) saving at the same instant must never share a temp file.
+        #   3. Paths that don't translate to a local file keep the in-place
+        #      VFS write.
+        try:
+            if isinstance(data, (str, bytes)): content = data   # dumpJSON passes text through as-is
+            else: content = json.dumps(data, indent=4, sort_keys=False, separators=(',', ':'))
+        except Exception as e:
+            log('FileAccess: setJSON, not written (data not serialisable): %s\nfile = %s'%(e,file), xbmc.LOGERROR)
+            return False
+        if not content:
+            log('FileAccess: setJSON, not written (empty data)\nfile = %s'%(file), xbmc.LOGERROR)
+            return False
+        if isinstance(content, str): content = content.encode(DEFAULT_ENCODING, 'backslashreplace')  # as VFSFile.write
         with FileLock(file):
-            fle = None
+            real_path = FileAccess._localPath(file)
+            if real_path is None:
+                fle = None
+                try:
+                    fle = FileAccess.open(file, 'w')
+                    return fle.write(content) is not False   # xbmcvfs.File.write returns False on failure
+                except Exception as e:
+                    log('FileAccess: setJSON failed! %s\nfile = %s'%(e,file), xbmc.LOGERROR)
+                    return False
+                finally:
+                    if fle is not None and hasattr(fle, 'close'): fle.close()
+            tmp = '%s.%d.%d.tmp' % (real_path, os.getpid(), threading.get_ident())
             try:
-                fle = FileAccess.open(file, 'w')
-                fle.write(FileAccess.dumpJSON(data, idnt=4, sortkey=False))
-            except Exception as e: log('FileAccess: setJSON failed! %s\nfile = %s'%(e,file), xbmc.LOGERROR)
-            finally:
-                if fle is not None and hasattr(fle, 'close'): fle.close()
-            return True
+                folder = os.path.dirname(real_path)
+                if folder and not os.path.isdir(folder): os.makedirs(folder, exist_ok=True)
+                with open(tmp, 'wb') as fle:
+                    fle.write(content)
+                    fle.flush()
+                    # Same tolerance as renderers.write_atomic: a filesystem
+                    # without fsync still gets the atomic replace.
+                    try: os.fsync(fle.fileno())
+                    except OSError as fe: log('FileAccess: setJSON, fsync unavailable for %s: %s'%(tmp,fe), xbmc.LOGDEBUG)
+                os.replace(tmp, real_path)
+                return True
+            except Exception as e:
+                log('FileAccess: setJSON failed! %s\nfile = %s'%(e,file), xbmc.LOGERROR)
+                try:
+                    if os.path.exists(tmp): os.unlink(tmp)
+                except OSError as ce:
+                    log('FileAccess: setJSON, could not remove %s: %s'%(tmp,ce), xbmc.LOGWARNING)
+                return False
+
+
+    @staticmethod
+    def _localPath(file):
+        """imports.59: the real filesystem path of `file` when it translates
+        to a local file (special:// or a plain path), else None (smb://,
+        nfs://... stay on Kodi's VFS)."""
+        try: real_path = FileAccess.translatePath(file)
+        except Exception as e:
+            log('FileAccess: _localPath, translatePath failed for %s: %s'%(file,e), xbmc.LOGWARNING)
+            return None
+        if not isinstance(real_path, str) or not real_path or '://' in real_path or not os.path.isabs(real_path):
+            return None
+        return real_path
 
 
     @staticmethod

@@ -129,7 +129,9 @@ def roundTimeUp(dt=None, roundTo=60):
    
 def strpTime(datestring, format=DTJSONFORMAT): #convert pvr infolabel datetime string to datetime obj, thread safe!
     try:              return datetime.datetime.strptime(datestring, format)
-    except TypeError: return datetime.datetime.fromtimestamp(ime.mktime(time.strptime(datestring, format)))
+    # imports.59: 'ime' typo fixed -- the fallback for Kodi's embedded-Python
+    # strptime bug raised NameError instead of returning the datetime.
+    except TypeError: return datetime.datetime.fromtimestamp(time.mktime(time.strptime(datestring, format)))
     except Exception:           return ''
    
 def epochTime(timestamp, tz=True): #convert pvr json datetime string to datetime obj
