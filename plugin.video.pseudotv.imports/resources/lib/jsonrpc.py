@@ -49,12 +49,14 @@ class JSONRPC(object):
         return log('%s: %s' % (self.__class__.__name__, msg), level)
 
 
-    def sendJSON(self, param):
+    def sendJSON(self, param, delay=True):
         command = param
         command["jsonrpc"] = "2.0"
         command["id"] = ADDON_ID
         response = FileAccess.loadJSON(BUILTIN.executeJSONRPC(FileAccess.dumpJSON(command)))
-        self.service.monitor.waitForAbort(float(SETTINGS.getSettingInt('RPC_Delay')))
+        # madteevee (imports fork, imports.60): delay=False skips the RPC_Delay pause
+        # after the reply, for a read whose caller must act on it at once.
+        if delay: self.service.monitor.waitForAbort(float(SETTINGS.getSettingInt('RPC_Delay')))
         self.log('sendJSON, response received')
         if response and response.get('error'):
             self.log('sendJSON, failed! error = %s' % FileAccess.dumpJSON(response.get('error')), xbmc.LOGWARNING)
@@ -88,8 +90,12 @@ class JSONRPC(object):
         # are unhashable, raising TypeError pre-imports.49. Mirrors the logoQue pattern at
         # resources.py:120 which has done exactly this serialization for years. Consumer
         # at tasks.py:1135 deserializes via FileAccess.loadJSON on pop. Set dedup is
-        # preserved (identical-shape param → identical JSON string → one entry). Exposed
-        # by Store_Duration=true after imports.48 (queDuration was the dominant caller).
+        # preserved (identical-shape param → identical JSON string → one entry).
+        # madteevee (imports fork, imports.60): queDuration, the caller that exposed this
+        # (and that queued params without a "method", which Kodi rejected as "JSONRPC:
+        # Failed to parse"), was removed. The only producer left is
+        # setSettingValue(queue=True). Every queued param must be a full request
+        # ({"method":...,"params":...}); test_imports60_rpc_payloads.py checks the call sites.
         if hasattr(self.service,'jsonQue'): self.service.jsonQue.add(FileAccess.dumpJSON(param))
         
         
@@ -298,8 +304,14 @@ class JSONRPC(object):
         return self.cacheJSON(param, life=datetime.timedelta(days=ttl_days), checksum=FileAccess._getMD5(path)).get('result',{}).get('filedetails',{}).get('streamdetails',{})
 
 
-    def getFileDetails(self, file, media='video', properties=["duration","runtime"]):
-        return self.cacheJSON({"method":"Files.GetFileDetails","params":{"file":file,"media":media,"properties":properties}})
+    def getFileDetails(self, file, media='video', properties=["duration","runtime"], cache=True, delay=True):
+        # madteevee (imports fork, imports.60): cache=False reads Kodi directly (the
+        # Rollback_Watched snapshot/restore must see the current values, not a 5-minute
+        # cached copy); with it, delay=False skips sendJSON's RPC_Delay pause. The
+        # defaults keep VFSParser's cached lookup unchanged.
+        param = {"method":"Files.GetFileDetails","params":{"file":file,"media":media,"properties":properties}}
+        if cache: return self.cacheJSON(param)
+        else:     return self.sendJSON(param, delay)
 
 
     def getViewMode(self):
@@ -437,49 +449,61 @@ class JSONRPC(object):
         return path
         
         
-    def _setRuntime(self, item={}, runtime=0, save=SETTINGS.getSettingBool('Store_Duration')): #set runtime collected by player, accurate meta.
+    # madteevee (imports fork, imports.60): durations are no longer written to Kodi's
+    # library. The removed queDuration queued params without a "method" (every one was
+    # rejected by Kodi as "JSONRPC: Failed to parse"), and a well-formed version would
+    # have sent resume {position 0, total N}, which CLEARS the item's resume point
+    # (Kodi 21 VideoLibrary.cpp UpdateResumePoint). Lengths stay in the add-on's own
+    # caches (getRuntime.* / getDuration.*) exactly as before. The `save` arguments
+    # below are kept so existing callers still work; they are accepted and ignored.
+    # Duration_Type is now read when called (the old defaults froze it at service start).
+    def _setRuntime(self, item=None, runtime=0, save=None): #set runtime collected by player, accurate meta. (save: ignored, imports.60)
+        if item is None: item = {}
         runtime = round(runtime)
         self.cache.set('getRuntime.%s'%(FileAccess._getMD5(item.get('file'))), runtime, checksum=FileAccess._getMD5(item.get('file')), expiration=datetime.timedelta(days=28))
-        if not item.get('file','plugin://').startswith(tuple(VFS_TYPES)) and save and runtime > 0: self.queDuration(item, runtime=runtime)
-    
-        
-    def _getRuntime(self, item={}): #get runtime collected by player, else less accurate provider meta
+
+
+    def _getRuntime(self, item=None): #get runtime collected by player, else less accurate provider meta
+        if item is None: item = {}
         runtime = self.cache.get('getRuntime.%s'%(FileAccess._getMD5(item.get('file'))), checksum=FileAccess._getMD5(item.get('file')))
         return round(runtime or item.get('resume',{}).get('total') or item.get('runtime') or item.get('duration') or (item.get('streamdetails',{}).get('video',[]) or [{}])[0].get('duration') or 0)
-        
 
-    def _setDuration(self, path, item={}, duration=0, save=SETTINGS.getSettingBool('Store_Duration')):#set VideoParser cache
+
+    def _setDuration(self, path, item=None, duration=0, save=None):#set VideoParser cache (item, save: ignored, imports.60)
         duration = round(duration)
         self.cache.set('getDuration.%s'%(FileAccess._getMD5(path)), duration, checksum=FileAccess._getMD5(path), expiration=datetime.timedelta(days=28))
-        if save and item: self.queDuration(item, duration)
         return duration
 
-    
+
     def _getDuration(self, path): #get VideoParser cache
         return round(self.cache.get('getDuration.%s'%(FileAccess._getMD5(path)), checksum=FileAccess._getMD5(path)) or self._getRuntime({'file':path}))
 
 
-    def getDuration(self, path, item={}, accurate=bool(SETTINGS.getSettingInt('Duration_Type')), save=SETTINGS.getSettingBool('Store_Duration')):
+    def getDuration(self, path, item=None, accurate=None, save=None): # save: ignored, imports.60
+        if accurate is None: accurate = bool(SETTINGS.getSettingInt('Duration_Type'))
         if not item: item = {'file':path}
         runtime = self._getRuntime(item) #player runtime, fallback meta provider runtime
         if runtime == 0 or accurate:
             duration = 0
             if isStack(path):# handle "stacked" videos
                 for file in splitStacks(path): duration += self.__parseDuration(runtime, file)
-            else: duration = self.__parseDuration(runtime, path, item, save, accurate)
+            else: duration = self.__parseDuration(runtime, path, item, accurate=accurate)
             if duration > 0: runtime = duration
-        self.log(f"getDuration [{runtime}] {path}, accurate = {accurate}, save ={save}")
+        self.log(f"getDuration [{runtime}] {path}, accurate = {accurate}")
         return runtime
 
 
-    def getTotDuration(self, items=[], accurate=bool(SETTINGS.getSettingInt('Duration_Type'))):
+    def getTotDuration(self, items=None, accurate=None):
+        if items is None: items = []
+        if accurate is None: accurate = bool(SETTINGS.getSettingInt('Duration_Type'))
         total = sum((self.getDuration(item.get('file'),item,accurate) for item in items))
         self.log("getTotDuration, items = %s, total = %s" % (len(items), total))
         return total
 
 
-    def __parseDuration(self, runtime, path, item={}, save=SETTINGS.getSettingBool('Store_Duration'), accurate=False):
-        self.log("__parseDuration, runtime = %s, path = %s, save = %s, accurate = %s" % (runtime, path, save, accurate))
+    def __parseDuration(self, runtime, path, item=None, accurate=False):
+        if item is None: item = {}
+        self.log("__parseDuration, runtime = %s, path = %s, accurate = %s" % (runtime, path, accurate))
         duration = self.videoParser.getVideoLength(path.replace("\\\\", "\\"), item, self)
         # imports.48: 25% sanity-check fallback retained ONLY when accurate=False (the
         # runtime==0 code path that falls into ffprobe). When the operator opted into
@@ -492,51 +516,15 @@ class JSONRPC(object):
         # `if duration > 0:` guard at the caller. Stack handling (line 461) passes no
         # `accurate` so it keeps the default False — preserves exact prior behaviour.
         if not accurate and round(percentDiff(runtime, duration)) > 25: duration = runtime
-        if save and duration > 0 and duration != runtime: self.queDuration(item, duration)
-        self.log(f"__parseDuration [{runtime}] {path}, save = {save}, accurate = {accurate}")
+        self.log(f"__parseDuration [{runtime}] {path}, accurate = {accurate}")
         return duration
-  
-  
-    def queDuration(self, item={}, duration=0, runtime=0):
-        mtypes = {'video'      : {"method":"Files.SetFileDetails"             ,"params":{"file"        :item.get('file',"")         ,"runtime": runtime,"resume": {"position": item.get('position',0.0),"total": duration}}},
-                  'movie'      : {"method":"VideoLibrary.SetMovieDetails"     ,"params":{"movieid"     :item.get('id',-1)           ,"runtime": runtime,"resume": {"position": item.get('position',0.0),"total": duration}}},
-                  'movies'     : {"method":"VideoLibrary.SetMovieDetails"     ,"params":{"movieid"     :item.get('movieid',-1)      ,"runtime": runtime,"resume": {"position": item.get('position',0.0),"total": duration}}},
-                  'episode'    : {"method":"VideoLibrary.SetEpisodeDetails"   ,"params":{"episodeid"   :item.get('id',-1)           ,"runtime": runtime,"resume": {"position": item.get('position',0.0),"total": duration}}},
-                  'episodes'   : {"method":"VideoLibrary.SetEpisodeDetails"   ,"params":{"episodeid"   :item.get('episodeid',-1)    ,"runtime": runtime,"resume": {"position": item.get('position',0.0),"total": duration}}},
-                  'musicvideo' : {"method":"VideoLibrary.SetMusicVideoDetails","params":{"musicvideoid":item.get('id',-1)           ,"runtime": runtime,"resume": {"position": item.get('position',0.0),"total": duration}}},
-                  'musicvideos': {"method":"VideoLibrary.SetMusicVideoDetails","params":{"musicvideoid":item.get('musicvideoid',-1) ,"runtime": runtime,"resume": {"position": item.get('position',0.0),"total": duration}}},
-                  'song'       : {"method":"AudioLibrary.SetSongDetails"      ,"params":{"songid"      :item.get('id',-1)           ,"runtime": runtime,"resume": {"position": item.get('position',0.0),"total": duration}}},
-                  'songs'      : {"method":"AudioLibrary.SetSongDetails"      ,"params":{"songid"      :item.get('songid',-1)       ,"runtime": runtime,"resume": {"position": item.get('position',0.0),"total": duration}}}}
-        
-        if not item.get('file','plugin://').startswith(tuple(VFS_TYPES)):
-            try:
-                mtype = mtypes.get(item.get('type'))
-                if mtype.get('params'):
-                    if   duration == 0: mtype['params'].pop('resume')  #save file duration meta
-                    elif runtime  == 0: mtype['params'].pop('runtime') #save player runtime meta
-                    id = (item.get('id') or item.get('movieid') or item.get('episodeid') or item.get('musicvideoid') or item.get('songid'))
-                    self.log('[%s] queDuration, media = %s, duration = %s, runtime = %s'%(id,item['type'],duration,runtime))
-                    self.queueJSON(mtype['params'])
-            except Exception as e: self.log("queDuration, failed! %s\nmtype = %s\nitem = %s"%(e,mtype,item), xbmc.LOGERROR)
-        
-        
-    def quePlaycount(self, item={}, save=SETTINGS.getSettingBool('Rollback_Watched')):
-        param = {'video'      : {"method":"Files.SetFileDetails"             ,"params":{"file"        :item.get('file',"")         ,"playcount": item.get('playcount',0),"resume": {"position": item.get('position',0.0),"total": item.get('total',0.0)}}},
-                 'movie'      : {"method":"VideoLibrary.SetMovieDetails"     ,"params":{"movieid"     :item.get('id',-1)           ,"playcount": item.get('playcount',0),"resume": {"position": item.get('position',0.0),"total": item.get('total',0.0)}}},
-                 'movies'     : {"method":"VideoLibrary.SetMovieDetails"     ,"params":{"movieid"     :item.get('movieid',-1)      ,"playcount": item.get('playcount',0),"resume": {"position": item.get('position',0.0),"total": item.get('total',0.0)}}},
-                 'episode'    : {"method":"VideoLibrary.SetEpisodeDetails"   ,"params":{"episodeid"   :item.get('id',-1)           ,"playcount": item.get('playcount',0),"resume": {"position": item.get('position',0.0),"total": item.get('total',0.0)}}},
-                 'episodes'   : {"method":"VideoLibrary.SetEpisodeDetails"   ,"params":{"episodeid"   :item.get('episodeid',-1)    ,"playcount": item.get('playcount',0),"resume": {"position": item.get('position',0.0),"total": item.get('total',0.0)}}},
-                 'musicvideo' : {"method":"VideoLibrary.SetMusicVideoDetails","params":{"musicvideoid":item.get('id',-1)           ,"playcount": item.get('playcount',0),"resume": {"position": item.get('position',0.0),"total": item.get('total',0.0)}}},
-                 'musicvideos': {"method":"VideoLibrary.SetMusicVideoDetails","params":{"musicvideoid":item.get('musicvideoid',-1) ,"playcount": item.get('playcount',0),"resume": {"position": item.get('position',0.0),"total": item.get('total',0.0)}}},
-                 'song'       : {"method":"AudioLibrary.SetSongDetails"      ,"params":{"songid"      :item.get('id',-1)           ,"playcount": item.get('playcount',0),"resume": {"position": item.get('position',0.0),"total": item.get('total',0.0)}}},
-                 'songs'      : {"method":"AudioLibrary.SetSongDetails"      ,"params":{"songid"      :item.get('songid',-1)       ,"playcount": item.get('playcount',0),"resume": {"position": item.get('position',0.0),"total": item.get('total',0.0)}}}}
 
-        if not item.get('file','plugin://').startswith(tuple(VFS_TYPES)):
-            try:
-                params = param.get(item.get('type'))
-                self.log('quePlaycount, params = %s'%(params.get('params',{})))
-                if hasattr(self.service,'_que'): self.service._que(self.sendJSON,1,params)
-            except Exception: pass
+
+    # madteevee (imports fork, imports.60): quePlaycount was removed. Its library rows
+    # sent the guide-build playcount plus resume {0,0} on every PseudoTV programme
+    # change and stop (which erased resume points), and its 'video'/'song' rows were
+    # always rejected by Kodi. Rollback_Watched is now a snapshot/restore of the played
+    # file's own state: playstate_helpers.PlaystateTracker, driven by services.Player.
 
 
     def requestList(self, citem, path, media='video', page=SETTINGS.getSettingInt('Page_Limit'), sort={}, filter={}, limits={}, query={}):

@@ -5,6 +5,9 @@ Sets only accept hashable items, so the call raised:
     TypeError: unhashable type: 'dict'
 …on every invocation. The path was dormant until imports.48 + Store_Duration=true
 made queDuration call queueJSON for every ffprobed-and-different-from-runtime file.
+(imports.60 removed queDuration: its params had no "method" and a fixed version
+would have cleared resume points. The example payloads below use the remaining
+producer, setSettingValue(queue=True).)
 
 Fix mirrors the logoQue pattern at resources.py:120 (which has been serializing
 to JSON-string for years): writer at jsonrpc.py:86 now FileAccess.dumpJSON(param)
@@ -39,9 +42,8 @@ def test_dict_param_no_longer_raises_TypeError():
     """The regression guard: dict param + queueJSON used to TypeError on the .add()
     because dicts aren't hashable. imports.49 serializes to string first."""
     stub = _make_stub()
-    payload = {'method': 'VideoLibrary.SetEpisodeDetails',
-               'params': {'episodeid': 14, 'runtime': 2661,
-                          'resume': {'position': 0.0, 'total': 2661}}}
+    payload = {'method': 'Settings.SetSettingValue',
+               'params': {'setting': 'debug.showloginfo', 'value': False}}
     _queueJSON_mirror(stub, payload)  # would raise pre-imports.49
     assert len(stub.service.jsonQue) == 1
 
@@ -50,8 +52,8 @@ def test_dispatch_roundtrip_recovers_original_dict():
     """Consumer pops the JSON string and deserializes; result must equal the
     original dict so sendJSON gets the same dispatchable shape it expected."""
     stub = _make_stub()
-    payload = {'method': 'VideoLibrary.SetMovieDetails',
-               'params': {'movieid': 99, 'runtime': 4763}}
+    payload = {'method': 'Settings.SetSettingValue',
+               'params': {'setting': 'videoplayer.stretch43', 'value': 0}}
     _queueJSON_mirror(stub, payload)
     recovered = _pop_jsonQue_mirror(stub.service.jsonQue)
     assert recovered == payload

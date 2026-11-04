@@ -226,7 +226,7 @@ msgid "Prefer File Metadata"
 msgstr ""
 
 msgctxt "#30052"
-msgid "Save Accurate Duration to Kodi's Library"
+msgid "Save Accurate Duration to Kodi's Library (no longer used)"
 msgstr ""
 
 msgctxt "#30053"
@@ -2126,7 +2126,7 @@ msgid "Prefer Kodi Metadata - Use less accurate runtimes from meta-providers.\nP
 msgstr ""
 
 msgctxt "#33052"
-msgid "Save parsed file duration meta to the Kodi library. Improves runtime accuracy. *see wiki for details."
+msgid "No longer used: the add-on keeps file durations in its own cache and does not write them to Kodi's library."
 msgstr ""
 
 msgctxt "#33053"

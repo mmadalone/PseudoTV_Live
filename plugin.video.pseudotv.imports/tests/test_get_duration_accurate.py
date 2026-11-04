@@ -1,242 +1,118 @@
 """Unit tests for the imports.48 `accurate`-aware __parseDuration fix.
 
-Mirrors the production logic from jsonrpc.JSONRPC.__parseDuration. jsonrpc.py
-isn't trivially importable in the test environment (it pulls in globals which
-in turn pulls in the wider service stack), so we follow the same pattern as
-test_chkcallback_cas.py / test_transition_supervisor.py: mirror the logic
-inline, faithful to production, plus source-scan assertions so any drift
-between mirror and production fails a test.
+imports.60: these tests now run the real jsonrpc.JSONRPC under the Kodi test
+stand-ins (before, they ran a copy of the logic plus source-text checks, so a
+change to the real code could pass them). The length write-back they used to
+check (queDuration) was removed in imports.60; see
+test_imports60_no_duration_writeback.py.
 
 Production:
     plugin.video.pseudotv.imports/resources/lib/jsonrpc.py
-        JSONRPC.__parseDuration  (imports.48, new `accurate` kwarg + gated fallback)
-        JSONRPC.getDuration      (imports.48, threads `accurate` through to __parseDuration)
+        JSONRPC.__parseDuration  (imports.48: `accurate` kwarg + gated fallback)
+        JSONRPC.getDuration      (imports.48: threads `accurate` through)
 
 The 2026-05-22 schedule audit found 61 programmes on 5 channels where the
 EPG slot length (set from library `runtime`) exceeds the actual playable file
 duration. With Duration_Type=1 ("accurate" / ffprobe), getDuration *would*
-ffprobe each file — but `__parseDuration` previously dropped the ffprobe
-value whenever it disagreed with library runtime by >25%, falling back to the
-(scraped, wrong) library runtime. That sanity-check is right for files where
-ffprobe returns garbage but wrong for the dominant case where the library
-itself is the unreliable input. imports.48 gates the fallback on
+ffprobe each file, but `__parseDuration` previously dropped the ffprobe value
+whenever it disagreed with library runtime by >25%, falling back to the
+(scraped, wrong) library runtime. imports.48 gates that fallback on
 `not accurate`: when the operator explicitly opts into accurate mode, trust
-the ffprobe value.
-
-Plan: /home/madalone/.claude/plans/elegant-coalescing-tulip.md
+the measured value.
 """
-import os
-import re
 import types
 
 import pytest
 
+from jsonrpc import JSONRPC
 
-# Mirror of globals.percentDiff (faithful to globals.py:279-281)
-def percentDiff(org, new):
-    try: return (abs(round(org) - round(new)) / round(new)) * 100.0
-    except ZeroDivisionError: return -1
+PATH = '/mnt/x/Film (1972)/Film (1972).mkv'
 
 
-def _parseDuration_mirror(self, runtime, path, item=None, save=False, accurate=False):
-    """Mirror of jsonrpc.JSONRPC.__parseDuration (imports.48).
-
-    Faithful to production. Any change to production must be reflected here
-    or the source-scan tests below will fail.
-    """
-    if item is None:
-        item = {}
-    duration = self._videoParser_getVideoLength(path, item, self)
-    if not accurate and round(percentDiff(runtime, duration)) > 25:
-        duration = runtime
-    if save and duration > 0 and duration != runtime:
-        self._queDuration(item, duration)
-    return duration
+class _Cache(object):
+    def __init__(self): self.d = {}
+    def get(self, name, checksum=None): return self.d.get(name)
+    def set(self, name, value, checksum=None, expiration=None):
+        self.d[name] = value
+        return value
 
 
-def _make_stub(*, ffprobe_returns, runtime, save=False, accurate=False):
-    """Build a SimpleNamespace stub mimicking the JSONRPC instance bits used
-    by __parseDuration."""
-    quedur_calls = []
-    stub = types.SimpleNamespace(
-        _videoParser_getVideoLength=lambda path, item, self_: ffprobe_returns,
-        _queDuration=lambda item, dur: quedur_calls.append((item, dur)),
-        log=lambda msg, level=None: None,
-        runtime=runtime,
-        save=save,
-        accurate=accurate,
-    )
-    stub._quedur_calls = quedur_calls
-    return stub
+def _rpc(monkeypatch, probe):
+    """Real JSONRPC with the file parser and cache replaced."""
+    svc = types.SimpleNamespace(jsonQue=set(), _que=lambda *a, **k: pytest.fail('nothing may be queued'))
+    rpc = JSONRPC(service=svc)
+    monkeypatch.setattr(rpc, 'cache', _Cache())
+    monkeypatch.setattr(rpc, 'videoParser', types.SimpleNamespace(getVideoLength=lambda path, item, jsonRPC: probe))
+    monkeypatch.setattr(rpc, 'log', lambda msg, level=0: None)
+    return rpc
+
+
+def _parse(rpc, runtime, accurate):
+    return rpc._JSONRPC__parseDuration(runtime, PATH, {'file': PATH}, accurate=accurate)
 
 
 # =============================================================================
-# Behaviour — accurate=True (operator opted into ffprobe)
+# accurate=True (operator opted into measuring)
 # =============================================================================
 
-
-def test_accurate_true_large_disagreement_uses_ffprobe():
-    """The regression guard: FFOD's 105-min library runtime vs 79-min file.
-    percentDiff = 32.3% > 25, so previously the fallback fired and the slot
-    was 6300s; now the ffprobe value (4763) wins."""
-    s = _make_stub(ffprobe_returns=4763, runtime=6300, accurate=True)
-    result = _parseDuration_mirror(s, runtime=6300, path='/mnt/x.mkv', accurate=True)
-    assert result == 4763, (
-        "imports.48 regression: accurate=True with >25% disagreement should "
-        "return the ffprobe value, not fall back to the library runtime"
-    )
+def test_accurate_true_large_disagreement_uses_measured(monkeypatch):
+    """The regression guard: a 105-min library runtime vs a 79-min file.
+    percentDiff = 32.3% > 25, so pre-imports.48 the slot was 6300 s."""
+    assert _parse(_rpc(monkeypatch, 4763), 6300, True) == 4763
 
 
-def test_accurate_true_small_disagreement_uses_ffprobe():
-    """Sanity: small disagreement also returns ffprobe (unchanged behaviour
-    — this case already worked pre-imports.48)."""
-    s = _make_stub(ffprobe_returns=4720, runtime=4763, accurate=True)
-    result = _parseDuration_mirror(s, runtime=4763, path='/mnt/x.mkv', accurate=True)
-    assert result == 4720
+def test_accurate_true_small_disagreement_uses_measured(monkeypatch):
+    assert _parse(_rpc(monkeypatch, 4720), 4763, True) == 4720
 
 
-def test_accurate_true_cn_cartoon_case():
-    """Cartoon Network: 60-min scraped slot, 44-min cartoon. 35% disagreement.
-    Pre-imports.48 fell back to 3600; now returns 2663."""
-    s = _make_stub(ffprobe_returns=2663, runtime=3600, accurate=True)
-    result = _parseDuration_mirror(s, runtime=3600, path='/mnt/x.mkv', accurate=True)
-    assert result == 2663
+def test_accurate_true_cartoon_case(monkeypatch):
+    """A 60-min scraped slot, a 44-min cartoon (35% disagreement)."""
+    assert _parse(_rpc(monkeypatch, 2663), 3600, True) == 2663
 
 
-def test_accurate_true_with_save_calls_queDuration():
-    """save=True with accurate=True and ffprobe differing from runtime: the
-    library-write path still fires. duration>0 guard doesn't block valid
-    ffprobe values."""
-    s = _make_stub(ffprobe_returns=4763, runtime=6300, save=True, accurate=True)
-    result = _parseDuration_mirror(
-        s, runtime=6300, path='/mnt/x.mkv', save=True, accurate=True,
-    )
-    assert result == 4763
-    assert len(s._quedur_calls) == 1, "queDuration should write the ffprobe value back"
-    assert s._quedur_calls[0][1] == 4763
-
-
-def test_accurate_true_ffprobe_zero_no_queDuration_write():
-    """imports.48 added a `duration > 0` guard around the queDuration call so
-    a failed ffprobe (returns 0) doesn't blast a 0 runtime into the Kodi
-    library. The caller (getDuration) handles ffprobe-failure separately via
-    its own `if duration > 0:` guard."""
-    s = _make_stub(ffprobe_returns=0, runtime=6300, save=True, accurate=True)
-    result = _parseDuration_mirror(
-        s, runtime=6300, path='/mnt/x.mkv', save=True, accurate=True,
-    )
-    # Returns 0 (ffprobe failed); getDuration will fall back to runtime via
-    # its own guard. But __parseDuration must NOT have called queDuration.
-    assert result == 0
-    assert s._quedur_calls == [], (
-        "queDuration must not be called with duration=0 — would mutate the "
-        "Kodi library to a 0 runtime"
-    )
+def test_accurate_true_measure_failed_getDuration_keeps_runtime(monkeypatch):
+    """__parseDuration returns 0; getDuration's `if duration > 0` keeps the runtime."""
+    rpc = _rpc(monkeypatch, 0)
+    assert _parse(rpc, 6300, True) == 0
+    assert rpc.getDuration(PATH, {'file': PATH, 'runtime': 6300}, True) == 6300
 
 
 # =============================================================================
-# Behaviour — accurate=False (existing conservative path preserved)
+# accurate=False (conservative path preserved)
 # =============================================================================
 
-
-def test_accurate_false_large_disagreement_falls_back_to_runtime():
-    """accurate=False preserves the pre-imports.48 sanity-check: >25%
-    disagreement → fall back to library runtime. This is the conservative
-    path used by the runtime==0 fallback into ffprobe; we don't want to
-    change its behaviour."""
-    s = _make_stub(ffprobe_returns=2663, runtime=3600, accurate=False)
-    result = _parseDuration_mirror(s, runtime=3600, path='/mnt/x.mkv', accurate=False)
-    assert result == 3600, (
-        "accurate=False must keep the existing >25% fallback — that's the "
-        "conservative path used by the runtime==0 fallback"
-    )
+def test_accurate_false_large_disagreement_falls_back_to_runtime(monkeypatch):
+    assert _parse(_rpc(monkeypatch, 2663), 3600, False) == 3600
 
 
-def test_accurate_false_small_disagreement_uses_ffprobe():
-    """accurate=False, <25% disagreement → ffprobe still wins (unchanged)."""
-    s = _make_stub(ffprobe_returns=4720, runtime=4763, accurate=False)
-    result = _parseDuration_mirror(s, runtime=4763, path='/mnt/x.mkv', accurate=False)
-    assert result == 4720
+def test_accurate_false_small_disagreement_uses_measured(monkeypatch):
+    assert _parse(_rpc(monkeypatch, 4720), 4763, False) == 4720
 
 
-def test_accurate_false_ffprobe_zero_returns_zero_caller_handles():
-    """accurate=False, ffprobe returns 0. `percentDiff(runtime, 0)` raises
-    ZeroDivisionError and returns -1, so the >25% fallback does NOT fire —
-    __parseDuration returns 0 directly. The CALLER (getDuration) then handles
-    the failure via its own `if duration > 0:` guard at jsonrpc.py:463,
-    keeping the library runtime. This is pre-imports.48 behaviour preserved
-    exactly: my fix only added `not accurate and …` to the fallback gate,
-    which doesn't change anything when the inner condition is already False."""
-    s = _make_stub(ffprobe_returns=0, runtime=6300, accurate=False)
-    result = _parseDuration_mirror(s, runtime=6300, path='/mnt/x.mkv', accurate=False)
-    assert result == 0, (
-        "ZeroDivisionError in percentDiff → -1, > 25 is False, fallback skipped "
-        "— __parseDuration returns 0; getDuration's `if duration > 0:` guard at "
-        "the caller is what keeps the library runtime"
-    )
+def test_accurate_false_measure_zero_returns_zero(monkeypatch):
+    """percentDiff(runtime, 0) hits ZeroDivisionError and returns -1, so the
+    fallback does not fire; the caller's `if duration > 0` guard keeps the runtime."""
+    assert _parse(_rpc(monkeypatch, 0), 6300, False) == 0
 
 
 # =============================================================================
-# Source-scan — drift between mirror and production = failing test
+# getDuration threads `accurate` through
 # =============================================================================
 
-
-def _read(rel_path):
-    here = os.path.dirname(os.path.abspath(__file__))
-    return open(os.path.join(os.path.dirname(here), rel_path)).read()
-
-
-def _jsonrpc_src():
-    return _read(os.path.join('resources', 'lib', 'jsonrpc.py'))
+def test_getDuration_accurate_true_measures_and_uses_the_measurement(monkeypatch):
+    rpc = _rpc(monkeypatch, 4763)
+    assert rpc.getDuration(PATH, {'file': PATH, 'runtime': 6300}, True) == 4763
 
 
-def test_parseDuration_signature_has_accurate_kwarg():
-    """imports.48 added `accurate=False` to __parseDuration's signature."""
-    src = _jsonrpc_src()
-    m = re.search(r'def __parseDuration\(self,\s*runtime,\s*path,\s*item=\{\},\s*save=[^,]+,\s*accurate=False\):', src)
-    assert m, (
-        "__parseDuration signature must include `accurate=False` kwarg — "
-        "imports.48 regression"
-    )
+def test_getDuration_accurate_false_with_runtime_does_not_measure(monkeypatch):
+    rpc = _rpc(monkeypatch, 4763)
+    monkeypatch.setattr(rpc, 'videoParser', types.SimpleNamespace(getVideoLength=lambda *a: pytest.fail('measured')))
+    assert rpc.getDuration(PATH, {'file': PATH, 'runtime': 6300}, False) == 6300
 
 
-def test_getDuration_passes_accurate_to_parseDuration():
-    """imports.48: the non-stack branch of getDuration must thread `accurate`
-    through to __parseDuration so the sanity-check fallback can be skipped."""
-    src = _jsonrpc_src()
-    # The else branch in getDuration: `else: duration = self.__parseDuration(runtime, path, item, save, accurate)`
-    m = re.search(
-        r'else:\s*duration\s*=\s*self\.__parseDuration\(\s*runtime,\s*path,\s*item,\s*save,\s*accurate\)',
-        src,
-    )
-    assert m, (
-        "getDuration must pass `accurate` as the 5th positional arg to "
-        "__parseDuration in the non-stack branch — imports.48 regression"
-    )
-
-
-def test_parseDuration_fallback_gated_on_not_accurate():
-    """imports.48: the 25% sanity-check fallback must be gated on
-    `not accurate`. Drift here would re-introduce the bug for accurate=True."""
-    src = _jsonrpc_src()
-    # Find __parseDuration body and assert the gate
-    fn_start = src.find('def __parseDuration(self, runtime, path, item={}, save=')
-    assert fn_start != -1
-    body = src[fn_start:fn_start + 2000]
-    assert re.search(r'if\s+not\s+accurate\s+and\s+round\(percentDiff\(', body), (
-        "__parseDuration's percentDiff sanity-check must be gated on "
-        "`not accurate` — imports.48 regression"
-    )
-
-
-def test_parseDuration_queDuration_has_duration_positive_guard():
-    """imports.48 also added a `duration > 0` guard to the queDuration call
-    so a failed ffprobe doesn't write a 0 runtime back to the Kodi library."""
-    src = _jsonrpc_src()
-    fn_start = src.find('def __parseDuration(self, runtime, path, item={}, save=')
-    assert fn_start != -1
-    body = src[fn_start:fn_start + 2000]
-    assert re.search(r'if\s+save\s+and\s+duration\s*>\s*0\s+and\s+duration\s*!=\s*runtime', body), (
-        "__parseDuration's queDuration call must be guarded by `duration > 0` "
-        "— prevents 0-runtime writes to the Kodi library on ffprobe failure"
-    )
+def test_getDuration_accurate_true_large_disagreement_is_not_overruled(monkeypatch):
+    """imports.48: getDuration passes accurate to __parseDuration, so the 25%
+    fallback is skipped in accurate mode."""
+    rpc = _rpc(monkeypatch, 2663)
+    assert rpc.getDuration(PATH, {'file': PATH, 'runtime': 3600}, True) == 2663
+    assert rpc.getDuration(PATH, {'file': PATH, 'runtime': 3600}, False) == 3600

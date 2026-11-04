@@ -23,6 +23,7 @@ from overlay    import Background, Overlay, Replay
 from rules      import RulesList
 from tasks      import Tasks
 from jsonrpc    import JSONRPC
+import playstate_helpers # madteevee (imports fork, imports.60): Rollback_Watched snapshot/restore
 
 class Player(xbmc.Player):
     # imports.16: pendingItem / playingItem live as instance attrs (set in
@@ -60,7 +61,6 @@ class Player(xbmc.Player):
     infoOnChange      = SETTINGS.getSettingBool('Enable_OnInfo')
     disableTrakt      = SETTINGS.getSettingBool('Disable_Trakt')
     rollbackPlaycount = SETTINGS.getSettingBool('Rollback_Watched')
-    saveDuration      = SETTINGS.getSettingBool('Store_Duration')
     minDuration       = SETTINGS.getSettingInt('Seek_Tolerance')
     maxProgress       = SETTINGS.getSettingInt('Seek_Threshold')
     sleepTime         = SETTINGS.getSettingInt('Idle_Timer')
@@ -95,7 +95,16 @@ class Player(xbmc.Player):
         # is the consecutive-short-play counter; resets on a normal-length play.
         self._play_started = 0
         self._short_plays  = 0
-        
+        # madteevee (imports fork, imports.60): Rollback_Watched as an exact undo.
+        # Every decision (what to snapshot, who owns it, what to send) lives in
+        # playstate_helpers.PlaystateTracker, which has its own lock; this class
+        # only supplies the Kodi I/O (_readPlaystateDetails, _playstateFile,
+        # sendJSON) and calls _syncPlaystate from the player events.
+        self.playstate = playstate_helpers.PlaystateTracker(read_details=self._readPlaystateDetails,
+                                                            playing_file=self._playstateFile,
+                                                            send=self.jsonRPC.sendJSON,
+                                                            log=self._playstateLog)
+
         
     def log(self, msg, level=xbmc.LOGDEBUG):
         return log('%s: %s'%(self.__class__.__name__,msg),level)
@@ -409,7 +418,13 @@ class Player(xbmc.Player):
             # (the stale playingItem.citem at the moment Overlay was built).
             # The v.26 fix addressed the analogous PseudoTV→PseudoTV race;
             # this closes the symmetric gap for the non-PseudoTV destination.
+            oldInfo = self.playingItem
             self.playingItem = playingItem
+            # madteevee (imports fork, imports.60): PseudoTV handed over to other
+            # playback. Kodi reuses the running player for the new file and sends
+            # no stop, so the last PseudoTV programme is rolled back here (restore
+            # only; a no-op when _onStop already did it).
+            if oldInfo.get('isPseudoTV'): self._syncPlaystate(oldInfo)
             self.toggleOverlay(False)
             self.lastSubState = BUILTIN.isSubtitle()
             # imports.16: non-PTV path now early-returns. Previously the
@@ -425,6 +440,11 @@ class Player(xbmc.Player):
         if newChan: #New channel
             self.runActions  = RulesList([playingItem.get('citem',{})]).runActions
             self.playingItem = self._runActions(RULES_ACTION_PLAYER_START, playingItem.get('citem',{}), playingItem, inherited=self)
+            # madteevee (imports fork, imports.60): roll back the previous programme and
+            # snapshot this one. Started before the subtitle/overlay work so the snapshot
+            # is read right after playback starts; the switch value is the one this
+            # channel's start rules (rule 53) just applied.
+            self._syncPlaystate(oldInfo, playingItem, bool(self.rollbackPlaycount))
             PROPERTIES.setTrakt(self.disableTrakt)
             self.setSubtitles(self.lastSubState) #todo allow rules to set sub preference per channel.
             self.toggleReplay(bool(self.replayPercentage))
@@ -436,6 +456,7 @@ class Player(xbmc.Player):
             self.toggleOverlay(self.enableOverlay)
         else: #New Program/Same Channel
             self.playingItem = playingItem
+            self._syncPlaystate(oldInfo, playingItem, bool(self.rollbackPlaycount)) # madteevee (imports fork, imports.60): see the new-channel branch
             if playingItem.get('radio',False):
                 BUILTIN.executebuiltin('Action(back)')
                 BUILTIN.executewindow('ReplaceWindow(visualisation)')
@@ -449,13 +470,18 @@ class Player(xbmc.Player):
             if getattr(self, 'smartSubsMode', 'legacy') == 'smart':
                 self.setSubtitles(self.lastSubState)
             self.toggleInfo(self.infoOnChange)
-        self.jsonRPC.quePlaycount(oldInfo.get('fitem',{}),self.rollbackPlaycount)
-        self.jsonRPC._setRuntime(playingItem.get('fitem',{}),playingItem.get('fitem',{}).get('runtime'),self.saveDuration)
+        # madteevee (imports fork, imports.60): quePlaycount removed (the rollback runs in
+        # _syncPlaystate above); _setRuntime now only caches the player's runtime.
+        self.jsonRPC._setRuntime(playingItem.get('fitem',{}),playingItem.get('fitem',{}).get('runtime'))
 
 
     @threadit
     def _onChange(self, playingItem={}):
         self.log('_onChange, playingItem = %s'%(playingItem))
+        # madteevee (imports fork, imports.60): the programme reached its end. Kodi has
+        # already saved its marks for the file, so roll it back now (restore only)
+        # instead of waiting for the next playback.
+        if playingItem.get('isPseudoTV'): self._syncPlaystate(playingItem)
         self.toggleOverlay(False)
         if playingItem:
             if not playingItem.get('isPlaylist',False):
@@ -530,13 +556,58 @@ class Player(xbmc.Player):
         if playingItem:
             PROPERTIES.setTrakt(False)
             if playingItem.get('isPlaylist',False): xbmc.PlayList(xbmc.PLAYLIST_VIDEO).clear()
-            self.jsonRPC.quePlaycount(playingItem.get('fitem',{}),self.rollbackPlaycount)
+            # madteevee (imports fork, imports.60): replaces quePlaycount. Restore only:
+            # rolls the programme back if it owns a snapshot.
+            if playingItem.get('isPseudoTV'): self._syncPlaystate(playingItem)
             self._runActions(RULES_ACTION_PLAYER_STOP, playingItem.get('citem',{}), playingItem, inherited=self)
         
             
     def _runActions(self, action, citem={}, parameter=None, inherited=None):
         if self.runActions: return self.runActions(action, citem, parameter, inherited)
         else:               return parameter
+
+
+    # madteevee (imports fork, imports.60): Rollback_Watched Kodi glue. The logic
+    # is in playstate_helpers.PlaystateTracker (unit-tested without Kodi).
+    @threadit
+    def _syncPlaystate(self, oldInfo=None, newInfo=None, allow=False):
+        # Own thread, not the service queue: channel builds and tunes block the
+        # queue, and a snapshot taken late could capture Kodi's post-play marks.
+        # The tracker's lock serializes overlapping events.
+        self.playstate.transition(oldInfo, newInfo, allow)
+
+
+    def _playstateFile(self, playingItem=None):
+        # The programme's file, only when Kodi is playing exactly that file now:
+        # catch-up clicks, catchup="vod" channels and playlist mode. Live
+        # programmes play as pvr://...pvr items, which Kodi never marks (no
+        # snapshot, no JSON-RPC). getPlayingItem().getPath() is the item's own
+        # path; getPlayingFile() returns Kodi's resolved path and would let live
+        # programmes through. plugin:// and resource paths are never looked up.
+        playingItem = playingItem or {}
+        file = (playingItem.get('fitem') or {}).get('file') or ''
+        if not file or playingItem.get('radio',False) or file.startswith(tuple(VFS_TYPES)): return None
+        try:
+            if self.isPlayingVideo() and self.getPlayingItem().getPath() == file: return file
+        except Exception as e: self.log('_playstateFile, playback changed during the check: %s'%(e)) # e.g. stopped between the two calls
+        return None
+
+
+    @threadit
+    def _cancelPlaystate(self):
+        # Own thread: Monitor.onSettingsChanged runs on the service's main thread,
+        # which must not wait for the tracker lock while a transition talks to Kodi.
+        self.playstate.clear()
+
+
+    def _readPlaystateDetails(self, file):
+        # delay=False: the tracker checks the player right after this read; the
+        # RPC_Delay pause would sit between the two (writes keep the pause).
+        return self.jsonRPC.getFileDetails(file, 'video', list(playstate_helpers.PLAYSTATE_PROPERTIES), cache=False, delay=False)
+
+
+    def _playstateLog(self, msg, level=playstate_helpers.DEBUG):
+        self.log(msg, {playstate_helpers.INFO:xbmc.LOGINFO, playstate_helpers.ERROR:xbmc.LOGERROR}.get(level, xbmc.LOGDEBUG))
 
 
     def _onSleep(self):
@@ -779,7 +850,8 @@ class Monitor(xbmc.Monitor):
         self.service = service
         self.jsonRPC = service.jsonRPC
         self.player  = Player(self,service)
-        
+        self.rollbackSwitch = SETTINGS.getSettingBool('Rollback_Watched') # madteevee (imports fork, imports.60): see _chkRollbackSwitch
+
         
     def log(self, msg, level=xbmc.LOGDEBUG):
         return log('%s: %s'%(self.__class__.__name__,msg),level)
@@ -817,9 +889,29 @@ class Monitor(xbmc.Monitor):
         self.log("onNotification, sender %s - method: %s  - data: %s" % (sender, method, data))
             
 
-    @debounceit(15)
     def onSettingsChanged(self):
-        self.log('onSettingsChanged') 
+        # madteevee (imports fork, imports.60): "Rollback watched" applies at once;
+        # everything else stays debounced (15 s) and queued as before.
+        self._chkRollbackSwitch()
+        self._onSettingsChanged()
+
+
+    def _chkRollbackSwitch(self):
+        # Acts only when this setting itself changed: switching it off cancels the
+        # pending rollback of the programme playing at once (before, that waited for
+        # the 15 s debounce plus the service queue, so a quick Stop still rolled
+        # back). Other settings changes cancel nothing.
+        state = SETTINGS.getSettingBool('Rollback_Watched')
+        if state == self.rollbackSwitch: return
+        self.log('_chkRollbackSwitch, Rollback_Watched = %s'%(state))
+        self.rollbackSwitch = state
+        self.player.rollbackPlaycount = state
+        if not state: self.player._cancelPlaystate()
+
+
+    @debounceit(15)
+    def _onSettingsChanged(self):
+        self.log('onSettingsChanged')
         self.service._que(self._updatePlayerSettings)
         self.service._que(self._updateServiceSettings)
             
@@ -836,7 +928,6 @@ class Monitor(xbmc.Monitor):
         self.player.infoOnChange      = SETTINGS.getSettingBool('Enable_OnInfo')
         self.player.disableTrakt      = SETTINGS.getSettingBool('Disable_Trakt')
         self.player.rollbackPlaycount = SETTINGS.getSettingBool('Rollback_Watched')
-        self.player.saveDuration      = SETTINGS.getSettingBool('Store_Duration')
         self.player.minDuration       = SETTINGS.getSettingInt('Seek_Tolerance')
         self.player.maxProgress       = SETTINGS.getSettingInt('Seek_Threshold')
         self.player.sleepTime         = SETTINGS.getSettingInt('Idle_Timer')

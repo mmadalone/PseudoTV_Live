@@ -689,8 +689,11 @@
                     </constraints>
                     <control type="spinner" format="string"/>
                 </setting>
+                <!-- madteevee (imports fork, imports.60): hidden (level 4 = internal, never shown).
+                     Lengths are no longer written to Kodi's library; they stay in the add-on's own
+                     cache. Kept so channel rule 500 (Duration Options) still reads its default. -->
                 <setting id="Store_Duration" type="boolean" label="30052" help="33052" parent="Duration_Type">
-                    <level>3</level>
+                    <level>4</level>
                     <default>false</default>
                     <dependencies>
                         <dependency type="visible">

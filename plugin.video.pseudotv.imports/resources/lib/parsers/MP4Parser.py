@@ -44,25 +44,42 @@ class MP4Parser:
     def determineLength(self, filename: str) -> int and float:
         log("MP4Parser: determineLength %s"%filename)
         try: self.File = FileAccess.open(filename, "rb", None)
-        except Exception:
-            log("MP4Parser: Unable to open the file")
+        except Exception as e:
+            log("MP4Parser: Unable to open the file: %s"%(e))
             return 0
-            
-        dur = self.readHeader()
-        if not dur:
-            log("MP4Parser - Using New Parser")
-            boxes = self.find_boxes(self.File)
-            # Sanity check that this really is a movie file.
-            if (boxes.get(b"ftyp",[-1])[0] == 0):
-                try:
+
+        # madteevee (imports fork, imports.60): port of upstream 10a2728b's
+        # fallback fix plus ce64bafa's try/finally (thanks, upstream). The
+        # fallback looked up 'trak' and 'udta' boxes it never used, so an MP4
+        # without a 'udta' box raised KeyError b'udta' and got no length (148
+        # of 819 movie files here). The ftyp-at-offset-0 sanity check is kept.
+        # Upstream's track-header fallback and 2 GB box cap are NOT ported: a
+        # track header's length is in the movie's time unit, not the track's
+        # (on films here it would give e.g. 115 s for a 92-minute film if it
+        # were ever reached), and 32-bit box sizes go up to 4 GB. The file is
+        # now always closed, and a read error inside the header reader returns
+        # 0 (unknown) instead of raising.
+        dur   = 0
+        boxes = {}
+        try:
+            dur = self.readHeader()
+            if not dur:
+                log("MP4Parser - Using New Parser")
+                boxes = self.find_boxes(self.File)
+                # Sanity check that this really is a movie file.
+                if boxes.get(b"ftyp",[-1])[0] != 0:
+                    log("MP4Parser: No 'ftyp' box at the start of the file")
+                elif b"moov" not in boxes:
+                    log("MP4Parser: Missing 'moov' box")
+                else:
                     moov_boxes = self.find_boxes(self.File, boxes[b"moov"][0] + 8, boxes[b"moov"][1])
-                    trak_boxes = self.find_boxes(self.File, moov_boxes[b"trak"][0] + 8, moov_boxes[b"trak"][1])
-                    udta_boxes = self.find_boxes(self.File, moov_boxes[b"udta"][0] + 8, moov_boxes[b"udta"][1])
-                    dur = self.scan_mvhd(self.File, moov_boxes[b"mvhd"][0])
-                except Exception as e:
-                    log("MP4Parser, failed! %s\nboxes = %s"%(e,boxes), xbmc.LOGERROR)
-                    dur = 0
-        self.File.close()
+                    if b"mvhd" in moov_boxes: dur = self.scan_mvhd(self.File, moov_boxes[b"mvhd"][0])
+                    else: log("MP4Parser: Missing 'mvhd' box in 'moov'")
+        except Exception as e:
+            log("MP4Parser, failed! %s\nboxes = %s"%(e,boxes), xbmc.LOGERROR)
+            dur = 0
+        finally:
+            self.File.close()
         log("MP4Parser: Duration is %s"%(dur))
         return dur
 

@@ -96,7 +96,7 @@ class Builder(object):
         self.incExtras        = SETTINGS.getSettingBool('Enable_Extras') 
         self.incStrmDetails   = SETTINGS.getSettingBool('Enable_Details')
         self.enableBCTs       = SETTINGS.getSettingBool('Enable_Fillers')#todo add to adv. rules
-        self.saveDuration     = SETTINGS.getSettingBool('Store_Duration')
+        self.saveDuration     = SETTINGS.getSettingBool('Store_Duration') # madteevee (imports fork, imports.60): no longer writes anything (getDuration ignores it); kept because rule 500 (Duration Options) sets it
         self.minDuration      = SETTINGS.getSettingInt('Seek_Tolerance')
         self.limit            = SETTINGS.getSettingInt('Page_Limit')
         self.recursiveLimit   = SETTINGS.getSettingInt('Recursive_Depth') #todo adv. channel rule. set recursive depth.

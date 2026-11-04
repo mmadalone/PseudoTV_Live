@@ -993,7 +993,12 @@ class RollbackPlaycount(BaseRule):
             self.log("runAction, setting rollbackPlaycount = %s"%(player.rollbackPlaycount))
             
         elif actionid == RULES_ACTION_PLAYER_STOP:
-            player.rollbackPlaycount = self.storedValues[0]
+            # madteevee (imports fork, imports.60): runActions re-creates the rules on
+            # every call (fresh rules from the citem), so storedValues[0] is still []
+            # here, and the old line switched rollback off on every channel after the
+            # first stop on a rule-53 channel. Now that Rollback_Watched is acted on,
+            # restore the global switch instead.
+            player.rollbackPlaycount = SETTINGS.getSettingBool('Rollback_Watched')
             self.log("runAction, restoring rollbackPlaycount = %s"%(player.rollbackPlaycount))
         return parameter
 
@@ -1124,7 +1129,12 @@ class DurationOptions(BaseRule): #PRE-BUILD RULES [500-599]
         self.description        = "Duration Options"
         self.optionLabels       = [LANGUAGE(30049),LANGUAGE(30052),LANGUAGE(32233)]
         self.optionValues       = [SETTINGS.getSettingInt('Duration_Type'),SETTINGS.getSettingBool('Store_Duration'),SETTINGS.getSettingInt('Seek_Tolerance')]
-        self.optionDescriptions = [LANGUAGE(33015),LANGUAGE(33049),LANGUAGE(33052),LANGUAGE(32233)]
+        # madteevee (imports fork, imports.60): one description per option (a stray
+        # leading LANGUAGE(33015), "Pagination Limit", shifted them by one). Option 1
+        # (Store_Duration) no longer does anything: lengths are not written to Kodi's
+        # library any more, and #30052/#33052 say so. It stays in place so saved rule
+        # values keep their positions.
+        self.optionDescriptions = [LANGUAGE(33049),LANGUAGE(33052),LANGUAGE(32233)]
         self.actions            = [RULES_ACTION_CHANNEL_START,RULES_ACTION_CHANNEL_STOP]
         self.selectBoxOptions   = [{LANGUAGE(30050):0,LANGUAGE(30051):1},[],list(range(0,900,5))]
         self.storedValues       = [[],[],[]]
