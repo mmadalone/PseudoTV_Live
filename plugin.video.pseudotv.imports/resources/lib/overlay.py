@@ -396,8 +396,15 @@ class OnNext(xbmcgui.WindowXMLDialog):
                 else: wait -= CPU_CYCLE
                         
         except Exception as e: self.log("onInit, failed! %s"%(e), xbmc.LOGERROR)
-        self.log("onInit, closing")
-        self.close()
+        finally:
+            # madteevee (imports fork, imports.63): every exit closes the window. The early
+            # returns above (no time for the next programme) skipped this close, so an
+            # invisible modal window stayed on screen until Kodi restarted: Kodi then
+            # refused window switches ("refused because there are active modal dialogs")
+            # and other dialogs, such as the Restart pop-up, could not open.
+            self.log("onInit, closing")
+            try: self.close()
+            except Exception as e: self.log("onInit, close failed! %s"%(e), xbmc.LOGERROR) # e.g. the window is gone at shutdown
                 
                 
     def _updateUpNext(self, nowItem: dict={}, nextItem: dict={}):
