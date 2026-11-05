@@ -81,18 +81,20 @@ class Cache(object):
         log('%s [%s]: %s' % (self.__class__.__name__, {True:'MEM',False:'DB'}[self.cache.enable_mem_cache], msg), level)
 
 
-    def set(self, name, value, checksum=ADDON_VERSION, expiration=datetime.timedelta(minutes=15)):
+    def set(self, name, value, checksum=ADDON_VERSION, expiration=datetime.timedelta(minutes=15), versioned=True):
         # don't store empty values when cache disabled unless explicitly allowed
+        # madteevee (imports fork, imports.61): versioned=False stores the entry without
+        # a check number, so it survives add-on updates (see _Cache.getChecksum).
         if not any([self.disable_cache,value is None]):
-            self.cache.set(name, value, checksum, expiration)
+            self.cache.set(name, value, checksum, expiration, versioned)
             self.log('set, name = %s, value = %s, type = %s' % (name, '%s...'%(str(value)[:128]),type(value).__name__))
         return value
 
 
-    def get(self, name, checksum=ADDON_VERSION):
+    def get(self, name, checksum=ADDON_VERSION, versioned=True):
         if not self.disable_cache:
             try:
-                value = self.cache.get(name, checksum)
+                value = self.cache.get(name, checksum, versioned)
                 self.log('get, name = %s, value = %s, type = %s' % (name, '%s...'%(str(value)[:128]),type(value).__name__))
                 return value
             except Exception as e:
@@ -190,8 +192,8 @@ class _Cache(object):
                 else:     self.log('chkCleanup, cleanup due; deferred to service task (chkCacheClean)', xbmc.LOGINFO)
 
 
-    def get(self, endpoint, checksum=""):
-        checksum = self.getChecksum(checksum)
+    def get(self, endpoint, checksum="", versioned=True):
+        checksum = self.getChecksum(checksum, versioned)
         cur_time = self.getTimestamp(datetime.datetime.now())
         result   = None
         if self.enable_mem_cache: result = self._getMEM(endpoint, checksum, cur_time)
@@ -199,10 +201,10 @@ class _Cache(object):
         return result
 
 
-    def set(self, endpoint, data, checksum="", expiration=datetime.timedelta(days=30)):
+    def set(self, endpoint, data, checksum="", expiration=datetime.timedelta(days=30), versioned=True):
         task_name = "set.%s" % endpoint
         self._busy_tasks.append(task_name)
-        checksum = self.getChecksum(checksum)
+        checksum = self.getChecksum(checksum, versioned)
         expires  = self.getTimestamp(datetime.datetime.now() + expiration)
         if self.enable_mem_cache: self._setMEM(endpoint, checksum, expires, data)
         self._setDB(endpoint, checksum, expires, data)
@@ -401,8 +403,17 @@ class _Cache(object):
             return int(time.mktime(date_time.timetuple()))
 
 
-    def getChecksum(self, stringinput):
+    def getChecksum(self, stringinput, versioned=True):
         # return simple summed-ord checksum; include global checksum if present
+        # madteevee (imports fork, imports.61): versioned=False returns 0 = "no check
+        # number". _getDB skips the comparison for it (the original
+        # script.module.simplecache meaning of an empty checksum), so the entry is
+        # not invalidated by an add-on update; expiry still applies. Used only for
+        # the playlist fingerprint (Settings.getFileCRC) and the playlist position
+        # (JSONRPC.autoPagination), both on the database-only cache instance: the
+        # memory cache's _getMEM returns expired entries whenever both check
+        # numbers are 0.
+        if not versioned: return 0
         if not stringinput and not self.global_checksum: return 0
         if self.global_checksum: combined = "%s-%s" % (self.global_checksum, stringinput)
         else:                    combined = str(stringinput)

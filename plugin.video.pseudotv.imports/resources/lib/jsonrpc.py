@@ -603,8 +603,11 @@ class JSONRPC(object):
             
             
     def autoPagination(self, id, path, query={}, limits={}):
-        if not limits: return (self.cache.get('autoPagination.%s.%s.%s'%(id,FileAccess._getMD5(path),FileAccess._getMD5(FileAccess.dumpJSON(query))), checksum=id) or {"end": 0, "start": 0, "total":0})
-        else:          return  self.cache.set('autoPagination.%s.%s.%s'%(id,FileAccess._getMD5(path),FileAccess._getMD5(FileAccess.dumpJSON(query))), limits, checksum=id, expiration=datetime.timedelta(days=28))
+        # madteevee (imports fork, imports.61): the playlist position survives add-on
+        # updates (versioned=False; the key already names the channel). Before, an
+        # update reset every channel's playlist to its first episode.
+        if not limits: return (self.cache.get('autoPagination.%s.%s.%s'%(id,FileAccess._getMD5(path),FileAccess._getMD5(FileAccess.dumpJSON(query))), versioned=False) or {"end": 0, "start": 0, "total":0})
+        else:          return  self.cache.set('autoPagination.%s.%s.%s'%(id,FileAccess._getMD5(path),FileAccess._getMD5(FileAccess.dumpJSON(query))), limits, expiration=datetime.timedelta(days=28), versioned=False)
             
              
     def randomPagination(self, page=SETTINGS.getSettingInt('Page_Limit'), limits={}, start=0):

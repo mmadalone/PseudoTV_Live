@@ -624,8 +624,16 @@ class XMLTVS(object):
                   'icon'         : [{'src':citem['logo']}]})
                   
         self.log('addChannel, mitem = %s'%(mitem))
-        try:              self.XMLTVDATA['channels'][self.findChannel(mitem)[0]] = mitem
-        except Exception: self.XMLTVDATA['channels'].append(mitem)
+        # madteevee (imports fork, imports.61): look the channel up in the list being
+        # updated. findChannel without a list searches getChannels(), a SORTED COPY;
+        # after a save in the same build call the real list is in another order, so
+        # the upsert replaced a different channel's element (whose guide was then
+        # pruned as an orphan on the next save) and duplicated this one. imports.61
+        # rebuilds keep the channel element, so every rebuild now takes this upsert.
+        channels = self.XMLTVDATA.setdefault('channels', [])
+        idx = self.findChannel(mitem, channels)[0]
+        if idx is None: channels.append(mitem)
+        else:           channels[idx] = mitem
         return True
 
 
@@ -721,8 +729,26 @@ class XMLTVS(object):
         self.XMLTVDATA['programmes'] = list([program for program in programmes if program.get('channel') != citem.get('id')])
         self.log('delBroadcast, removing channel %s; channels: before = %s, after = %s; programmes: before = %s, after = %s'%(citem.get('id'),len(channels),len(self.XMLTVDATA['channels']),len(programmes),len(self.XMLTVDATA['programmes'])))
         return True
-        
-        
+
+
+    def trimBroadcast(self, citem: dict, cut) -> bool:
+        # madteevee (imports fork, imports.61): the rebuild of one channel keeps its
+        # programmes that started before `cut` (epoch seconds), so they stay
+        # replayable, and drops the rest (replay_helpers.split_for_rebuild).
+        # delBroadcast (everything) stays for channel delete/disable. The channel
+        # element is left in place; the Builder upserts it after a successful build.
+        programmes, kept, removed = replay_helpers.split_for_rebuild(self.XMLTVDATA.get('programmes') or [], citem.get('id'), cut)
+        self.XMLTVDATA['programmes'] = programmes
+        self.log('[%s] trimBroadcast, cut %s: kept %s aired, removed %s'%(citem.get('id'), epochTime(cut,tz=False).strftime(DTFORMAT), kept, removed), xbmc.LOGINFO)
+        return True
+
+
+    def resumeAfter(self, citem: dict, cut):
+        # madteevee (imports fork, imports.61): where a rebuilt channel's new schedule
+        # starts: after the kept programme airing at `cut`, else at `cut`.
+        return replay_helpers.rebuild_resume(self.XMLTVDATA.get('programmes') or [], citem.get('id'), cut)
+
+
     def delRecording(self, ritem: dict):
         self.log('[%s] delRecording'%((ritem.get('id') or ritem.get('label'))))
         recordings = self.XMLTVDATA['recordings']

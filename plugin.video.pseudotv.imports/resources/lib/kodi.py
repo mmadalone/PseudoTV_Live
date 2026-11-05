@@ -104,10 +104,10 @@ class Settings(object):
         return FileAccess._decodeString(self.getSetting(key))
     
     
-    def getCacheSetting(self, key, checksum=ADDON_VERSION, revive=False):
-        value = self.cacheDB.get(key, checksum)
+    def getCacheSetting(self, key, checksum=ADDON_VERSION, revive=False, versioned=True):
+        value = self.cacheDB.get(key, checksum, versioned)
         self.log(f'[{ADDON_ID}] getCacheSetting, key = {key}, value = {str(value)[:128]}, type = {type(value).__name__}')
-        if value and revive: self.setCacheSetting(key, value, checksum)
+        if value and revive: self.setCacheSetting(key, value, checksum, versioned=versioned)
         return value
         
         
@@ -175,9 +175,9 @@ class Settings(object):
         return self.setSetting(key,FileAccess._encodeString(values))
             
             
-    def setCacheSetting(self, key, value=None, checksum=ADDON_VERSION, life=datetime.timedelta(days=84)):
+    def setCacheSetting(self, key, value=None, checksum=ADDON_VERSION, life=datetime.timedelta(days=84), versioned=True):
         self.log(f'[{ADDON_ID}] setCacheSetting, key = {key}, value = {str(value)[:128]}, type = {type(value).__name__}')
-        return self.cacheDB.set(key, value, checksum, life)
+        return self.cacheDB.set(key, value, checksum, life, versioned)
             
 
     def setEXTSetting(self, id, key, value):
@@ -553,10 +553,15 @@ class Settings(object):
             return False
         finally:
             fle.close()
+        # madteevee (imports fork, imports.61): the stored fingerprint is compared by
+        # its value only (versioned=False). Before, the add-on version was part of
+        # the cache check number, so every update made every playlist look edited
+        # and rebuilt every Custom channel. Key and crc32 are unchanged, so values
+        # stored by earlier versions are reused.
         name  = 'getFileCRC.%s'%(FileAccess._getMD5(file))
-        cache = self.getCacheSetting(name, checksum=crc, revive=True)
+        cache = self.getCacheSetting(name, revive=True, versioned=False)
         if not cache or cache != crc:
-            self.setCacheSetting(name, crc, checksum=crc)
+            self.setCacheSetting(name, crc, versioned=False)
             return True
         return False
         

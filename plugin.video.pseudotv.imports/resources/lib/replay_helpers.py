@@ -215,6 +215,58 @@ def link_replay_days(records):
     return out
 
 
+# madteevee (imports fork, imports.61): a rebuild of one of the user's own
+# channels keeps the programmes that have already started. Those channels are
+# catchup="vod" with no catchup-days (IPTV Simple's "Channel K"): a guide entry
+# can be replayed only while pseudotv.xml still holds it with its catchup-id,
+# and Kodi keeps showing past entries from its own copy of the guide. Before,
+# a rebuild deleted the whole channel guide, aired programmes included. Times
+# are compared as parsed epochs (xmltv_to_epoch), never as text, because the
+# programmes carry a ' +HHMM' suffix. Used by XMLTVS.trimBroadcast and
+# XMLTVS.resumeAfter.
+
+def split_for_rebuild(programmes, channel_id, cut):
+    """Split the guide for the rebuild of one channel at `cut` (epoch seconds).
+
+    Returns (programmes, kept, removed). Every other channel's programmes and
+    every non-dict item are returned unchanged, in their original order. The
+    programmes of `channel_id` whose start is before `cut` stay untouched,
+    including the one airing at `cut`. Its other programmes are dropped, and so
+    is any programme of it whose start or stop can't be parsed (the old full
+    clear dropped those too)."""
+    out, kept, removed = [], 0, 0
+    for programme in programmes or ():
+        if not isinstance(programme, dict) or programme.get('channel') != channel_id:
+            out.append(programme)
+            continue
+        start = xmltv_to_epoch(programme.get('start'))
+        stop = xmltv_to_epoch(programme.get('stop'))
+        if start is not None and stop is not None and start < cut:
+            out.append(programme)
+            kept += 1
+        else:
+            removed += 1
+    return out, kept, removed
+
+
+def rebuild_resume(programmes, channel_id, cut):
+    """Where the new schedule of a rebuilt channel starts: the latest stop of
+    its programmes that started before `cut` (the one airing at `cut` keeps its
+    full slot), or `cut` itself when that is later. Never earlier than `cut`;
+    programmes that can't be parsed are ignored."""
+    resume = cut
+    for programme in programmes or ():
+        if not isinstance(programme, dict) or programme.get('channel') != channel_id:
+            continue
+        start = xmltv_to_epoch(programme.get('start'))
+        stop = xmltv_to_epoch(programme.get('stop'))
+        if start is None or stop is None or start >= cut:
+            continue
+        if stop > resume:
+            resume = stop
+    return resume
+
+
 def _first_text(programme, key):
     """The first text of a programme field: a plain string, or the first
     (text, lang) pair as the XMLTV reader gives it; '' for anything else."""

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<addon id="plugin.video.pseudotv.imports" version="0.8.0+imports.60" name="PseudoTV Live (imports)" provider-name="Lunatixz, mmadalone">
+<addon id="plugin.video.pseudotv.imports" version="0.8.0+imports.61" name="PseudoTV Live (imports)" provider-name="Lunatixz, mmadalone">
     <requires>
         <import addon="xbmc.python" version="3.0.1"/>
         <import addon="script.module.six" version="1.0.0"/>
@@ -77,13 +77,13 @@
         <source>https://github.com/PseudoTV/PseudoTV_Live</source>
         <forum>https://forum.kodi.tv/showthread.php?tid=355549</forum>
         <disclaimer lang="en_GB">BETA PROJECT; SUBJECT TO BUGS</disclaimer>
-        <news>v0.8.0+imports.60
+        <news>v0.8.0+imports.61
+- Fixed: shows that already aired on your own channels can be replayed from the TV guide for up to 3 days; a rebuild keeps them, except the hour or two just before it.
+- Changed: add-on updates no longer rebuild your own channels or restart their playlists from the first episode.
+v0.8.0+imports.60
 - Fixed: "Rollback watched" now undoes what Kodi records while a catch-up programme plays (watched count, last played, resume point) instead of erasing resume points.
 - Fixed: the Kodi log no longer fills with "Failed to parse" errors; "Save Accurate Duration to Kodi's Library" never reached the library, and the setting is now hidden.
-- Fixed: MP4 files without an optional metadata block now get a measured length.
-v0.8.0+imports.59
-- New!: past Movistar+ shows in the guide replay from their start, with most of the guide's descriptions kept and up to 7 days of past shows.
-- Fixed: several ways the guide or your import settings could be lost or reverted.</news>
+- Fixed: MP4 files without an optional metadata block now get a measured length.</news>
         <reuselanguageinvoker>true</reuselanguageinvoker>
         <assets>
             <icon>resources/images/icon.png</icon>
