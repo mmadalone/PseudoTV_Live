@@ -165,7 +165,7 @@ In addition to the per-commit patches against the `plugin.video.pseudotv.live` u
   - Keys while it was up: Back stayed in full screen; channel + changed channel; Up and Info showed the info; a number key started channel-number entry; Play/Pause paused.
   - A restart plus Stop during an own-file guide replay restored the film's watched marks exactly (imports.60).
   - Right after the update the add-on's changelog window (modal) keeps the pop-up away until it is closed.
-  - Found, not from this update: Kodi's "Play programme" on an own channel's show on now starts at 0:00 when the show started less than an hour ago (two in summer): `plugin.py` playPlaylist's join check compares with `getUTCstamp()`, which is `time.time()` minus the UTC offset, the same clock issue as the rebuild anchor.
+  - Found, not from this update: "Play programme" started through Kodi's JSON-RPC (`Player.Open {broadcastid}`) on an own channel's show on now plays from 0:00, because that route hands the add-on no programme times (fitem holds only file and title), so playPlaylist's join check never runs. Where the times do arrive, that check compares them with `getUTCstamp()` (`time.time()` minus the UTC offset), so a show less than an hour in (two in summer) would also start at 0:00: the clock issue "D".
 
 **Maintenance posture**: the imports addon does NOT rebase against upstream — it's a one-time fork that diverged from `plugin.video.pseudotv.live` after the `madteevee-on-nightly` rebase. Forward-ports from upstream into imports/ happen manually when needed.
 
