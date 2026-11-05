@@ -49,7 +49,9 @@ def test_module_is_import_light_and_py38():
     tree = ast.parse(src, feature_version=(3, 8))
     names = {a.name for n in _ast.walk(tree) if isinstance(n, _ast.Import) for a in n.names}
     names |= {n.module for n in _ast.walk(tree) if isinstance(n, _ast.ImportFrom)}
-    assert names <= {'calendar', 'json', 're', 'time'}
+    # imports.63: epg_utc_to_epoch moved to clock_helpers (standard library only, see
+    # test_imports63_clock.py) and is re-exported here
+    assert names <= {'calendar', 'json', 're', 'time', 'clock_helpers'}
 
 
 def test_custom_suffix_matches_the_channel_id_slug():

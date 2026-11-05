@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<addon id="plugin.video.pseudotv.imports" version="0.8.0+imports.62" name="PseudoTV Live (imports)" provider-name="Lunatixz, mmadalone">
+<addon id="plugin.video.pseudotv.imports" version="0.8.0+imports.63" name="PseudoTV Live (imports)" provider-name="Lunatixz, mmadalone">
     <requires>
         <import addon="xbmc.python" version="3.0.1"/>
         <import addon="script.module.six" version="1.0.0"/>
@@ -81,13 +81,15 @@
         <source>https://github.com/PseudoTV/PseudoTV_Live</source>
         <forum>https://forum.kodi.tv/showthread.php?tid=355549</forum>
         <disclaimer lang="en_GB">BETA PROJECT; SUBJECT TO BUGS</disclaimer>
-        <news>v0.8.0+imports.62
+        <news>v0.8.0+imports.63
+- Fixed: rebuilding one of your own channels no longer replaces a show that has already started; the new line-up begins when the show on now ends.
+- Fixed: "Play programme" in the TV guide menu on a show that is on now joins it part-way through (when the guide passes the show's times) and no longer fails to play.
+- Fixed: the "Up next" time is right (it was an hour early, two in summer), and guide times stay right across the change to and from summer time.
+- Changed: past shows leave the guide exactly "Minimum (Past) Guide Days" after they end (an hour sooner than before).
+v0.8.0+imports.62
 - New: restart a show that is already running from its beginning, on your own channels and on LiveTV channels that can replay it (Movistar+): a RESTART button after you tune in, "Restart from beginning" in the TV guide menu, and a remote button you set up (NotifyAll(pseudotv,restart)).
 - Changed: "Restart Percentage" starts at 5% on new installs (was 95%); existing installs keep their value: set it in Settings, Global, Overlay.
-- Fixed: the RESTART button never appeared, and the channel rule "Restart Button" switched it off after the first stop.
-v0.8.0+imports.61
-- Fixed: shows that already aired on your own channels can be replayed from the TV guide for up to 3 days; a rebuild keeps them, except the hour or two just before it.
-- Changed: add-on updates no longer rebuild your own channels or restart their playlists from the first episode.</news>
+- Fixed: the RESTART button never appeared, and the channel rule "Restart Button" switched it off after the first stop.</news>
         <reuselanguageinvoker>true</reuselanguageinvoker>
         <assets>
             <icon>resources/images/icon.png</icon>

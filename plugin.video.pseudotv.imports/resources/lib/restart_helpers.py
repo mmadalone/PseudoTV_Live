@@ -28,21 +28,26 @@
 #      (context_restart.py sends the same notification with the guide path).
 #
 # Import-light pure module (same pattern as playstate_helpers.py /
-# replay_helpers.py): no Kodi imports, no addon imports, no I/O, no clock
-# reads (callers pass `now`), Python 3.8 syntax. services.py reads Kodi and
-# passes the facts in; every decision is made here and tested without stubs.
+# replay_helpers.py): no Kodi imports, no addon imports except clock_helpers
+# (imports.63, itself standard library only), no I/O, no clock reads (callers
+# pass `now`), Python 3.8 syntax. services.py reads Kodi and passes the facts
+# in; every decision is made here and tested without stubs.
 #
 # Restart routes:
 # - Custom: Player.seekTime(0) on the playing episode (no re-tune). When it
 #   ends, the channel returns to live as it always does.
 # - LiveTV: JSON-RPC Player.Open {broadcastid}, Kodi's own 'Play programme'
 #   path (PlayEpgTag), only after PVR.GetBroadcastIsPlayable says yes.
-#   Kodi's guide 'Play programme' on a Custom show on now keeps joining
-#   mid-way (2026-05-11); plugin.py is not involved here.
-import calendar
+#   Kodi's guide 'Play programme' on a Custom show on now still joins mid-way
+#   when the play carries the show's times (imports.63: on the real clock;
+#   routes without times play from 0:00); plugin.py is not involved here.
 import json
 import re
-import time
+
+# imports.63: the Kodi broadcast-time parser lives in clock_helpers (the add-on's
+# one set of time conversions). Re-exported here, the same object, for this
+# module, services.py and the imports.62 tests.
+from clock_helpers import epg_utc_to_epoch
 
 # One notification for the remote button and the guide entry. The sender is
 # short because the UC Remote 3 Kodi integration limits a custom command to 64
@@ -90,13 +95,6 @@ def _int(value):
     if isinstance(value, bool): return None
     try: return int(value)
     except (TypeError, ValueError): return None
-
-
-def epg_utc_to_epoch(text):
-    """Kodi JSON-RPC broadcast time 'YYYY-MM-DD HH:MM:SS' (UTC) -> epoch seconds, None if empty/invalid."""
-    if not isinstance(text, str) or not text.strip(): return None
-    try: return calendar.timegm(time.strptime(text.strip(), '%Y-%m-%d %H:%M:%S'))
-    except ValueError: return None
 
 
 def clamp_percent(value):

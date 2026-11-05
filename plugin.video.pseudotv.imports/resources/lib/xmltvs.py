@@ -21,6 +21,7 @@ import xmltv
 import io
 import os
 import replay_helpers
+import clock_helpers # madteevee (imports fork, imports.63): the one clock + time conversions
 
 from globals     import *
 from m3u         import M3U
@@ -29,27 +30,14 @@ from fileaccess  import FileAccess, FileLock
 from writer_lock import held, WriterTimeout
 
 
-def _xmltvTzSuffix():
-    """Build the local-TZ ' +HHMM' / ' -HHMM' suffix per XMLTV spec.
-    Recomputed each call so DST transitions don't trip up long-running services."""
-    off = int(getTimeoffset())
-    return ' %s%02d%02d' % ('+' if off >= 0 else '-', abs(off) // 3600, (abs(off) % 3600) // 60)
-
-
-def _stripXmltvTzSuffix(s):
-    """Make strpTime(..., DTFORMAT) tolerant of the ' +HHMM' suffix we now emit.
-    Backwards-compat: also tolerates legacy no-suffix entries from prior builds."""
-    if not isinstance(s, str): return s
-    s = s.strip()
-    # Pattern: ' +HHMM' or ' -HHMM' at the end (6 trailing chars: space + sign + 4 digits)
-    if len(s) >= 6 and s[-6] == ' ' and s[-5] in '+-' and s[-4:].isdigit():
-        return s[:-6]
-    return s
-
-
 def _programmeSortKey(program):
     """imports.59: sortProgrammes key -- channel, then start. None-safe: a
-    missing or None value sorts as ''."""
+    missing or None value sorts as ''. imports.63: deliberately still the start
+    TEXT. Inside one channel text order is time order except where offsets mix
+    (the repeated autumn hour, a few Movistar+ entries), and nothing depends on
+    that order: IPTV Simple keys programmes by start time and every time
+    comparison in the add-on parses (clock_helpers.xmltv_to_epoch). A parsed key
+    cost about 10x per sort, and getProgrammes sorts on every call."""
     return (program.get('channel') or '', program.get('start') or '')
 
 
@@ -211,7 +199,7 @@ class XMLTVS(object):
                 
     def resetData(self):
         self.log('resetData')
-        return {'date'                : epochTime(float(time.time()),tz=False).strftime(DTFORMAT),
+        return {'date'                : epochTime(float(time.time())).strftime(DTFORMAT),
                 'generator-info-name' : self.cleanString('%s Guidedata'%(ADDON_NAME)),
                 'generator-info-url'  : self.cleanString(ADDON_ID),
                 'source-info-name'    : self.cleanString(ADDON_NAME),
@@ -261,37 +249,45 @@ class XMLTVS(object):
                 fle.close()
 
             
-    def loadStopTimes(self, channels: list=[], programmes: list=[], fallback=None):
+    def loadStopTimes(self, channels: list=[], programmes: list=[], fallback_epoch=None):
+        # madteevee (imports fork, imports.63): epochs in and out. `fallback_epoch` (the
+        # local hour floor of the real clock unless given; see clock_helpers.build_window)
+        # replaces the old DTFORMAT text `fallback`; the keyword is renamed so an old
+        # text caller fails loudly. First start and last stop are parsed with their
+        # offsets (replay_helpers.guide_bounds), no longer compared as text with the
+        # offset stripped, which went wrong in the repeated autumn hour; a malformed
+        # programme is skipped instead of forcing the fallback. A channel without a
+        # parseable programme, or whose guide starts after the fallback, (re)starts
+        # from the fallback. Yields (channel id, int epoch), never None or text.
         if not channels:   channels   = self.getChannels()
         if not programmes: programmes = self.getProgrammes()
-        if not fallback:   fallback   = epochTime(roundTimeDown(getUTCstamp(),offset=60),tz=False).strftime(DTFORMAT)
-
+        if fallback_epoch is None: fallback_epoch = clock_helpers.local_floor(clock_helpers.now(), 60)
+        bounds = replay_helpers.guide_bounds(programmes, [channel.get('id') for channel in channels])
         for channel in channels:
-            try:
-                firstStart = min((program['start'] for program in programmes if program['channel'] == channel['id']), default=fallback)
-                lastStop   = max((program['stop']  for program in programmes if program['channel'] == channel['id']), default=fallback)
-                self.log(' [%s] loadStopTimes first-start = %s, last-stop = %s, fallback = %s'%(channel['id'],firstStart,lastStop,fallback))
-                if _stripXmltvTzSuffix(firstStart) > _stripXmltvTzSuffix(fallback): raise Exception('First start-time in the future, rebuild channel with fallback')
-                yield channel['id'],datetime.datetime.timestamp(strpTime(_stripXmltvTzSuffix(lastStop), DTFORMAT))
-            except Exception as e:
-                self.log(" [%s] loadStopTimes failed!\nMalformed XMLTV channel/programmes %s! rebuilding channel with default stop-time %s"%(channel.get('id'),e,fallback), xbmc.LOGWARNING)
-                yield channel['id'],datetime.datetime.timestamp(strpTime(_stripXmltvTzSuffix(fallback), DTFORMAT))
+            first, last = bounds.get(channel.get('id'), (None, None))
+            self.log(' [%s] loadStopTimes first-start = %s, last-stop = %s, fallback = %s'%(channel.get('id'),first,last,fallback_epoch))
+            if first is None:
+                yield channel.get('id'), fallback_epoch
+            elif first > fallback_epoch:
+                self.log(' [%s] loadStopTimes, first start-time in the future, rebuilding channel from %s'%(channel.get('id'),epochTime(fallback_epoch).strftime(DTFORMAT)), xbmc.LOGWARNING)
+                yield channel.get('id'), fallback_epoch
+            else:
+                yield channel.get('id'), last
 
 
-    def hasProgrammes(self, channels: list=[], programmes: list=[], now=None):
+    def hasProgrammes(self, channels: list=[], programmes: list=[], now_epoch=None):
+        # madteevee (imports fork, imports.63): `now_epoch` is an epoch (default: the
+        # local hour floor of the real clock, today's meaning on the real clock); a
+        # channel has programmes while its last parseable stop is later than that.
         if not channels:   channels   = self.getChannels()
         if not programmes: programmes = self.getProgrammes()
-        if not now: now = epochTime(roundTimeDown(getUTCstamp(),offset=60),tz=False).strftime(DTFORMAT)
+        if now_epoch is None: now_epoch = clock_helpers.local_floor(clock_helpers.now(), 60)
+        bounds = replay_helpers.guide_bounds(programmes, [channel.get('id') for channel in channels])
         for channel in channels:
-            try: 
-                valid = False
-                last_stop = max((program['stop'] for program in programmes if program['channel'] == channel['id']), default=now)
-                if last_stop > now: valid = True
-                self.log('[%s] hasProgrammes, valid = %s'%(channel['id'],valid))
-                yield channel['id'],valid
-            except Exception as e:
-                self.log("[%s] hasProgrammes, failed!\nMalformed XMLTV channel/programmes %s! valid = False"%(channel.get('id'),e), xbmc.LOGWARNING)
-                yield channel['id'],False
+            last  = bounds.get(channel.get('id'), (None, None))[1]
+            valid = last is not None and last > now_epoch
+            self.log('[%s] hasProgrammes, valid = %s'%(channel.get('id'),valid))
+            yield channel.get('id'),valid
 
 
     def cleanString(self, text: str) -> str:
@@ -442,8 +438,13 @@ class XMLTVS(object):
 
 
     def cleanProgrammes(self, programmes: list=[], keep_days=None) -> list:
-        now     = (epochTime(float(getUTCstamp()),tz=False) - datetime.timedelta(days=MIN_GUIDEDAYS)) #allow some old programmes to avoid empty cells
-        holiday = Seasonal().getHoliday()
+        # madteevee (imports fork, imports.63): every age test compares epochs from one
+        # clock read: a programme is dropped when its parsed stop is more than Min_Days
+        # before now. Before, the stop text was read without its offset and compared
+        # with the slow clock (getUTCstamp), 1 h late for '+0100' shows.
+        now_epoch = clock_helpers.now()
+        cutoff    = now_epoch - MIN_GUIDEDAYS * 86400 #allow some old programmes to avoid empty cells
+        holiday   = Seasonal().getHoliday()
         # imports.59 (S10.4): keep_days = {channel id: days} for the live
         # link-replay channels (cleanSelf, replay_helpers.link_replay_days).
         # A programme of such a channel that carries a replay link is kept
@@ -451,7 +452,6 @@ class XMLTVS(object):
         # the Min_Days rule below. Movistar+'s guide export starts at its own
         # day's 00:00, so older linked shows exist only in this file.
         keep_days     = keep_days or {}
-        now_epoch     = time.time()
         pseudotv_slug = '@%s' % (PSEUDOTV_SLUG)
 
         def __filterProgrammes(program):
@@ -465,35 +465,29 @@ class XMLTVS(object):
             else:
                 citem    = {}
                 seasonal = {}
-            stopTime = program.get('stop',now)
+            stopTime = program.get('stop')
             if isinstance(stopTime, str): stopTime = stopTime.rstrip()
             if seasonal and seasonal.get('name',str(random.random())) != holiday.get('name'):
                 self.log('[%s] cleanProgrammes, __filterProgrammes removing expired holiday (%s)'%(citem.get('id'),seasonal))
                 return None
             # imports.59 (S1.4): a stop that isn't text (missing / None) is
-            # unparseable -- kept, per the rule below, without calling
-            # strpTime (whose TypeError fallback can't take a non-string).
+            # unparseable -- kept, per the rule below, without calling the parser.
             if not isinstance(stopTime, str):
                 return program
+            stop_epoch = clock_helpers.xmltv_to_epoch(stopTime) # imports.63: parsed once, with its offset
             days = keep_days.get(channel) if isinstance(channel, str) else None
             if days:
                 link = program.get('catchup-id')
                 if isinstance(link, str) and link.strip():
-                    stop_epoch = replay_helpers.xmltv_to_epoch(stopTime)
                     if stop_epoch is not None and stop_epoch >= now_epoch - days * 86400:
                         return program
-            # madteevee (imports fork): strpTime returns '' on parse failure
-            # (globals.py:119). Comparing '' < datetime raises TypeError —
-            # crashed the addon at startup once the cleanSelf patch let
-            # imported programmes through (their stop format may differ
-            # from internal DTFORMAT). Treat unparseable stop times as
-            # "keep the programme" (safer than dropping silently).
-            # _stripXmltvTzSuffix tolerates both legacy no-suffix entries and
-            # the +HHMM-suffixed entries we now emit (XMLTV-spec compliance).
-            parsed_stop = strpTime(_stripXmltvTzSuffix(stopTime), DTFORMAT)
-            if not isinstance(parsed_stop, datetime.datetime):
+            # madteevee (imports fork): treat an unparseable stop time as "keep
+            # the programme" (safer than dropping it silently): imported guides
+            # may use other formats. Before imports.63, strpTime's '' on failure
+            # compared with a datetime crashed the add-on at startup once.
+            if stop_epoch is None:
                 return program
-            if parsed_stop < now:
+            if stop_epoch < cutoff:
                 self.log('[%s] cleanProgrammes, __filterProgrammes removing expired programmes (%s)'%(citem.get('id'),stopTime))
                 return None  # remove expired content, todo ignore "recordings" ie. media=True
             return program
@@ -612,7 +606,7 @@ class XMLTVS(object):
         try:              self.XMLTVDATA['recordings'][self.findRecording(ritem)[0]] = sitem # replace existing channel meta
         except Exception: self.XMLTVDATA['recordings'].append(sitem)
 
-        fitem['start'] = getUTCstamp()
+        fitem['start'] = clock_helpers.now() # imports.63: the real clock (getUTCstamp was 1-2 h in the past)
         fitem['stop']  = fitem['start'] + fitem['duration']
         if self.addProgram(ritem['id'],self.getProgramItem(ritem,fitem),encodeDESC=True):
             return True
@@ -638,24 +632,20 @@ class XMLTVS(object):
 
 
     def addProgram(self, id: str, item: dict, encodeDESC: bool=True) -> bool:
-        # madteevee: append local-TZ suffix to start/stop. XMLTV spec says
-        # timestamps WITHOUT a +HHMM suffix mean local time, but pvr.iptvsimple
-        # interprets them as UTC — causing a permanent timezone-offset shift in
-        # what it thinks is "broadcastnow" (we write 20:00 local meaning
-        # 20:00, iptvsimple reads it as 20:00 UTC = 22:00 local). The bug
-        # surfaces as every Custom channel showing a programme from
-        # offset-hours-ago as "currently airing", which then resolves to that
-        # past programme's plugin URL → playback starts from frame 0 because
-        # the join-now check correctly refuses to seek past a stop that's
-        # already elapsed. Adding the explicit +HHMM suffix makes iptvsimple
-        # parse the local-time timestamps correctly.
-        _tz_sfx = _xmltvTzSuffix()
+        # madteevee: start/stop carry an explicit ' +HHMM' offset. Per the XMLTV
+        # DTD a time WITHOUT an offset is UTC, and pvr.iptvsimple reads it that
+        # way, so local digits alone showed every Custom channel's programmes
+        # hours off ("broadcastnow" was a programme from offset-hours-ago, whose
+        # plugin URL then played from frame 0). imports.63: each time carries the
+        # offset in force at ITS OWN instant (clock_helpers.xmltv_time), not the
+        # offset of the moment the guide is written: a programme written before
+        # a change of summer time but airing after it was shown 1 h off.
         pitem = {'channel'     : id,
                  'category'    : [(self.cleanString(genre.replace(LANGUAGE(32105),'Undefined')),LANG) for genre in item['categories']],
                  'title'       : [(self.cleanString(item['title']), LANG)],
                  'desc'        : [(Globals._encodePlot(self.cleanString(item['desc']),item['fitem']), LANG) if encodeDESC else (self.cleanString(item['desc']), LANG)],
-                 'stop'        : (epochTime(float(item['stop']),tz=False).strftime(DTFORMAT) + _tz_sfx),
-                 'start'       : (epochTime(float(item['start']),tz=False).strftime(DTFORMAT) + _tz_sfx),
+                 'stop'        : clock_helpers.xmltv_time(float(item['stop'])),
+                 'start'       : clock_helpers.xmltv_time(float(item['start'])),
                  'icon'        : [{'src': Globals._toEpgIconURL(item['thumb'])}], # v.40: wrap image:// → Kodi /image/ proxy URL so iptvsimple accepts it
                  'length'      : {'units': 'seconds', 'length': str(item['length'])}}
                         
@@ -739,14 +729,17 @@ class XMLTVS(object):
         # element is left in place; the Builder upserts it after a successful build.
         programmes, kept, removed = replay_helpers.split_for_rebuild(self.XMLTVDATA.get('programmes') or [], citem.get('id'), cut)
         self.XMLTVDATA['programmes'] = programmes
-        self.log('[%s] trimBroadcast, cut %s: kept %s aired, removed %s'%(citem.get('id'), epochTime(cut,tz=False).strftime(DTFORMAT), kept, removed), xbmc.LOGINFO)
+        self.log('[%s] trimBroadcast, cut %s: kept %s aired, removed %s'%(citem.get('id'), epochTime(cut).strftime(DTFORMAT), kept, removed), xbmc.LOGINFO)
         return True
 
 
-    def resumeAfter(self, citem: dict, cut):
-        # madteevee (imports fork, imports.61): where a rebuilt channel's new schedule
-        # starts: after the kept programme airing at `cut`, else at `cut`.
-        return replay_helpers.rebuild_resume(self.XMLTVDATA.get('programmes') or [], citem.get('id'), cut)
+    def resumeAfter(self, citem: dict, cut, floor=None):
+        # madteevee (imports fork, imports.61 / imports.63): where a rebuilt channel's new
+        # schedule starts: after the kept programme on air at `cut`; with nothing on air,
+        # at the later of `floor` (default: `cut`) and its last kept stop
+        # (replay_helpers.rebuild_resume). Builder._rebuildStart passes cut = the real now
+        # and floor = the local hour floor.
+        return replay_helpers.rebuild_resume(self.XMLTVDATA.get('programmes') or [], citem.get('id'), cut, floor)
 
 
     def delRecording(self, ritem: dict):

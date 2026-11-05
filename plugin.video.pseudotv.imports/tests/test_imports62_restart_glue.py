@@ -751,7 +751,9 @@ def test_strings():
 
 def test_addon_xml_guide_entry():
     root = ET.parse(os.path.join(ADDON, 'addon.xml')).getroot()
-    assert root.get('version') == '0.8.0+imports.62'
+    # imports.63: any later imports version keeps the guide entry (was pinned to .62)
+    prefix, _, number = root.get('version').rpartition('.')
+    assert prefix == '0.8.0+imports' and number.isdigit() and int(number) >= 62
     main = root.find("./extension[@point='kodi.context.item']/menu[@id='kodi.core.main']")
     top = main.findall('./item')
     assert len(top) == 1

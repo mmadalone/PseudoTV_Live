@@ -545,11 +545,6 @@ class M3U(object):
         return M3U_TEMP.copy()
         
         
-    def getTZShift(self):
-        self.log('getTZShift')
-        return ((time.mktime(time.localtime()) - time.mktime(time.gmtime())) / 60 / 60)
-
-    
     def getStations(self):
         stations = self.sortStations(self.M3UDATA.get('stations',[]))
         self.log('getStations, stations = %s'%(len(stations)))

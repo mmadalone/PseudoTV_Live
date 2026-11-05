@@ -367,8 +367,13 @@ def test_xmltv_to_epoch_offsets():
     assert xmltv_to_epoch('  20261103120000  +0000 ') == base
 
 
-def test_xmltv_to_epoch_without_offset_is_local_time():
-    assert xmltv_to_epoch('20261103120000') == int(time.mktime((2026, 11, 3, 12, 0, 0, 0, 0, -1)))
+def test_xmltv_to_epoch_without_offset_is_utc(tz):
+    """imports.63 (changed meaning, decision 1): the XMLTV DTD reads a time
+    without an offset as UTC, and so does IPTV Simple; before, this read it as
+    local time."""
+    tz('Europe/Madrid')
+    assert xmltv_to_epoch('20261103120000') == calendar.timegm((2026, 11, 3, 12, 0, 0))
+    assert xmltv_to_epoch('20270328023000') == calendar.timegm((2027, 3, 28, 2, 30, 0))   # no such local time in Madrid
 
 
 @pytest.mark.parametrize('bad', [None, '', 5, 'garbage', '2026110312000', '202611031200xx +0000',
@@ -472,9 +477,19 @@ def _old_server_xmltv_to_ts(s):
 
 @pytest.mark.parametrize('s', ['20261103120000 +0000', '20261103120000 +0100', '20261103120000 -0330',
                                '20271031020000 +0200', '20271031020000 +0100', '20270328033000 +0200',
-                               '20261103120000', '20270328023000', '  20261103120000 +0000  ', '19700101000000 +0000'])
+                               '  20261103120000 +0000  ', '19700101000000 +0000'])
 def test_server_grid_time_same_for_valid_input(s):
+    # imports.63: the two offset-less params moved to the test below (no offset = UTC now)
     assert (xmltv_to_epoch(s) or 0) == _old_server_xmltv_to_ts(s)
+
+
+@pytest.mark.parametrize('s', ['20261103120000', '20270328023000'])
+def test_server_grid_time_without_offset_is_utc(s, tz):
+    """imports.63 (changed meaning): a time without an offset is UTC (XMLTV DTD);
+    the old server parser read it as local time, an hour earlier in Madrid."""
+    tz('Europe/Madrid')
+    assert xmltv_to_epoch(s) == calendar.timegm(time.strptime(s, '%Y%m%d%H%M%S'))
+    assert xmltv_to_epoch(s) != _old_server_xmltv_to_ts(s)
 
 
 @pytest.mark.parametrize('s', [None, '', 'garbage', '2026', '20261303120000 +0000', '20261103120000 +01:00'])
@@ -496,7 +511,9 @@ def test_server_parsers_delegate_to_xmltv_to_epoch():
 
 
 def test_replay_helpers_is_pure():
-    """No Kodi or addon imports (same contract as filter_helpers/logo_links)."""
+    """No Kodi or addon imports (same contract as filter_helpers/logo_links),
+    except clock_helpers (imports.63: standard library only itself, see
+    test_imports63_clock.py), which provides the re-exported xmltv_to_epoch."""
     with open(os.path.join(LIB, 'replay_helpers.py')) as f:
         tree = ast.parse(f.read())
     names = set()
@@ -505,4 +522,4 @@ def test_replay_helpers_is_pure():
             names.update(a.name.split('.')[0] for a in node.names)
         elif isinstance(node, ast.ImportFrom):
             names.add((node.module or '').split('.')[0])
-    assert names <= {'calendar', 'datetime', 're', 'time', 'unicodedata', 'bisect', 'operator'}, names
+    assert names <= {'calendar', 'datetime', 're', 'time', 'unicodedata', 'bisect', 'operator', 'clock_helpers'}, names

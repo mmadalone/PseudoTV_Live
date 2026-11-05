@@ -324,7 +324,7 @@ def render_xmltv(xmltvdata):
         data = xmltvdata.get('data') or {}
         writer = _xmltv_lib.Writer(
             encoding            = DEFAULT_ENCODING,
-            date                = data.get('date') or epochTime(float(time.time()), tz=False).strftime(DTFORMAT),
+            date                = data.get('date') or epochTime(float(time.time())).strftime(DTFORMAT),
             source_info_url     = data.get('source-info-url')     or ADDON_ID,
             source_info_name    = data.get('source-info-name')    or ADDON_NAME,
             generator_info_url  = data.get('generator-info-url')  or ADDON_ID,

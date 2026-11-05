@@ -31,6 +31,7 @@ from server         import HTTP, Discovery
 from renderers      import render_m3u, render_xmltv, write_atomic
 from filter_helpers import RENDER_KEYS, _renderStateDrift
 import replay_helpers
+import clock_helpers # madteevee (imports fork, imports.63): the one clock + time conversions
 
 from context_create import _auto
 
@@ -1033,14 +1034,15 @@ class Tasks(object):
         # CRC differed — buildChannels' __hasChanged honors the explicit flag
         # before falling through to its own getFileCRC call.
         if not channels: return []
-        now       = getUTCstamp()
-        nstart    = roundTimeDown(now, offset=60)
-        fallback  = epochTime(nstart, tz=False).strftime(DTFORMAT)
-        threshold = now + ((MAX_GUIDEDAYS * 86400) - 43200)
+        # imports.63: the real clock and the Builder's own build window
+        # (clock_helpers.build_window), so a channel this filter queues is never
+        # declined by Builder.__needsUpdate (each declined build re-reads the whole
+        # guide). Before, both read the slow getUTCstamp() separately.
+        fallback, threshold = clock_helpers.build_window(clock_helpers.now(), MAX_GUIDEDAYS)
         detect    = SETTINGS.getSettingBool('Enable_Changed')
 
         xmltv  = XMLTVS()
-        stops  = dict(xmltv.loadStopTimes(channels, fallback=fallback))
+        stops  = dict(xmltv.loadStopTimes(channels, fallback_epoch=fallback))
 
         # imports.29: load currently-rendered M3U state once per filter pass
         # for the drift check below. M3UDATA shape is

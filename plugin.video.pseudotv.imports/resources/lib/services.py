@@ -25,6 +25,7 @@ from tasks      import Tasks
 from jsonrpc    import JSONRPC
 import playstate_helpers # madteevee (imports fork, imports.60): Rollback_Watched snapshot/restore
 import restart_helpers   # madteevee (imports fork, imports.62): restart from the beginning (pop-up, remote, guide entry)
+import clock_helpers     # madteevee (imports fork, imports.63): the one clock + time conversions
 
 class Player(xbmc.Player):
     # imports.16: pendingItem / playingItem live as instance attrs (set in
@@ -772,7 +773,7 @@ class Player(xbmc.Player):
                     resume = {"position":self.getPlayedTime(),
                               "total":   self.getPlayerTime(),
                               "file" :   self.getPlayerFile(),
-                              "updated":{'instance':PROPERTIES.getFriendlyName(),'time':getUTCstamp()}}
+                              "updated":{'instance':PROPERTIES.getFriendlyName(),'time':clock_helpers.now()}} # imports.63: the real clock (PauseRule 'last viewed', shown by rules.py via epochTime)
                     self.playingItem.setdefault('resume',{}).update(resume)
                     self.log('__chkResumeTime, resume = %s'%(self.playingItem.get('resume')))
 

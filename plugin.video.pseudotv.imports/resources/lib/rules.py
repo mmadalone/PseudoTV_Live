@@ -21,6 +21,7 @@ from globals    import *
 from jsonrpc    import JSONRPC
 from channels   import Channels
 from lang_codes import LANG_CHOICES, normalize_lang
+import clock_helpers # madteevee (imports fork, imports.63): the one clock + time conversions
 #todo pinlock
         
 
@@ -1848,7 +1849,7 @@ class PadScheduling(BaseRule):
                 totDur = 0
                 start  = parameter[-1]['stop']
                 idx    = len(parameter)
-                now    = getUTCstamp()
+                now    = clock_helpers.now() # imports.63: the real clock (getUTCstamp was 1-2 h slow)
                 while not inherited.monitor.abortRequested() and start <= (now + target):
                     if start >= (now + target): break
                     else:
@@ -1919,7 +1920,7 @@ class PauseRule(BaseRule): #POST-BUILD RULES [3000-~]
         return builder.buildCells(citem, duration=self._getTotDuration(citem.get('id'), filelist), entries=1, 
                                   info={"title":'%s (%s)'%(citem.get('name'),LANGUAGE(32145)), 
                                         "episodetitle":viewed,
-                                        "plot":'%s: %s\nSize: %s\nRuntime: ~%s hrs.'%(LANGUAGE(32249),epochTime(time.time(),tz=False).strftime(BACKUP_TIME_FORMAT),len(filelist),round(self._getTotDuration(citem.get('id'), filelist)//60//60)),
+                                        "plot":'%s: %s\nSize: %s\nRuntime: ~%s hrs.'%(LANGUAGE(32249),epochTime(time.time()).strftime(BACKUP_TIME_FORMAT),len(filelist),round(self._getTotDuration(citem.get('id'), filelist)//60//60)),
                                         "art":{"thumb":citem.get('logo',LOGO_COLOR),"fanart":FANART,"logo":citem.get('logo',LOGO),"icon":citem.get('logo',LOGO)}})
 
             

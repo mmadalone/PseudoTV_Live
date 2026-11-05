@@ -136,7 +136,9 @@ def _prewarm_epg_grid(xml_mtime, window_h=4):
         return _KODI_MARKUP_RE.sub('', s).strip()
     def _xmltv_to_ts(s):
         # imports.59: one shared parser (replay_helpers.xmltv_to_epoch, same
-        # rules: +HHMM offset, no offset = local time); 0 when unparseable.
+        # rules: +HHMM offset; imports.63: no offset = UTC, XMLTV DTD); 0 when
+        # unparseable. pseudotv.xml carries an offset on every time ('+0000' or
+        # '+0100' Movistar+, '+0100'/'+0200' own channels).
         return xmltv_to_epoch(s) or 0
     now = int(time.time())
     start_ts = (now // 60) * 60
@@ -2081,15 +2083,13 @@ class MyHandler(BaseHTTPRequestHandler):
                                     __sendChunk(self.path, FileAccess.dumpJSON(grid_cached).encode(encoding=DEFAULT_ENCODING), use_compression)
                                     return
                                 # XMLTV time format: 'YYYYMMDDHHMMSS +0000' or 'YYYYMMDDHHMMSS'.
-                                # Per XMLTV spec section 2.1: timestamps WITHOUT a timezone
-                                # suffix are interpreted as LOCAL time (of the source). Our
-                                # pseudotv.xml inherits this — movistarplus delivers Spanish
-                                # local time (CEST/CET) without a suffix. Parsing as UTC
-                                # would shift the whole grid by 2 hours, causing the EPG
-                                # to disagree with what's actually airing on TV.
+                                # imports.63: per the XMLTV DTD a time WITHOUT an offset is
+                                # UTC (IPTV Simple reads it the same way). pseudotv.xml
+                                # carries an offset on every time ('+0000' or '+0100'
+                                # Movistar+, '+0100'/'+0200' own channels).
                                 def _xmltv_to_ts(s):
                                     # imports.59: shared parser (replay_helpers.xmltv_to_epoch,
-                                    # same rules; no suffix = local time); 0 when unparseable.
+                                    # same rules; no offset = UTC); 0 when unparseable.
                                     return xmltv_to_epoch(s) or 0
                                 # Step 6 Phase 7 polish (madteevee): EPG titles/descs from some
                                 # providers embed Kodi BBcode markup ([COLOR tomato]T8[/COLOR],

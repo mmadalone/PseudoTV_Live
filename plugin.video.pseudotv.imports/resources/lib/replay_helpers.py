@@ -21,9 +21,10 @@
 # own guide export, merged into that import's guide.
 #
 # Import-light pure module (same pattern as filter_helpers.py / logo_links.py):
-# no Kodi imports, no addon imports, no I/O, Python 3.8 syntax. imports.py,
-# xmltvs.py, tasks.py and server.py share one definition and the tests run it
-# without Kodi stubs.
+# no Kodi imports, no addon imports except clock_helpers (imports.63, itself
+# standard library only), no I/O, Python 3.8 syntax. imports.py, xmltvs.py,
+# tasks.py and server.py share one definition and the tests run it without
+# Kodi stubs.
 #
 # Background: Movistar+ (plugin.video.movistarplus) declares link-based
 # catch-up in its playlist (catchup="default" catchup-source="{catchup-id}")
@@ -40,13 +41,15 @@
 # per-channel replay offer, the dashboard messages, the daily export and the
 # new-file trigger off together.
 
-import calendar
-import datetime
 import re
-import time
 import unicodedata
 from bisect import bisect_left, bisect_right
 from operator import itemgetter
+
+# imports.63: the XMLTV time parser lives in clock_helpers (the add-on's one set
+# of time conversions). Re-exported here, the same object, for imports.py,
+# server.py, xmltvs.py and the tests.
+from clock_helpers import xmltv_to_epoch
 
 # Longest replay history kept for a channel whose replay needs per-show links.
 REPLAY_HISTORY_MAX_DAYS = 7
@@ -133,38 +136,6 @@ def exporter_for(import_cfg):
     return m.group(1), spec, source[:source.rfind('/') + 1] + spec['guide']
 
 
-def xmltv_to_epoch(s):
-    """XMLTV time ('YYYYmmddHHMMSS +HHMM') -> epoch seconds (int), or None.
-
-    calendar.timegm minus the offset. No offset = local time (the same rule as
-    the dashboard grid in server.py). None for anything else: not text, not
-    14 digits, an impossible date, or an offset that isn't +HHMM / -HHMM."""
-    if not isinstance(s, str):
-        return None
-    s = s.strip()
-    base = s[:14]
-    if len(base) != 14 or not base.isdigit():
-        return None
-    fields = (int(base[0:4]), int(base[4:6]), int(base[6:8]),
-              int(base[8:10]), int(base[10:12]), int(base[12:14]))
-    try:
-        datetime.datetime(*fields)
-    except ValueError:
-        return None
-    rest = s[14:].strip()
-    if not rest:
-        try:
-            return int(time.mktime(fields + (0, 0, -1)))
-        except (OverflowError, ValueError):
-            return None
-    if len(rest) < 5 or rest[0] not in '+-' or not rest[1:5].isdigit():
-        return None
-    offset = int(rest[1:3]) * 3600 + int(rest[3:5]) * 60
-    if rest[0] == '-':
-        offset = -offset
-    return calendar.timegm(fields + (0, 0, 0)) - offset
-
-
 def _text(value):
     return value if isinstance(value, str) else ''
 
@@ -223,7 +194,8 @@ def link_replay_days(records):
 # a rebuild deleted the whole channel guide, aired programmes included. Times
 # are compared as parsed epochs (xmltv_to_epoch), never as text, because the
 # programmes carry a ' +HHMM' suffix. Used by XMLTVS.trimBroadcast and
-# XMLTVS.resumeAfter.
+# XMLTVS.resumeAfter (imports.63: Builder._rebuildStart cuts at the real moment
+# the new schedule is laid).
 
 def split_for_rebuild(programmes, channel_id, cut):
     """Split the guide for the rebuild of one channel at `cut` (epoch seconds).
@@ -249,12 +221,19 @@ def split_for_rebuild(programmes, channel_id, cut):
     return out, kept, removed
 
 
-def rebuild_resume(programmes, channel_id, cut):
-    """Where the new schedule of a rebuilt channel starts: the latest stop of
-    its programmes that started before `cut` (the one airing at `cut` keeps its
-    full slot), or `cut` itself when that is later. Never earlier than `cut`;
-    programmes that can't be parsed are ignored."""
-    resume = cut
+def rebuild_resume(programmes, channel_id, cut, floor=None):
+    """Where the new schedule of a rebuilt channel starts (epoch seconds). The
+    programme on air at `cut` keeps its full slot: the new schedule starts at
+    its stop, the latest stop of the channel's programmes that started before
+    `cut`. With nothing on air at `cut` it starts at the later of `floor` and
+    that latest stop (`floor` alone when there is none). `floor` defaults to
+    `cut` itself, which is the imports.61 rule. imports.63: the Builder cuts at
+    the real now and passes the local hour floor, so a guide that ran out
+    neither leaves a hole inside the current hour nor overlaps. Programmes that
+    can't be parsed are ignored."""
+    if floor is None:
+        floor = cut
+    last = None
     for programme in programmes or ():
         if not isinstance(programme, dict) or programme.get('channel') != channel_id:
             continue
@@ -262,9 +241,37 @@ def rebuild_resume(programmes, channel_id, cut):
         stop = xmltv_to_epoch(programme.get('stop'))
         if start is None or stop is None or start >= cut:
             continue
-        if stop > resume:
-            resume = stop
-    return resume
+        if last is None or stop > last:
+            last = stop
+    if last is not None and last > cut:
+        return last
+    return floor if last is None else max(floor, last)
+
+
+def guide_bounds(programmes, channel_ids):
+    """{channel id: (first start, last stop)} in epoch seconds for the channels
+    in `channel_ids`, in one pass over the guide (imports.63: XMLTVS.loadStopTimes
+    and hasProgrammes compare times, not text). Non-dict items, non-text channel
+    values and programmes whose start or stop can't be parsed are skipped; a
+    channel without a parseable programme is left out."""
+    wanted = set(cid for cid in (channel_ids or ()) if isinstance(cid, str))
+    bounds = {}
+    for programme in programmes or ():
+        if not isinstance(programme, dict):
+            continue
+        channel = programme.get('channel')
+        if not isinstance(channel, str) or channel not in wanted:
+            continue
+        start = xmltv_to_epoch(programme.get('start'))
+        stop = xmltv_to_epoch(programme.get('stop'))
+        if start is None or stop is None:
+            continue
+        first_last = bounds.get(channel)
+        if first_last is None:
+            bounds[channel] = (start, stop)
+        else:
+            bounds[channel] = (min(first_last[0], start), max(first_last[1], stop))
+    return bounds
 
 
 def _first_text(programme, key):

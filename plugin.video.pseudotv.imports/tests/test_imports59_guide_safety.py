@@ -204,15 +204,19 @@ def test_sort_error_logs_and_returns_list_unchanged():
 # ================================================================ cleanProgrammes (S1.4)
 
 
-def test_clean_programmes_keeps_stopless_programme_without_strptime(monkeypatch):
+def test_clean_programmes_keeps_stopless_programme_without_parsing(monkeypatch):
+    # imports.63: cleanProgrammes parses stops with clock_helpers.xmltv_to_epoch (it
+    # no longer calls strpTime), so the spy sits on that parser.
     calls = []
-    real = xmltvs.strpTime
-    monkeypatch.setattr(xmltvs, 'strpTime', lambda *a, **k: calls.append(a) or real(*a, **k))
+    real = xmltvs.clock_helpers.xmltv_to_epoch
+    monkeypatch.setattr(xmltvs.clock_helpers, 'xmltv_to_epoch', lambda *a, **k: calls.append(a) or real(*a, **k))
     progs = [{'channel': 'TVE@mp', 'start': '20990101000000 +0000', 'stop': None, 'title': [('a', '')]},
              {'channel': 'TVE@mp', 'start': '20990101000000 +0000', 'title': [('b', '')]}]
     out = _x().cleanProgrammes(progs)
     assert out == progs
-    assert calls == [], 'a non-text stop never reaches strpTime'
+    assert calls == [], 'a non-text stop never reaches the parser'
+    texted = [_prog(1)]                                          # control: a text stop does reach it
+    assert _x().cleanProgrammes(texted) == texted and calls == [(texted[0]['stop'],)]
 
 
 # ================================================================ strpTime (S1.5)

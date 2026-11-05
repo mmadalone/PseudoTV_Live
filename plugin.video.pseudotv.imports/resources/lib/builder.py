@@ -21,6 +21,7 @@
 import copy
 
 from globals    import *
+import clock_helpers # madteevee (imports fork, imports.63): the one clock + time conversions
 from channels   import Channels
 from xmltvs     import XMLTVS
 from xsp        import XSP
@@ -173,9 +174,9 @@ class Builder(object):
         madteevee (imports fork, imports.61): REPLACES this channel's station,
         channel element and programmes with the snapshot instead of appending to
         them. A rebuild now keeps the channel's station, channel element and
-        aired programmes in place (__clrStation trims), and a build can fail
-        after adding programmes or upserting the station, so appending would
-        duplicate them. The result is exactly the pre-build state.
+        aired programmes in place (_rebuildStart trims, imports.63), and a build
+        can fail after adding programmes or upserting the station, so appending
+        would duplicate them. The result is exactly the pre-build state.
         """
         chid = citem.get('id')
         snap = self._build_snapshots.pop(chid, None) if chid else None
@@ -207,6 +208,32 @@ class Builder(object):
         (continuing after their long 'paused' cell would leave a guide hole of
         days). Rule ids are text in channels.json and numbers once loaded."""
         return not any(str(rule) == '3000' for rule in ((citem or {}).get('rules') or {}))
+
+
+    def _rebuildStart(self, citem):
+        """madteevee (imports fork, imports.63): trim and resume of a changed channel's
+        rebuild, at the real moment its new schedule is laid: buildChannels calls it
+        right before addScheduling, after buildVideo (about 9 minutes for a big
+        playlist), so no programme that has started by then is rewritten. The
+        snapshot taken in __hasChanged (before this trim) still restores a failed
+        build exactly.
+        Normal channels keep every programme that started before the real now and
+        continue when the one on air ends; with nothing on air, at the later of the
+        local hour floor and the last kept stop. PauseRule (3000) channels cut and
+        start at the local hour floor (see _rebuildContinuesAfterAired).
+        Returns the new schedule's start, an int epoch."""
+        now   = clock_helpers.now()
+        floor = clock_helpers.local_floor(now, 60)
+        if self._rebuildContinuesAfterAired(citem):
+            cut   = now
+            self.xmltv.trimBroadcast(citem, cut)
+            start = self.xmltv.resumeAfter(citem, cut, floor)
+        else: # PauseRule (3000)
+            cut   = floor
+            self.xmltv.trimBroadcast(citem, cut)
+            start = floor
+        self.log('[%s] buildChannels, rebuild keeps the aired guide; new schedule from %s (cut %s)'%(citem.get('id'),epochTime(start).strftime(DTFORMAT),epochTime(cut).strftime(DTFORMAT)), xbmc.LOGINFO)
+        return start
 
 
     def _discardSnapshot(self, citem):
@@ -326,10 +353,12 @@ class Builder(object):
         # (the inner dialog opens immediately), so we don't need an outer
         # "inspection phase" indicator anymore.
         build_progress = None
-        def __needsUpdate(citem, now, fallback, state=True):
-            #max guidedata days to seconds, minus fill buffer (12hrs) in seconds.
-            last_stop = dict(self.xmltv.loadStopTimes([citem], fallback=fallback)).get(citem['id']) #check last stop times 
-            if last_stop > (now + ((MAX_GUIDEDAYS * 86400) - 43200)): state = False
+        def __needsUpdate(citem, threshold, fallback, state=True):
+            # imports.63: threshold = now + guide days - 12 h fill buffer, from
+            # clock_helpers.build_window (the same window as the tasks.py build filter);
+            # fallback = the local hour floor (an epoch).
+            last_stop = dict(self.xmltv.loadStopTimes([citem], fallback_epoch=fallback)).get(citem['id']) #check last stop times
+            if last_stop > threshold: state = False
             self.log('[%s] buildChannels, __needsUpdate = %s, last_stop = %s'%(citem['id'],state, last_stop))
             return state, last_stop
             
@@ -347,9 +376,13 @@ class Builder(object):
                 # Without this, multiple sequential per-channel builds compound
                 # the wipe across the class-level shared M3U/XMLTV state.
                 self._snapshotChannel(citem)
-                if __clrStation(citem, nstart): # imports.61: nstart = the anchor the new schedule starts from
-                    self.log('[%s] buildChannels, __hasChanged cleared channel meta'%(citem['id']))
-                    citem['changed'] = False
+                __clrStation(citem)
+                # imports.63: 'changed' is cleared whatever resetPagination returns
+                # (imports.61's trimBroadcast always reported True, so it always was);
+                # the guide is trimmed later, at the real moment the new schedule is
+                # laid (Builder._rebuildStart), after this snapshot.
+                self.log('[%s] buildChannels, __hasChanged cleared channel meta'%(citem['id']))
+                citem['changed'] = False
                 changes.add(self.channels.addChannel(citem))
                 modified_ids.add(citem['id']) # v.43: track touched IDs for merge-on-write at setChannels
             return state
@@ -412,16 +445,17 @@ class Builder(object):
             self.log('[%s] buildChannels, __addStation = %s'%(citem['id'],state))
             return state
         
-        def __clrStation(citem: dict, cut) -> bool:
-            # madteevee (imports fork, imports.61): a rebuild keeps the channel's
-            # programmes that started before `cut` (XMLTVS.trimBroadcast) instead of
-            # deleting its whole guide (delBroadcast), so already-aired programmes
-            # stay replayable: IPTV Simple replays these catchup="vod" channels only
-            # while pseudotv.xml still holds the entry. The M3U entry and the channel
-            # element stay in place; __addStation upserts both after a successful
-            # build and _restoreChannel replaces them after a failed one.
-            # resetPagination stays: a real edit restarts the playlist.
-            state = any([self.resetPagination(citem),self.xmltv.trimBroadcast(citem, cut)])
+        def __clrStation(citem: dict) -> bool:
+            # madteevee (imports fork, imports.61 / imports.63): a rebuild keeps the
+            # channel's guide, M3U entry and channel element; only the playlist
+            # position is reset here (a real edit restarts the playlist). The guide is
+            # trimmed later, at the real moment the new schedule is laid
+            # (Builder._rebuildStart -> XMLTVS.trimBroadcast keeps every programme that
+            # has started, so aired ones stay replayable: IPTV Simple replays these
+            # catchup="vod" channels only while pseudotv.xml still holds the entry).
+            # __addStation upserts the station after a successful build and
+            # _restoreChannel replaces everything after a failed one.
+            state = self.resetPagination(citem)
             self.log('[%s] buildChannels, __clrStation = %s'%(citem['id'],state))
             return state
             
@@ -509,9 +543,12 @@ class Builder(object):
                     completed    = set()
                     changes      = set()
                     modified_ids = set() # v.43: per-citem IDs that __hasChanged actually mutated; passed to setChannels for merge-on-write
-                    now          = getUTCstamp()
-                    nstart    = roundTimeDown(now,offset=60)#offset time to start bottom of the hour
-                    fallback  = epochTime(nstart,tz=False).strftime(DTFORMAT)
+                    # imports.63: the real clock (getUTCstamp() ran 1 h slow, 2 h in summer,
+                    # so new channels started and the guide was extended that far back) and
+                    # one build window shared with tasks.py's build filter.
+                    now          = clock_helpers.now()
+                    nstart, threshold = clock_helpers.build_window(now, MAX_GUIDEDAYS) # local hour floor; extend threshold
+                    fallback  = nstart # an epoch: loadStopTimes' start for new / empty channels
 
                     self.pDialog = None
                     self.pMSG    = ''
@@ -567,38 +604,32 @@ class Builder(object):
                                     self.log('[%s] buildChannels, metadata-only escalating to full rebuild (no programmes — cleanChannels would drop the channel)' % (citem['id']), xbmc.LOGINFO)
                                     citem['changed'] = True
                                     citem['metadata_changed'] = False
-                            _update, start = __needsUpdate(citem, now, fallback)
+                            _update, start = __needsUpdate(citem, threshold, fallback)
                             _changed = __hasChanged(citem, enableChanged)
-                            # imports.31: when __hasChanged=True, __clrStation
-                            # (inside __hasChanged) just removed this channel's
-                            # programmes from the anchor on (imports.61: the
-                            # ones that started earlier are kept). The `start`
-                            # value captured by __needsUpdate above reflects
-                            # the PRE-clear last_stop, which can be far in the
-                            # future when the prior schedule already extended
-                            # N days out. Using a future `start` as the new
-                            # schedule anchor leaves a gap between `now` and
-                            # the first new programme; the next chkChannels
-                            # cycle then re-triggers __needsUpdate to fill the
-                            # gap (wasted ~9-min rebuild). After a clear, the
-                            # anchor must be `now` (bottom-of-hour aligned to
-                            # match the existing programme-grid convention
-                            # established by `nstart` + xmltvs.loadStopTimes
-                            # fallback semantics). NO change for the
-                            # _update-only path (extend without wipe) — that
-                            # path correctly anchors at last_stop, which
-                            # preserves catchup semantics (catchup_mode='vod'
-                            # intentionally schedules past programmes per
+                            # imports.31: when __hasChanged=True the channel is
+                            # rebuilt: __clrStation (inside __hasChanged) reset
+                            # its playlist, and the new schedule replaces the
+                            # guide from the rebuild cut on (imports.61 keeps
+                            # what started earlier; imports.63 takes the cut
+                            # after the build, in Builder._rebuildStart). The
+                            # `start` value captured by __needsUpdate above is
+                            # the old last_stop, which can be far in the future
+                            # when the prior schedule already extended N days
+                            # out. Using a future `start` as the new schedule
+                            # anchor leaves a gap between `now` and the first
+                            # new programme; the next chkChannels cycle then
+                            # re-triggers __needsUpdate to fill the gap (wasted
+                            # ~9-min rebuild). So the provisional start is the
+                            # bottom of the hour (`nstart`, the loadStopTimes
+                            # fallback). NO change for the _update-only path
+                            # (extend without wipe) — that path correctly
+                            # anchors at last_stop, which preserves catchup
+                            # semantics (catchup_mode='vod' intentionally
+                            # schedules past programmes per
                             # project_imports_catchup memory).
                             if _changed:
                                 start = roundTimeDown(now, offset=60)
-                                # imports.61: continue after the kept programme
-                                # airing at the anchor (same value as nstart), so
-                                # the guide has no gap and no overlap (not for
-                                # PauseRule channels, see _rebuildContinuesAfterAired).
-                                if self._rebuildContinuesAfterAired(citem):
-                                    start = self.xmltv.resumeAfter(citem, start)
-                                self.log('[%s] buildChannels, rebuild keeps the aired guide; new schedule from %s (anchor %s)'%(citem['id'],epochTime(start,tz=False).strftime(DTFORMAT),epochTime(nstart,tz=False).strftime(DTFORMAT)), xbmc.LOGINFO)
+                                # imports.63: provisional (the start > 0 gate and the 'Building' label); Builder._rebuildStart sets the real start right before addScheduling
                             self.log('[%s] buildChannels, preview = %s, rules = %s, _update = %s'%(citem['id'],preview,citem.get('rules',{}),_update))
                             if self.service._interrupt():
                                 self.log("[%s] buildChannels, _interrupt"%(citem['id']))
@@ -632,6 +663,7 @@ class Builder(object):
                                         else:                        fileList = self.buildVideo(citem)
                                         #fileList = {False:'In-Valid Channel', True:'Valid Channel w/o programmes', list:'Valid Channel w/ programmes}
                                         if isinstance(fileList,list):
+                                            if _changed: start = self._rebuildStart(citem) # imports.63: trim + start at the real moment the schedule is laid
                                             fileList = sorted(self.addScheduling(citem, fileList, now, start), key=itemgetter('start'))
                                             if not preview and __hasFileList(fileList):
                                                 updated.add(__addProgrammes(citem, fileList))#add xmltv lineup entries.

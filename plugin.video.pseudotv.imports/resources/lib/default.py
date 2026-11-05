@@ -21,6 +21,7 @@ from globals    import *
 from logger     import log
 from plugin     import Plugin
 from pool       import threadit
+import clock_helpers # madteevee (imports fork, imports.63): plot times must belong to the requested file
 
 def _run(mode, sysInfo={}):
     # No @debounceit decorator — nightly added one with RPC_Delay (interpreted as seconds,
@@ -50,9 +51,10 @@ if __name__ == '__main__':
             else:
                 # v.33: live tunes from iptvsimple arrive with the main M3U URL
                 # form: vid={catchup-id}&start={utc}&duration={duration}&stop=
-                # {utcend}. iptvsimple substitutes {lutc} → now but leaves the
-                # catchup tokens as literals for live (they only get filled for
-                # actual catchup playback). Pre-rebase nightly aborted with
+                # {utcend}. iptvsimple substitutes {lutc} → now and can leave the
+                # catchup tokens as literals (imports.63: IPTV Simple 21.10.2 fills
+                # {utc}/{utcend}/{duration} on live URLs when it knows the show,
+                # 15/15 tunes on 2026-11-05). Pre-rebase nightly aborted with
                 # setResolvedUrl(False) on this case — broke ALL live PVR tunes
                 # silently (Kodi just dropped the play attempt with no UI).
                 # Plugin.__init__ also explodes on int('{utc}') at plugin.py:33
@@ -69,6 +71,17 @@ if __name__ == '__main__':
                 except: fitem, nitem = Globals._decodePlot(Globals._getInfoLabel('Plot')), Globals._decodePlot(Globals._getInfoLabel('NextPlot'))
                 chid, vid   = (sysInfo.get("chid")  or fitem.get('citem',{}).get('id')), FileAccess._decodeString(sysInfo.get("vid",""))
                 name, title = (Globals._unquoteString(sysInfo.get("name",'')) or Globals._getInfoLabel('ChannelName')), (Globals._unquoteString(sysInfo.get('title','')) or Globals._getInfoLabel('label'))
+                # madteevee (imports fork, imports.63): start/stop decoded from the
+                # FOCUSED ListItem.Plot belong to the programme in that plot. A 'Play
+                # programme' sent by JSON-RPC, a widget or the in-player guide can
+                # arrive while another programme is focused, and the realign below
+                # fixes only file and title, so a join would use another programme's
+                # times. They are kept only when that programme plays the requested
+                # file (clock_helpers.plot_times_match); with an empty vid nothing is
+                # compared or dropped.
+                if isinstance(fitem, dict) and vid and isinstance(vid, str) and not clock_helpers.plot_times_match(fitem, vid):
+                    dropped = [key for key in ('start', 'stop') if fitem.pop(key, None) is not None]
+                    if dropped: log(f"Default: dropped plot {'/'.join(dropped)} of another programme ({fitem.get('originalfile') or fitem.get('file')})", xbmc.LOGINFO)
                 # madteevee (imports fork): align fitem.file / fitem.title with
                 # the freshly-decoded URL params before they go downstream. The
                 # tune URL pvr.iptvsimple invokes carries the AUTHORITATIVE

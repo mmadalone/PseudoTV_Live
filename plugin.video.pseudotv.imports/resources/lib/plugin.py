@@ -21,6 +21,7 @@ from globals             import *
 from jsonrpc             import JSONRPC
 from rules               import RulesList
 from infotagger.listitem import ListItemInfoTag
+import clock_helpers # madteevee (imports fork, imports.63): the real clock + the one join rule
 
 class Plugin(object):
     player  = PLAYER()
@@ -97,11 +98,14 @@ class Plugin(object):
 
     def _getPVRItems(self):
         def __findCurrent(items, byFile=True, found=-1):
+            # imports.63: the by-time match used an undefined `ntime` (NameError); it is
+            # the one join rule on the real clock. Kodi broadcast times are UTC text.
+            now = clock_helpers.now()
             for pos, nextitem in enumerate(items):
                 fitem = Globals._decodePlot(nextitem.get('plot',{}))
                 file  = self.sysInfo.get('fitem',{}).get('file')
                 if byFile and file.lower() == fitem.get('file','').lower(): found = pos
-                elif not byFile and ntime >= strpTime(nextitem.get('starttime')) and ntime < strpTime(nextitem.get('endtime')) and self.sysInfo.get('chid') == fitem.get('citem',{}).get('id',str(random.random())): found = pos
+                elif not byFile and clock_helpers.join_offset(clock_helpers.epg_utc_to_epoch(nextitem.get('starttime')), clock_helpers.epg_utc_to_epoch(nextitem.get('endtime')), now) is not None and self.sysInfo.get('chid') == fitem.get('citem',{}).get('id',str(random.random())): found = pos
                 if found >= 0:
                     self.log('[%s] __buildPlaylist __findCurrent found match!'%(self.sysInfo.get('chid')))
                     items = items[found:]
@@ -151,7 +155,14 @@ class Plugin(object):
             self.log('[%s] _setResume, seek = %s, progresspercentage = %s\npath = %s'%(self.sysInfo.get('chid'), self.sysInfo.get('seek',0), self.sysInfo.get('progresspercentage',100), listitem.getPath()))
             listitem.setProperty('startoffset', str(self.sysInfo['seek'])) #secs
             infoTag = ListItemInfoTag(listitem,'video')
-            infoTag.set_resume_point({'ResumeTime':self.sysInfo['seek'],'TotalTime':(self.sysInfo['duration'] * 60)})
+            # madteevee (imports fork, imports.63): both values in seconds, as
+            # InfoTagVideo.setResumePoint expects (the same unit fix as upstream
+            # 20b4966a). The URL's {duration} is seconds already; 'duration' * 60
+            # repeated that text 60 times on channel tunes, and the 'Play programme'
+            # route (no duration) raised KeyError, so a join there played nothing.
+            try:    duration = int(float(self.sysInfo.get('duration') or 0))
+            except (TypeError, ValueError, OverflowError): duration = 0
+            infoTag.set_resume_point({'ResumeTime':self.sysInfo['seek'],'TotalTime':duration})
         return listitem
 
         
@@ -166,15 +177,16 @@ class Plugin(object):
             try:    now   = int(self.sysInfo.get('now',   -1) or -1)
             except: now   = -1
             # madteevee: fitem.start/stop fallback for Custom-channel live tunes.
-            # pvr.iptvsimple LEAVES the catchup tokens {utc}/{utcend}/{duration}
-            # un-substituted on live URLs (they only fill for catchup playback),
-            # and default.py:61-66 then zeroes them to '0' to avoid downstream
-            # int('{utc}') crashes. Result: start/stop reach playLive as -1
-            # (zero falsy → 'or -1'), the join-now check below fails, and the
-            # tune falls through to the VOD branch which plays from frame 0.
-            # The decoded fitem carries REAL epoch start/stop set by Builder's
-            # addScheduling, so use those as the authoritative source when the
-            # URL templates were zeroed.
+            # When pvr.iptvsimple leaves the tokens {utc}/{utcend}/{duration}
+            # un-substituted on a live URL, default.py:61-66 zeroes them to '0'
+            # to avoid downstream int('{utc}') crashes, so start/stop reach
+            # playLive as -1 (zero falsy → 'or -1'), the join-now check below
+            # fails, and the tune falls through to the VOD branch which plays
+            # from frame 0. The decoded fitem carries REAL epoch start/stop set by
+            # Builder's addScheduling, so use those when the URL templates were
+            # zeroed. (imports.63: IPTV Simple 21.10.2 fills {utc}/{utcend}/
+            # {duration} on live URLs when it knows the show: 15/15 tunes on
+            # 2026-11-05; {duration} is in seconds.)
             fitem = self.sysInfo.get('fitem') or {}
             if start <= 0:
                 try:    start = int(fitem.get('start') or -1)
@@ -183,18 +195,23 @@ class Plugin(object):
                 try:    stop  = int(fitem.get('stop')  or -1)
                 except: stop  = -1
             if now <= 0:
-                now = int(time.time())
+                now = int(clock_helpers.now())
             # EPG now-cell tune (forward-ported from master fork) — when iptvsimple's PVR EPG
-            # fires a live URL for a programme that is currently on-air (start <= now <= stop),
+            # fires a live URL for a programme that is currently on-air (start <= now < stop),
             # join that programme at the in-programme offset rather than restarting from frame
             # 0. Without this, library-derived channels (which are always isVOD=True because
             # fitem.file is local while vid is the encoded plugin URL) fall into the VOD branch
             # below, get mode flipped to 'vod', seek reset to -1, the "Now playing VOD" toast
             # raised, and lose channel-bug / live-timebar UX. seek is computed from now-start;
             # _setResume honours Seek_Tolerance (≈60s) so an at-the-cusp tune still plays from 0.
-            if self.sysInfo.get('fitem') and start > 0 and stop > 0 and start <= now <= stop:
-                seek = max(0, now - start)
+            seek = clock_helpers.join_offset(start, stop, now) # imports.63: [start, stop), the one join rule
+            if self.sysInfo.get('fitem') and seek is not None:
                 duration_seconds = max(1, stop - start)
+                # imports.63: _setResume's TotalTime is the show length in seconds; when the
+                # URL's {duration} was zeroed (default.py), take it from start/stop instead.
+                try:    has_duration = int(float(self.sysInfo.get('duration') or 0)) > 0
+                except (TypeError, ValueError, OverflowError): has_duration = False
+                if not has_duration: self.sysInfo['duration'] = duration_seconds
                 self.sysInfo['seek']               = seek
                 self.sysInfo['progresspercentage'] = int(seek * 100 / duration_seconds)
                 self.log('[%s] playLive, joining now-cell at seek=%s/%ss (%s%%)'%(self.sysInfo.get('chid'), seek, duration_seconds, self.sysInfo['progresspercentage']))
@@ -255,7 +272,7 @@ class Plugin(object):
                     self.log('[%s] __buildfItem, within seek tolerance setting seek totaltime = %s, resumetime = %s'%(chid, runtime, seektime))
                     listitem.setProperty('startoffset', str(seektime)) #secs
                     infoTag = ListItemInfoTag(listitem, 'video')
-                    infoTag.set_resume_point({'ResumeTime':seektime, 'TotalTime':runtime * 60})
+                    infoTag.set_resume_point({'ResumeTime':seektime, 'TotalTime':runtime}) # imports.63: seconds, like _setResume (resume.total is getPlayerTime seconds)
                     
                 sysInfo.update({'fitem':item,'resume':{"idx":lizLST.index(item)}})
                 listitem.setProperty('sysInfo',FileAccess._encodeString(sysInfo))
@@ -323,18 +340,20 @@ class Plugin(object):
         # detect the stream is starting mid-event. Compute seek from
         # fitem.start vs current time and stash on sysInfo so _setResume
         # (called for idx==0 in __buildfItem above) applies it. Mirrors the
-        # equivalent block in playLive at lines 176-185.
-        try:    fi_start = int((self.sysInfo.get('fitem') or {}).get('start') or 0)
-        except: fi_start = 0
-        try:    fi_stop  = int((self.sysInfo.get('fitem') or {}).get('stop')  or 0)
-        except: fi_stop  = 0
-        # getUTCstamp() comes via `from globals import *` (defined globals.py:128).
-        # Used here instead of an explicit `time.time()` to match the addon's
-        # existing UTC-stamp convention (fitem.start/stop are also UTC-epoch).
-        now_ts = int(getUTCstamp())
-        if fi_start > 0 and fi_stop > 0 and fi_start <= now_ts <= fi_stop:
-            seek = max(0, now_ts - fi_start)
+        # equivalent block in playLive.
+        # imports.63: fitem.start/stop are real epochs (Builder.addScheduling), so the
+        # check runs on the real clock with the one join rule, [start, stop). It used
+        # getUTCstamp() (1 h slow, 2 h in summer): shows less than an hour in played
+        # from 0:00, older ones joined an hour short. default.py drops plot times that
+        # belong to another file; routes that pass no times (JSON-RPC Player.Open
+        # {broadcastid}, the in-player guide, widgets) play from 0:00, no lookup.
+        fitem  = self.sysInfo.get('fitem') or {}
+        now_ts = int(clock_helpers.now())
+        seek   = clock_helpers.join_offset(fitem.get('start'), fitem.get('stop'), now_ts)
+        if seek is not None:
+            fi_start, fi_stop = int(fitem['start']), int(fitem['stop'])
             duration_seconds = max(1, fi_stop - fi_start)
+            self.sysInfo['duration']           = duration_seconds # _setResume's TotalTime (this route has no URL duration)
             self.sysInfo['seek']               = seek
             self.sysInfo['progresspercentage'] = int(seek * 100 / duration_seconds)
             self.log('[%s] playPlaylist, joining current EPG event at seek=%s/%ss (%s%%)'%(self.sysInfo.get('chid'), seek, duration_seconds, self.sysInfo['progresspercentage']))

@@ -20,6 +20,7 @@
 from variables   import *
 from kodi        import *
 from pool        import debounceit, killit, timeit, poolit, executeit, timerit, threadit, ExecutorPool
+import clock_helpers # madteevee (imports fork, imports.63): the one clock + time conversions
 
 DIALOG     = Dialog()
 PROPERTIES = DIALOG.properties
@@ -109,43 +110,34 @@ def hasFile(file):
     return state    
 
 def diffRuntime(dur, roundto=15):
-    def ceil_dt(dt, delta):
-        return dt + (datetime.datetime.min - dt) % delta
-    now = datetime.datetime.fromtimestamp(dur)
-    return (ceil_dt(now, datetime.timedelta(minutes=roundto)) - now).total_seconds()
+    # madteevee (imports fork, imports.63): seconds from a duration up to the next
+    # whole `roundto` minutes, by plain arithmetic. The old body went through the
+    # local wall clock of 1970 (fromtimestamp(dur)), right only where that year's
+    # UTC offset was a whole multiple of `roundto` (the same result in Madrid).
+    return float((-dur) % (roundto * 60))
 
 def roundTimeDown(dt, offset=30): # round the given time down to the nearest
-    n = datetime.datetime.fromtimestamp(dt)
-    delta = datetime.timedelta(minutes=offset)
-    if n.minute > (offset-1): n = n.replace(minute=offset, second=0, microsecond=0)
-    else: n = n.replace(minute=0, second=0, microsecond=0)
-    return time.mktime(n.timetuple())
-    
-def roundTimeUp(dt=None, roundTo=60):
-   if dt == None : dt = datetime.datetime.now()
-   seconds = (dt.replace(tzinfo=None) - dt.min).seconds
-   rounding = (seconds+roundTo/2) // roundTo * roundTo
-   return dt + datetime.timedelta(0,rounding-seconds,-dt.microsecond)
-   
+    # madteevee (imports fork, imports.63): the local :00 (offset=60) or :00/:30
+    # (offset=30) floor of epoch `dt` as an int, clock_helpers.local_floor: it uses
+    # the UTC offset of `dt` itself instead of mktime() of a naive local time, which
+    # could pick either instant in the repeated hour after the change to winter
+    # time. Offsets that don't divide 60 raise ValueError (every caller passes 60).
+    return clock_helpers.local_floor(dt, offset)
+
 def strpTime(datestring, format=DTJSONFORMAT): #convert pvr infolabel datetime string to datetime obj, thread safe!
     try:              return datetime.datetime.strptime(datestring, format)
     # imports.59: 'ime' typo fixed -- the fallback for Kodi's embedded-Python
     # strptime bug raised NameError instead of returning the datetime.
     except TypeError: return datetime.datetime.fromtimestamp(time.mktime(time.strptime(datestring, format)))
     except Exception:           return ''
-   
-def epochTime(timestamp, tz=True): #convert pvr json datetime string to datetime obj
-    if tz: timestamp -= getTimeoffset()
+
+def epochTime(timestamp): #epoch -> local datetime
+    # madteevee (imports fork, imports.63): the tz switch is gone. tz=True subtracted
+    # the UTC offset once more (the Up next time showed 1 h early, 2 h in summer);
+    # every tz=False caller now passes just the epoch. getTimeoffset, getUTCstamp
+    # (the real epoch minus the UTC offset: 1 h slow in winter, 2 h in summer),
+    # getGMTstamp and roundTimeUp are gone too: the one clock is clock_helpers.now().
     return datetime.datetime.fromtimestamp(timestamp)
-
-def getTimeoffset():
-    return (int((datetime.datetime.now() - datetime.datetime.utcnow()).days * 86400 + round((datetime.datetime.now() - datetime.datetime.utcnow()).seconds, -1)))
-    
-def getUTCstamp():
-    return time.time() - getTimeoffset()
-
-def getGMTstamp():
-    return time.time()
 
 def isStack(path): #is path a stack
     return path.startswith('stack://')

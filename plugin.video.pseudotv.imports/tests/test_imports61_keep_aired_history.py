@@ -12,10 +12,11 @@ be replayed.
 Now the rebuild keeps every programme that started before the rebuild point
 (including the one on air at that point) unchanged, and the new schedule starts
 right after that programme: no hole, no overlap. A failed rebuild still
-restores exactly the pre-build state.
+restores exactly the pre-build state. imports.63: the rebuild point is the real
+moment the new schedule is laid (Builder._rebuildStart, right before
+addScheduling), no longer the slow clock's hour before the build.
 """
 import ast
-import calendar
 import copy
 import io
 import os
@@ -26,6 +27,7 @@ import types
 import pytest
 import xbmc
 
+import clock_helpers
 import renderers
 import replay_helpers as rh
 import xmltv
@@ -49,17 +51,7 @@ def E(text):
     return rh.xmltv_to_epoch(text)
 
 
-@pytest.fixture
-def utc():
-    """Pin the process time zone (xmltv_to_epoch reads suffix-less times as local)."""
-    old = os.environ.get('TZ')
-    os.environ['TZ'] = 'UTC'
-    time.tzset()
-    yield
-    if old is None: os.environ.pop('TZ', None)
-    else:           os.environ['TZ'] = old
-    time.tzset()
-
+# imports.63: the time-zone pinning fixtures (tz, clock_zone) are shared, in conftest.py.
 
 # --- split_for_rebuild -------------------------------------------------------------------
 
@@ -108,9 +100,12 @@ def test_times_are_compared_as_times_not_as_text():
     assert out == [early] and (kept, removed) == (1, 1)
 
 
-def test_legacy_times_without_suffix_are_local(utc):
-    old = P(X, '20261104165000', '20261104173000')           # local = UTC here: 16:50 < 17:00
-    new = P(X, '20261104171000', '20261104175000')
+def test_times_without_offset_are_utc(tz):
+    """imports.63: a time without an offset is UTC (XMLTV DTD). In Madrid the old
+    local reading put both programmes before the cut (16:50 and 17:10 CET)."""
+    tz('Europe/Madrid')
+    old = P(X, '20261104165000', '20261104173000')           # 16:50 UTC < 17:00 UTC: kept
+    new = P(X, '20261104171000', '20261104175000')           # 17:10 UTC: after the cut, dropped
     out, _, _ = rh.split_for_rebuild([old, new], X, CUT)
     assert out == [old]
 
@@ -170,7 +165,7 @@ def test_trim_broadcast_uses_the_helper_and_leaves_channels_alone():
 
 def test_trim_broadcast_reports_success_without_programmes():
     x = _xmltvs([])
-    assert x.trimBroadcast({'id': X}, CUT) is True              # builder.py clears 'changed' on True
+    assert x.trimBroadcast({'id': X}, CUT) is True              # imports.63: 'changed' no longer depends on it
     assert x.XMLTVDATA['programmes'] == []
     assert x.resumeAfter({'id': X}, CUT) == CUT
 
@@ -266,25 +261,9 @@ def test_restore_of_a_channel_that_had_no_station_or_channel_element():
 
 # --- end to end: real addProgram + addScheduling + render/read ------------------------------------
 
-@pytest.fixture(params=[('UTC', (2026, 11, 4)), ('Europe/Madrid', (2026, 11, 4)), ('Europe/Madrid', (2026, 7, 1))],
-                ids=['utc', 'madrid-winter', 'madrid-summer'])
-def zone(request, monkeypatch):
-    """Pin the process time zone and the offset the writer stamps: addProgram adds the
-    CURRENT UTC offset (xmltvs._xmltvTzSuffix -> getTimeoffset), so without the pin the
-    winter-dated data would get a summer suffix whenever the suite runs in summer."""
-    import datetime
-    import xmltvs
-    name, day = request.param
-    old = os.environ.get('TZ')
-    os.environ['TZ'] = name
-    time.tzset()
-    base = calendar.timegm(day + (12, 0, 0))
-    offset = int(datetime.datetime.fromtimestamp(base).astimezone().utcoffset().total_seconds())
-    monkeypatch.setattr(xmltvs, 'getTimeoffset', lambda: offset)
-    yield base
-    if old is None: os.environ.pop('TZ', None)
-    else:           os.environ['TZ'] = old
-    time.tzset()
+def _offset_text(epoch):
+    off = time.localtime(epoch).tm_gmtoff
+    return '%s%02d%02d' % ('+' if off >= 0 else '-', abs(off) // 3600, (abs(off) % 3600) // 60)
 
 
 def _item(start, stop, label, cid):
@@ -292,29 +271,39 @@ def _item(start, stop, label, cid):
             'thumb': '', 'length': stop - start, 'catchup-id': cid}
 
 
-def test_rebuild_keeps_aired_programmes_with_no_gap_and_no_overlap(zone):
+def test_rebuild_keeps_aired_programmes_with_no_gap_and_no_overlap(clock_zone, monkeypatch):
+    """imports.63: the rebuild cuts at the real moment the new schedule is laid
+    (Builder._rebuildStart, mid-hour): every programme that started before it stays
+    byte-identical, including one that started after the top of the hour, and the
+    new line-up starts when the one on air ends. Each time carries the offset of its
+    own instant, so the writer needs no pin in any zone (the change days mix
+    offsets)."""
     x = _xmltvs([])
-    base = zone
+    now = clock_zone
+    floor = clock_helpers.local_floor(now)
+    base = floor - 3 * 3600
     t = base
-    for i, d in enumerate([2400, 2700, 3000, 2580, 2760, 3120, 2460, 2880, 2640, 2520]):
+    # programme 4 ends and programme 5 starts 10 min after the hour; 5 is on air at `now`
+    for i, d in enumerate([2400, 2700, 3000, 2580, 720, 3400, 2460, 2880, 2640, 2520]):
         x.addProgram(X, _item(t, t + d, 'old %d' % i, 'plugin://plugin.video.pseudotv.imports/?mode=vod&vid=old%d' % i), encodeDESC=False)
         t += d
     for h in range(10):
         x.addProgram(Y, _item(base + h * 3600, base + (h + 1) * 3600, 'tve %d' % h, 'tve%d' % h), encodeDESC=False)
-    cut = base + 3 * 3600                                       # the builder's anchor (a round hour)
     before_x = copy.deepcopy([p for p in x.XMLTVDATA['programmes'] if p['channel'] == X])
     before_y = copy.deepcopy([p for p in x.XMLTVDATA['programmes'] if p['channel'] == Y])
-    kept = [p for p in before_x if E(p['start']) < cut]
+    kept = [p for p in before_x if E(p['start']) < now]
     spanning = kept[-1]
-    assert E(spanning['start']) < cut < E(spanning['stop'])     # the data has a show on air at the cut
+    assert floor < E(spanning['start']) < now < E(spanning['stop'])   # on air at now, started after the hour
 
-    x.trimBroadcast({'id': X}, cut)
-    start = x.resumeAfter({'id': X}, cut)
-    assert start == E(spanning['stop'])
+    monkeypatch.setattr(clock_helpers, 'now', lambda: now + 0.4)        # the moment the schedule is laid
+    builder = types.SimpleNamespace(xmltv=x, log=lambda *a, **k: None,
+                                    _rebuildContinuesAfterAired=Builder._rebuildContinuesAfterAired)
+    start = Builder._rebuildStart(builder, {'id': X, 'rules': {'51': {}}})
+    assert start == E(spanning['stop']) and isinstance(start, int)
     fake = types.SimpleNamespace(runActions=lambda action, citem, parameter=None, inherited=None: parameter,
                                  log=lambda *a, **k: None)
     new = [{'label': 'new %d' % i, 'duration': d} for i, d in enumerate([2700, 2400, 3000])]
-    for it in Builder.addScheduling(fake, {'id': X}, new, cut, start):
+    for it in Builder.addScheduling(fake, {'id': X}, new, now, start):
         x.addProgram(X, _item(it['start'], it['stop'], it['label'], 'plugin://plugin.video.pseudotv.imports/?mode=vod&vid=%s' % it['label']), encodeDESC=False)
 
     after_x = [p for p in x.XMLTVDATA['programmes'] if p['channel'] == X]
@@ -323,8 +312,11 @@ def test_rebuild_keeps_aired_programmes_with_no_gap_and_no_overlap(zone):
     ordered = sorted(after_x, key=lambda p: E(p['start']))
     for prev, nxt in zip(ordered, ordered[1:]):
         assert E(nxt['start']) == E(prev['stop'])               # no hole, no overlap
-    assert E(after_x[len(kept)]['start']) >= cut
+    assert E(after_x[len(kept)]['start']) > now                 # nothing that had started is rewritten
     assert [p for p in x.XMLTVDATA['programmes'] if p['channel'] == Y] == before_y
+    for p in after_x:                                           # each time: its own instant's offset
+        for key in ('start', 'stop'):
+            assert p[key] == clock_helpers.xmltv_time(E(p[key])) and p[key].endswith(' ' + _offset_text(E(p[key])))
 
     x.XMLTVDATA['data'] = {'date': '20261104120000'}
     rendered = renderers.render_xmltv(x.XMLTVDATA)
@@ -345,21 +337,29 @@ def _code(text):
 
 
 def test_rebuild_trims_instead_of_deleting_the_channel():
+    """imports.63: __clrStation only resets the playlist position; the trim (never a
+    delete) happens in Builder._rebuildStart, right before addScheduling."""
     code = _code(_builder_src())
-    clr = re.search(r'def __clrStation\(citem: dict, cut\) -> bool:\n(.*?)\n\s+return state', code, re.S)
-    assert clr, '__clrStation(citem, cut) not found'
+    clr = re.search(r'def __clrStation\(citem: dict\) -> bool:\n(.*?)\n\s+return state', code, re.S)
+    assert clr, '__clrStation(citem) not found'
     body = clr.group(1)
-    assert 'self.xmltv.trimBroadcast(citem, cut)' in body and 'self.resetPagination(citem)' in body
-    assert 'delBroadcast' not in body and 'delStation' not in body
-    assert 'if __clrStation(citem, nstart):' in code
-    assert 'nstart    = roundTimeDown(now,offset=60)' in code
+    assert 'self.resetPagination(citem)' in body
+    assert 'trimBroadcast' not in body and 'delBroadcast' not in body and 'delStation' not in body
+    start = code[code.index('def _rebuildStart(self, citem):'):code.index('def _discardSnapshot(')]
+    assert start.count('self.xmltv.trimBroadcast(citem, cut)') == 2       # normal and PauseRule branch
+    assert 'start = self.xmltv.resumeAfter(citem, cut, floor)' in start
+    assert 'delBroadcast' not in start and 'delStation' not in start
+    assert 'nstart, threshold = clock_helpers.build_window(now, MAX_GUIDEDAYS)' in code
+    assert 'roundTimeDown(now,offset=60)' not in code
 
 
 def test_new_schedule_continues_after_the_show_on_air():
+    """The new schedule's start is taken after the build, right before it is laid."""
     code = _code(_builder_src())
-    assert re.search(r'if _changed:\n\s+start = roundTimeDown\(now, offset=60\)\n\s+'
-                     r'if self\._rebuildContinuesAfterAired\(citem\):\n\s+start = self\.xmltv\.resumeAfter\(citem, start\)\n', code)
-    assert code.count('start = roundTimeDown(now, offset=60)') == 1
+    loop = code[code.index('_update, start = __needsUpdate(citem,'):]
+    assert loop.index('fileList = self.buildVideo(citem)') < loop.index('if _changed: start = self._rebuildStart(citem)') \
+        < loop.index('self.addScheduling(citem, fileList, now, start)')
+    assert code.count('start = roundTimeDown(now, offset=60)') == 1      # the provisional start (imports.31)
 
 
 @pytest.mark.parametrize('citem, continues', [
@@ -375,10 +375,12 @@ def test_pause_rule_channels_keep_the_anchor(citem, continues):
 
 def test_snapshot_is_taken_before_the_trim():
     """A failed rebuild can restore exactly the pre-build state only if the snapshot
-    precedes the trim."""
+    precedes the trim (imports.63: the trim runs in _rebuildStart, after the build)."""
     code = _code(_builder_src())
     body = code[code.index('def __hasChanged('):code.index('def __hasProgrammes(')]
-    assert 0 < body.index('self._snapshotChannel(citem)') < body.index('if __clrStation(citem, nstart):')
+    assert 0 < body.index('self._snapshotChannel(citem)') < body.index('__clrStation(citem)') < body.index("citem['changed'] = False")
+    loop = code[code.index('_update, start = __needsUpdate(citem,'):]
+    assert loop.index('_changed = __hasChanged(citem,') < loop.index('self._rebuildStart(citem)')
 
 
 def test_a_failed_changed_rebuild_still_counts_as_failed():
@@ -399,12 +401,21 @@ def test_changed_files_pass_the_ast_python38_check(name):
     ast.parse(open(os.path.join(LIB, name), encoding='utf-8').read(), feature_version=(3, 8))
 
 
-def test_replay_helpers_stays_import_light():
-    """Standard library only: no Kodi modules, no add-on modules."""
-    import sys
-    tree = ast.parse(open(os.path.join(LIB, 'replay_helpers.py'), encoding='utf-8').read())
+def _imported(name):
+    tree = ast.parse(open(os.path.join(LIB, name), encoding='utf-8').read())
     imported = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import): imported.update(a.name.split('.')[0] for a in node.names)
         elif isinstance(node, ast.ImportFrom): imported.add((node.module or '').split('.')[0])
+    return imported
+
+
+def test_replay_helpers_stays_import_light():
+    """Standard library only: no Kodi modules, no add-on modules except
+    clock_helpers (imports.63), which is itself standard library only."""
+    import sys
+    imported = _imported('replay_helpers.py')
+    imported.discard('clock_helpers')
     assert imported and imported <= set(sys.stdlib_module_names), imported - set(sys.stdlib_module_names)
+    clock = _imported('clock_helpers.py')
+    assert clock and clock <= set(sys.stdlib_module_names), clock - set(sys.stdlib_module_names)

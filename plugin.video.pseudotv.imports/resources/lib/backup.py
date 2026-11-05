@@ -33,7 +33,7 @@ class Backup(object):
         
 
     def getFileDate(self, file: str) -> str:
-        try:    return epochTime(pathlib.Path(FileAccess.translatePath(file)).stat().st_mtime,tz=False).strftime(BACKUP_TIME_FORMAT)
+        try:    return epochTime(pathlib.Path(FileAccess.translatePath(file)).stat().st_mtime).strftime(BACKUP_TIME_FORMAT)
         except Exception: return LANGUAGE(32105) #Unknown
         
         
