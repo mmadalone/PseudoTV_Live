@@ -83,7 +83,7 @@
         <disclaimer lang="en_GB">BETA PROJECT; SUBJECT TO BUGS</disclaimer>
         <news>v0.8.0+imports.62
 - New: restart a show that is already running from its beginning, on your own channels and on LiveTV channels that can replay it (Movistar+): a RESTART button after you tune in, "Restart from beginning" in the TV guide menu, and a remote button you set up (NotifyAll(pseudotv,restart)).
-- Changed: "Restart Percentage" starts at 5% (was 95%); 0% turns the button off.
+- Changed: "Restart Percentage" starts at 5% on new installs (was 95%); existing installs keep their value: set it in Settings, Global, Overlay.
 - Fixed: the RESTART button never appeared, and the channel rule "Restart Button" switched it off after the first stop.
 v0.8.0+imports.61
 - Fixed: shows that already aired on your own channels can be replayed from the TV guide for up to 3 days; a rebuild keeps them, except the hour or two just before it.
