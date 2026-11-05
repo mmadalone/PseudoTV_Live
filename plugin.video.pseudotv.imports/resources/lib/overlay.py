@@ -21,6 +21,7 @@
 # -*- coding: utf-8 -*-
 from globals   import *
 from resources import Resources
+import restart_helpers # madteevee (imports fork, imports.62): Restart pop-up close rule
 
 WH, WIN = BUILTIN.getResolution()
 
@@ -89,75 +90,71 @@ class Background(xbmcgui.WindowXMLDialog):
             self.close()
 
 class Replay(xbmcgui.WindowXMLDialog):
-    closing = False
-    
+    # madteevee (imports fork, imports.62): a passive view. Player.toggleReplay decides
+    # when to offer it (restart_helpers), opens it with doModal() and, once it has
+    # closed, reads self.restart; the restart itself is Player.requestRestart, the one
+    # action shared with the remote button and the guide entry.
+    # Before: the constructor opened it, onInit used a never-set self.service (so it
+    # closed the moment it opened), only Custom playback kept it open, and OK stopped
+    # playback to replay the programme's catch-up link.
     def __init__(self, *args, **kwargs):
         xbmcgui.WindowXMLDialog.__init__(self, *args, **kwargs)
-        self.player  = kwargs.get('player', None)
-        self.monitor = self.player.service.monitor
-        self.citem   = self.player.playingItem.get('citem',{})
-        self.fitem   = self.player.playingItem.get('fitem',{})
-        
-        if bool(self.player.replayPercentage) and self.fitem:
-            progress = self.player.getPlayerProgress()
-            if (progress >= self.player.replayPercentage and progress < self.player.maxProgress):
-                self.log("__init__, replayPercentage = %s, progress = %s"%(self.player.replayPercentage, progress))
-                self.doModal()
-                
-                
+        self.player  = kwargs['player']
+        self.service = self.player.service
+        self.monitor = self.service.monitor
+        self.epoch   = kwargs.get('epoch')   # Player._play_epoch it was offered for
+        self.end     = kwargs.get('end')     # LiveTV: the show's end (epoch s), else None
+        self.restart = False
+        self.closing = False
+
+
     def log(self, msg, level=xbmc.LOGDEBUG):
         return log('%s: %s'%(self.__class__.__name__,msg),level)
-    
-    
-    def _isVisible(self, control):
-        try:              return control.isVisible()
-        except Exception: return (BUILTIN.getInfoBool('Playing','Player') and not bool(BUILTIN.getInfoBool('IsVisible(fullscreeninfo)','Window')) | BUILTIN.getInfoBool('IsVisible(fullscreenvideo)','Window'))
-    
-    
+
+
     def onInit(self):
         self.log("onInit")
         try:
-            prog  = 0
-            wait  = OSD_TIMER*2
-            tot   = wait
+            prog    = 0
+            tot     = float(OSD_TIMER*2)
+            started = time.time()
             control = self.getControl(40000)
             control.setVisibleCondition('[Player.Playing + !Window.IsVisible(fullscreeninfo) + Window.IsVisible(fullscreenvideo)]')
             xpos = control.getX()
-            
-            while not self.monitor.abortRequested():
-                if (self.service._shutdown(CPU_CYCLE) or self._isVisible(control) or self.closing): break
-                    
-            while not self.monitor.abortRequested():
-                if (self.service._shutdown(CPU_CYCLE) or wait < 0 or self.closing or not self.player.isPlayingPseudoTV()): break
-                else:
-                    prog = int((abs(wait-tot)*100)//tot)
-                    if prog > 0: control.setAnimations([('Conditional', 'effect=zoom start=%s,100 end=%s,100 time=1000 center=%s,100 condition=True'%((prog-20),(prog),xpos))])
-                    wait -= CPU_CYCLE
-            
+            # One bounded countdown. It also ends when playback changes (zap, programme
+            # end, stop) or the LiveTV show ends. _shutdown waits through
+            # Monitor.waitForAbort, which lets Kodi run onAction meanwhile.
+            while not self.service._shutdown(restart_helpers.POPUP_POLL) and not self.closing:
+                now = time.time()
+                if now - started >= tot or restart_helpers.popup_done(self.epoch, self.player._play_epoch, now, self.end): break
+                step = int(((now - started)*100)//tot)
+                if step > 0 and step != prog:
+                    prog = step
+                    control.setAnimations([('Conditional', 'effect=zoom start=%s,100 end=%s,100 time=1000 center=%s,100 condition=True'%((prog-20),(prog),xpos))])
             control.setAnimations([('Conditional', 'effect=fade start=%s end=0 time=240 delay=0.240 condition=True'%(prog))])
             control.setVisible(False)
-            self.setFocusId(40001)
         except Exception as e: self.log("onInit, failed! %s"%(e), xbmc.LOGERROR)
-        self.log("onInit, closing")
+        self.log("onInit, closing, restart = %s"%(self.restart))
         self.close()
 
 
     def onAction(self, act):
+        # Any key closes the pop-up; OK on the button asks for the restart. Keys that
+        # mean something to the player (restart_helpers.POPUP_PASS_ON) are passed on after
+        # the 240 ms close animation (Kodi drops actions while a modal dialog animates
+        # closed). Back only closes it (Python windows consume Back). The old
+        # AlarmClock(...,.5,...) pass-on fired at once: AlarmClock reads '.5' as 0 minutes.
         actionId = act.getId()
         self.log('onAction: actionId = %s'%(actionId))
         self.closing = True
-        if   actionId == ACTION_MOVE_UP:       BUILTIN.executebuiltin('AlarmClock(up,Action(up),.5,true,false)')
-        elif actionId == ACTION_MOVE_DOWN:     BUILTIN.executebuiltin('AlarmClock(down,Action(down),.5,true,false)')
-        elif actionId in ACTION_PREVIOUS_MENU: BUILTIN.executebuiltin('AlarmClock(back,Action(back),.5,true,false)')
-        elif actionId in ACTION_SELECT_ITEM and self.getFocusId(40001): 
-            if   self.player.playingItem.get('isPlaylist',False): self.player.seekTime(0)
-            elif self.fitem: 
-                with BUILTIN.busy_dialog():
-                    liz = LISTITEMS.buildItemListItem(self.fitem)
-                    liz.setProperty('sysInfo',FileAccess._encodeString(self.player.playingItem))
-                    timerit(self.player.play)(1.0,*(self.fitem.get('catchup-id'),liz))
-                    self.player.stop()
-            else: DIALOG.notificationDialog(LANGUAGE(30154))
+        if actionId in ACTION_SELECT_ITEM:
+            if self.getFocusId() == 40001: self.restart = True
+        elif actionId in (ACTION_PAGE_UP, ACTION_PAGE_DOWN):
+            # channel +/- reach a dialog as PageUp/PageDown (keymap global section)
+            if BUILTIN.getInfoBool('IsPlayingTv','Pvr'):
+                timerit(BUILTIN.executebuiltin)(0.5,'Action(ChannelUp)' if actionId == ACTION_PAGE_UP else 'Action(ChannelDown)')
+        elif actionId in restart_helpers.POPUP_PASS_ON:
+            timerit(BUILTIN.executebuiltin)(0.5,'Action(%s)'%(restart_helpers.POPUP_PASS_ON[actionId]))
 
 
     def onClose(self):

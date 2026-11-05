@@ -181,6 +181,30 @@ class JSONRPC(object):
         return self.sendJSON(param).get('result') == 'OK'
 
 
+    # madteevee (imports fork, imports.62): narrow reads for the restart action
+    # (restart_helpers). They never ask for 'file' or all fields (Movistar+ stream
+    # links carry tokens, and debug logging writes whole replies), and they skip
+    # the RPC_Delay pause (delay=False) because their caller acts on the answer.
+    def getPlayerItemRef(self):
+        param = {"method":"Player.GetItem","params":{"playerid":1,"properties":[]}}
+        return ((self.sendJSON(param, delay=False) or {}).get('result') or {}).get('item') or {}
+
+
+    def getPVRChannelInfo(self, channelid, properties=('hasarchive',)):
+        param = {"method":"PVR.GetChannelDetails","params":{"channelid":channelid,"properties":list(properties)}}
+        return ((self.sendJSON(param, delay=False) or {}).get('result') or {}).get('channeldetails') or {}
+
+
+    def getPVRChannelsNow(self):
+        param = {"method":"PVR.GetChannels","params":{"channelgroupid":"alltv","properties":["broadcastnow","hasarchive"]}}
+        return ((self.sendJSON(param, delay=False) or {}).get('result') or {}).get('channels') or []
+
+
+    def isBroadcastPlayable(self, broadcastid):
+        param = {"method":"PVR.GetBroadcastIsPlayable","params":{"broadcastid":broadcastid}}
+        return (self.sendJSON(param, delay=False) or {}).get('result') is True
+
+
     def getSetting(self, category, section, cache=False):
         param = {"method":"Settings.GetSettings","params":{"filter":{"category":category,"section":section}}}
         if cache: return self.cacheJSON(param).get('result',{}).get('settings',[])

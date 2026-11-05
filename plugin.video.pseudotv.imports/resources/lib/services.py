@@ -24,6 +24,7 @@ from rules      import RulesList
 from tasks      import Tasks
 from jsonrpc    import JSONRPC
 import playstate_helpers # madteevee (imports fork, imports.60): Rollback_Watched snapshot/restore
+import restart_helpers   # madteevee (imports fork, imports.62): restart from the beginning (pop-up, remote, guide entry)
 
 class Player(xbmc.Player):
     # imports.16: pendingItem / playingItem live as instance attrs (set in
@@ -104,16 +105,31 @@ class Player(xbmc.Player):
                                                             playing_file=self._playstateFile,
                                                             send=self.jsonRPC.sendJSON,
                                                             log=self._playstateLog)
+        # madteevee (imports fork, imports.62): restart from the beginning (restart_helpers).
+        # _play_epoch counts playback changes (started, AV started, ended, stopped, error),
+        # so the pop-up and a restart can tell that what they were for no longer plays.
+        # _retune marks the next tune after a Stop (the same channel tuned again).
+        # _pendingRestart is a guide-entry restart of a Custom channel waiting for its tune.
+        # _restart_lock lets one restart run at a time (@threadit alone doesn't serialize).
+        # _play_stops / _play_errors count stop and error events, so a LiveTV restart can
+        # tell a viewer's Stop from a replay that failed to open.
+        self._play_epoch     = 0
+        self._retune         = False
+        self._pendingRestart = None
+        self._restart_lock   = Lock()
+        self._play_stops     = 0
+        self._play_errors    = 0
 
-        
+
     def log(self, msg, level=xbmc.LOGDEBUG):
         return log('%s: %s'%(self.__class__.__name__,msg),level)
 
 
     def onPlayBackStarted(self):
+        self._play_epoch += 1 # madteevee (imports fork, imports.62)
         self.pendingItem.update({'invoked':-1,'pending':False,'item':{},'last':self.pendingItem.get('item',{})})
         self.log('onPlayBackStarted, pendingItem = %s'%(self.pendingItem))
-        
+
 
     def onAVChange(self):
         self.pendingItem.update({'resume':-1,'seek':-1,'item':{}})
@@ -141,8 +157,9 @@ class Player(xbmc.Player):
         # measure how long this programme actually played. Set AFTER the _tune_ts
         # stale-event early-return above so aborted fast-zap tunes don't pollute it.
         self._play_started = time.time()
+        self._play_epoch  += 1 # madteevee (imports fork, imports.62): after the stale-event filter
         self.log('onAVStarted, pendingItem = %s'%(self.pendingItem))
-        self._onPlay(self.pendingItem.get('item',{}))
+        self._onPlay(self.pendingItem.get('item',{}), self._play_epoch)
         
                 
     def onPlayBackSeek(self, seek_time=None, seek_offset=None): #Kodi bug? `OnPlayBackSeek` no longer called by player during seek, issue limited to pvr?
@@ -151,18 +168,26 @@ class Player(xbmc.Player):
     
     
     def onPlayBackError(self):
+        self._play_epoch += 1 # madteevee (imports fork, imports.62)
+        self._play_errors += 1
         self.pendingItem.update({'invoked':-1,'pending':False,'item':{}})
         self.log('onPlayBackError, pendingItem = %s'%(self.pendingItem))
         self._onError(self.playingItem)
-        
-        
+
+
     def onPlayBackEnded(self):
+        self._play_epoch += 1 # madteevee (imports fork, imports.62)
         self.pendingItem.update({'invoked':-1,'pending':False,'item':{}})
         self.log('onPlayBackEnded, pendingItem = %s'%(self.pendingItem))
         self._onChange(self.playingItem)
-        
-        
+
+
     def onPlayBackStopped(self):
+        # madteevee (imports fork, imports.62): a tune after a Stop may offer the Restart
+        # pop-up even on the same channel (programme changes end, they don't stop).
+        self._play_epoch += 1
+        self._play_stops += 1
+        self._retune      = True
         self.pendingItem.update({'invoked':-1,'pending':False,'item':{}})
         self.log('onPlayBackStopped, pendingItem = %s'%(self.pendingItem))
         self._onStop(self.playingItem)
@@ -381,7 +406,7 @@ class Player(xbmc.Player):
 
 
     @threadit
-    def _onPlay(self, playingItem={}):
+    def _onPlay(self, playingItem={}, epoch=None):
         self.log('_onPlay, playingItem = %s'%(playingItem))
         self.toggleInfo(False)
         self.toggleBackground(False)
@@ -427,6 +452,11 @@ class Player(xbmc.Player):
             if oldInfo.get('isPseudoTV'): self._syncPlaystate(oldInfo)
             self.toggleOverlay(False)
             self.lastSubState = BUILTIN.isSubtitle()
+            # madteevee (imports fork, imports.62): the Restart pop-up for LiveTV channels
+            # that can replay their show on now. LiveTV follows the global setting
+            # (channel rule 54 belongs to Custom channels).
+            self._retune = False
+            self.toggleReplay(bool(SETTINGS.getSettingInt('Replay_Percentage')), epoch)
             # imports.16: non-PTV path now early-returns. Previously the
             # method fell through to a redundant `else: self.playingItem =
             # playingItem` at the bottom — a second write of the same value.
@@ -434,10 +464,14 @@ class Player(xbmc.Player):
             return
         # PseudoTV path — non-PTV returned above
         self.lastSubState = BUILTIN.isSubtitle()
+        retune, self._retune = self._retune, False # madteevee (imports fork, imports.62): see onPlayBackStopped
         oldInfo = self.playingItem
         newChan = oldInfo.get('chid',random.random()) != playingItem.get('chid')
         self.log('_onPlay, [%s], mode = %s, isPlaylist = %s, new channel = %s'%(playingItem.get('citem',{}).get('id'), playingItem.get('mode'), playingItem.get('isPlaylist',False), newChan))
         if newChan: #New channel
+            # madteevee (imports fork, imports.62): start from the global value, so a
+            # previous channel's rule 54 ('Restart Button') never carries over.
+            self.replayPercentage = SETTINGS.getSettingInt('Replay_Percentage')
             self.runActions  = RulesList([playingItem.get('citem',{})]).runActions
             self.playingItem = self._runActions(RULES_ACTION_PLAYER_START, playingItem.get('citem',{}), playingItem, inherited=self)
             # madteevee (imports fork, imports.60): roll back the previous programme and
@@ -447,7 +481,7 @@ class Player(xbmc.Player):
             self._syncPlaystate(oldInfo, playingItem, bool(self.rollbackPlaycount))
             PROPERTIES.setTrakt(self.disableTrakt)
             self.setSubtitles(self.lastSubState) #todo allow rules to set sub preference per channel.
-            self.toggleReplay(bool(self.replayPercentage))
+            self.toggleReplay(bool(self.replayPercentage), epoch)
             # Post-playingItem-update overlay refresh: now that
             # self.playingItem reflects the new channel, ask the overlay
             # to close-and-rebuild. The chid-aware check in toggleOverlay
@@ -470,6 +504,13 @@ class Player(xbmc.Player):
             if getattr(self, 'smartSubsMode', 'legacy') == 'smart':
                 self.setSubtitles(self.lastSubState)
             self.toggleInfo(self.infoOnChange)
+            # madteevee (imports fork, imports.62): the same channel tuned again after a
+            # Stop offers the Restart pop-up like any tune. The add-on's own programme
+            # changes end the previous file (no Stop), so they never offer it.
+            if retune: self.toggleReplay(bool(self.replayPercentage), epoch)
+        # madteevee (imports fork, imports.62): a guide-entry restart of this channel was
+        # waiting for this tune: jump to the start of the programme.
+        self._restartPending(playingItem)
         # madteevee (imports fork, imports.60): quePlaycount removed (the rollback runs in
         # _syncPlaystate above); _setRuntime now only caches the player's runtime.
         self.jsonRPC._setRuntime(playingItem.get('fitem',{}),playingItem.get('fitem',{}).get('runtime'))
@@ -819,15 +860,31 @@ class Player(xbmc.Player):
 
 
     @debounceit(OSD_TIMER)
-    def toggleReplay(self, state: bool=bool(SETTINGS.getSettingInt('Replay_Percentage'))):
-        if state and self.isPlayingPseudoTV() and not self.playingItem.get('isfiller',True) and self.replay is None:
-            self.replay = Replay(REPLAY_XML, ADDON_PATH, "default", "1080i", player=self)
-        elif not state and hasattr(self.replay,'onClose'):
-            self.replay = self.replay.onClose()
-        else: return
-        self.log("toggleReplay, state = %s, replay = %s"%(state,self.replay))
-        
-        
+    def toggleReplay(self, state: bool=False, epoch=None):
+        # madteevee (imports fork, imports.62): offers the Restart pop-up for the playback
+        # `epoch` (Custom and LiveTV channels). restart_helpers decides; the dialog is a
+        # passive view that is always released when it closes (it used to stay set for
+        # the whole Kodi session, so it could be offered once at most).
+        if not state:
+            self._closeReplay()
+            return
+        if self.replay is not None or epoch != self._play_epoch: return
+        target = self._restartOffer()
+        if not target or not self._waitRestartWindow(epoch): return
+        if restart_helpers.popup_done(epoch, self._play_epoch, time.time(), target.get('end')): return
+        dialog = Replay(REPLAY_XML, ADDON_PATH, "default", "1080i", player=self, epoch=epoch, end=target.get('end'))
+        self.replay, chosen = dialog, False
+        self.log("toggleReplay, offering %s"%(target))
+        try:
+            dialog.doModal()
+            chosen = dialog.restart
+        finally:
+            self.replay = None
+            del dialog
+        self.log("toggleReplay, closed, restart = %s"%(chosen))
+        if chosen: self.requestRestart({'source':'popup','target':target})
+
+
     @debounceit(OSD_TIMER)
     def toggleInfo(self, state: bool=SETTINGS.getSettingBool('Enable_OnInfo')):
         if state and self.isPlayingPseudoTV() and not self.playingItem.get('isfiller',True) and not BUILTIN.getInfoBool('IsVisible(fullscreeninfo)','Window'):
@@ -838,6 +895,205 @@ class Player(xbmc.Player):
             BUILTIN.executebuiltin('Dialog.Close(fullscreeninfo)')
         else: return
         self.log('toggleInfo, state = %s'%(state))
+
+
+    # madteevee (imports fork, imports.62): restart from the beginning. Every decision is
+    # in restart_helpers (unit-tested without Kodi); these methods only read Kodi and act.
+    def _closeReplay(self):
+        # Asks an open Restart pop-up to close. One read of self.replay: toggleReplay's
+        # finally (another thread) can clear it at any moment.
+        replay = self.replay
+        if replay is not None: replay.closing = True
+
+
+    def _restartWait(self, done, limit, step=0.25):
+        # True as soon as done() holds; False after `limit` s or at shutdown.
+        waited = 0.0
+        while not done():
+            if waited >= limit or self.service._shutdown(step): return False
+            waited += step
+        return True
+
+
+    def _restartOffer(self):
+        # The pop-up's target, or None. Custom: the playing episode is >= Restart Percentage
+        # and < Seek_Threshold through (not a filler or radio). LiveTV: a live channel whose
+        # show on now is that far in and that Kodi says can be replayed.
+        if self.isPlayingPseudoTV():
+            if restart_helpers.custom_offer(self.playingItem, self.getPlayedTime(), self.getPlayerTime(),
+                                            self.replayPercentage, self.maxProgress):
+                return restart_helpers.custom_target(self.playingItem)
+            return None
+        if not BUILTIN.getInfoBool('IsPlayingTv','Pvr'): return None
+        item = self.jsonRPC.getPlayerItemRef()
+        if item.get('type') != 'channel': return None
+        target = self._restartLiveTarget(item.get('id'), time.time(), offer=True)
+        return target if target and target.get('playable') else None
+
+
+    def _restartLiveTarget(self, channelid, now, offer=False):
+        # hasarchive first, so the channels without replays never get a broadcastnow read
+        # (their artwork links are signed).
+        if not channelid or self.jsonRPC.getPVRChannelInfo(channelid, ('hasarchive',)).get('hasarchive') is not True: return None
+        details = self.jsonRPC.getPVRChannelInfo(channelid, ('broadcastnow','hasarchive'))
+        target  = restart_helpers.livetv_target(channelid, details, now, Globals._decodePlot,
+                                                SETTINGS.getSettingInt('Replay_Percentage'), self.maxProgress, offer)
+        if target: target['playable'] = self.jsonRPC.isBroadcastPlayable(target['broadcastid'])
+        return target
+
+
+    def _restartGuideTarget(self, path, now):
+        # One read of every channel's show on now, the same data matchChannel reads at
+        # every own-channel tune; the guide entry's path is matched against it.
+        target = restart_helpers.guide_target(self.jsonRPC.getPVRChannelsNow(), path, now, Globals._decodePlot)
+        if target and target.get('kind') == 'livetv': target['playable'] = self.jsonRPC.isBroadcastPlayable(target['broadcastid'])
+        return target
+
+
+    def _waitRestartWindow(self, epoch, limit=OSD_TIMER*2):
+        # Waits (bounded) until full-screen video plays with Kodi's channel info, the
+        # channel preview and any other dialog gone, while the same playback goes on.
+        ready = self._restartWait(lambda: epoch != self._play_epoch or xbmc.getCondVisibility(restart_helpers.WINDOW_READY), limit)
+        return ready and epoch == self._play_epoch
+
+
+    def _restartTuneTs(self):
+        # The playing ListItem's own tune stamp (default.py), to tell the programme the
+        # service knows from a zap still in progress. None when unreadable.
+        try:
+            sysInfo = FileAccess._decodeString(self.getPlayingItem().getProperty('sysInfo'))
+            return sysInfo.get('_tune_ts') if isinstance(sysInfo, dict) else None
+        except Exception: return None
+
+
+    def _restartFacts(self):
+        video    = self.isPlayingVideo()
+        pseudotv = self.isPlayingPseudoTV()
+        return {'video':      video,
+                'seekable':   BUILTIN.getInfoBool('SeekEnabled','Player'),
+                'pvr_live':   BUILTIN.getInfoBool('IsPlayingTv','Pvr'),
+                'pvr_epgtag': BUILTIN.getInfoBool('IsPlayingEpgTag','Pvr'),
+                'item':       self.jsonRPC.getPlayerItemRef() if video else {},
+                'pseudotv':   self.playingItem if pseudotv else None,
+                'tune_ts':    self._restartTuneTs() if pseudotv else None}
+
+
+    @threadit
+    def requestRestart(self, request=None):
+        # THE restart action, shared by the pop-up (B), the remote button (C) and the guide
+        # entry (D). One at a time: @threadit alone does not serialize.
+        if not self._restart_lock.acquire(False):
+            self.log('requestRestart, a restart is already running; ignoring %s'%(request), xbmc.LOGINFO)
+            return
+        try: self._runRestart(request or {})
+        except Exception as e: self.log('requestRestart, failed! %s'%(e), xbmc.LOGERROR)
+        finally: self._restart_lock.release()
+
+
+    def _runRestart(self, request):
+        # A zap still settling ('tune in progress') is retried for a few seconds, so a
+        # pressed button never ends without an answer.
+        path  = request.get('path')
+        guide = bool(path)
+        for _ in range(restart_helpers.SETTLE_TRIES):
+            now     = time.time()
+            facts   = self._restartFacts()
+            playing = restart_helpers.classify_playing(facts)
+            target  = self._restartGuideTarget(path, now) if guide else request.get('target')
+            action, reason = restart_helpers.decide(playing, target, now, guide)
+            if action == restart_helpers.LOOKUP_LIVE:
+                target = self._restartLiveTarget(playing.get('channelid'), now)
+                if target: action, reason = restart_helpers.decide(playing, target, now)
+                else:      action, reason = restart_helpers.UNAVAILABLE, 'no replay for the show on now'
+            if action != restart_helpers.IGNORE: break
+            if self.service._shutdown(restart_helpers.SETTLE_WAIT): return
+        else: action, reason = restart_helpers.UNAVAILABLE, '%s (after %s tries)'%(reason, restart_helpers.SETTLE_TRIES)
+        self.log('requestRestart, source = %s, playing = %s, action = %s (%s), target = %s'
+                 %(request.get('source'), playing.get('kind'), action, reason, target), xbmc.LOGINFO)
+        if action != restart_helpers.UNAVAILABLE: self._closeReplay()
+        if   action == restart_helpers.SEEK_START:     self._restartSeek(guide)
+        elif action == restart_helpers.OPEN_BROADCAST: self._restartOpen(target, facts.get('item') or {})
+        elif action == restart_helpers.TUNE_CUSTOM:    self._restartTune(target)
+        elif action == restart_helpers.RETUNE_CUSTOM:  self._restartTune(target, stop_first=True)
+        elif action == restart_helpers.UNAVAILABLE:    self._restartNote()
+
+
+    def _restartSeek(self, guide=False, wait=0.0):
+        # Player.seekTime does nothing when the player can't seek and raises when nothing
+        # plays. The guide entry also brings the video back to full screen, as Kodi's own
+        # 'Play programme' does for the entry that already plays.
+        if wait: self._restartWait(lambda: BUILTIN.getInfoBool('SeekEnabled','Player'), wait)
+        try: self.seekTime(0)
+        except Exception as e:
+            self.log('_restartSeek, failed! %s'%(e), xbmc.LOGWARNING)
+            return False
+        if guide and not BUILTIN.getInfoBool('IsActive(fullscreenvideo)','Window'):
+            BUILTIN.executewindow('ActivateWindow(fullscreenvideo)')
+        return True
+
+
+    def _restartOpen(self, target, before):
+        # Kodi's own 'Play programme' (PlayEpgTag). Kodi doesn't tell Python that a replay
+        # was refused, so the result is read from the player (restart_helpers.watch_outcome),
+        # timed from the moment Player.Open returned.
+        bid = target['broadcastid']
+        if not self.jsonRPC.playerOpen({'item':{'broadcastid':bid}}):
+            self.log('_restartOpen, broadcast %s: Player.Open refused'%(bid), xbmc.LOGINFO)
+            return self._restartNote()
+        t0, idle0, stops, errors = time.time(), BUILTIN.getIdle(), self._play_stops, self._play_errors
+        before_key = (before.get('type'), before.get('id')) if before else None
+        can_retune = before.get('type') == 'channel' and (before.get('id') or 0) > 0
+        while not self.service._shutdown(restart_helpers.WATCH_POLL):
+            playing = self.isPlaying()
+            item    = self.jsonRPC.getPlayerItemRef() if playing else {}
+            outcome = restart_helpers.watch_outcome({'elapsed':    time.time() - t0,
+                                                     'replay':     playing and BUILTIN.getInfoBool('IsPlayingEpgTag','Pvr') and item.get('id') == bid,
+                                                     'unchanged':  playing and before_key is not None and (item.get('type'), item.get('id')) == before_key,
+                                                     'playing':    playing,
+                                                     'busy':       BUILTIN.isBusyDialog(),
+                                                     'idle':       BUILTIN.getIdle(),
+                                                     'idle0':      idle0,
+                                                     'stopped':    self._play_stops != stops,
+                                                     'errored':    self._play_errors != errors,
+                                                     'can_retune': can_retune})
+            if outcome == 'wait': continue
+            self.log('_restartOpen, broadcast %s: %s'%(bid, outcome), xbmc.LOGINFO)
+            if outcome == 'retune': self.jsonRPC.playerOpen({'item':{'channelid':before['id']}})
+            if outcome in ('refused','retune','failed'): self._restartNote()
+            return
+
+
+    def _restartTune(self, target, stop_first=False):
+        # A Custom guide entry whose channel isn't playing that programme: tune the channel
+        # (it joins mid-show), then _restartPending jumps to the start once it plays. When
+        # Kodi plays that very channel, Player.Open {channelid} would only switch to full
+        # screen, so it is stopped first.
+        if stop_first:
+            self.stop()
+            if not self._restartWait(lambda: not self.isPlaying(), restart_helpers.STOP_WAIT): return self._restartNote()
+        self._pendingRestart = {'chid':target['chid'], 'start':target['start'], 'ts':time.time()}
+        if not self.jsonRPC.playerOpen({'item':{'channelid':target['channelid']}}):
+            self._pendingRestart = None
+            self._restartNote()
+
+
+    def _restartPending(self, playingItem):
+        # Called at the end of _onPlay's PseudoTV path.
+        pending = self._pendingRestart
+        if not pending: return
+        now = time.time()
+        if restart_helpers.pending_match(pending, playingItem, now):
+            self._pendingRestart = None
+            self.log('_restartPending, [%s] jumping to the start of the programme'%(pending.get('chid')), xbmc.LOGINFO)
+            self._restartSeek(wait=2.0)
+        elif restart_helpers.pending_expired(pending, now):
+            self._pendingRestart = None
+
+
+    def _restartNote(self):
+        # 'Restart Unavailable...'. Shown even when 'Notify while playing' is off: it
+        # answers a button the viewer pressed.
+        DIALOG.notificationDialog(LANGUAGE(30154), show=True)
 
 
 class Monitor(xbmc.Monitor):
@@ -887,6 +1143,13 @@ class Monitor(xbmc.Monitor):
 
     def onNotification(self, sender, method, data):
         self.log("onNotification, sender %s - method: %s  - data: %s" % (sender, method, data))
+        # madteevee (imports fork, imports.62): the remote button (no data) and the guide
+        # entry (data {path}) both arrive as NotifyAll(pseudotv, restart). The work runs on
+        # the restart thread, so this returns at once.
+        request = restart_helpers.parse_notification(sender, method, data)
+        if request is not None:
+            request['source'] = 'guide' if request.get('path') else 'remote'
+            self.player.requestRestart(request)
             
 
     def onSettingsChanged(self):

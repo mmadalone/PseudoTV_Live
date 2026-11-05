@@ -2311,7 +2311,7 @@ msgid "Parse Library & Build Channels while playing."
 msgstr ""
 
 msgctxt "#33153"
-msgid "[B]Restart[/B] prompt when media progress above % [0% Disabled, 95% Default]."
+msgid "[B]Restart[/B] button when you tune into a show that has played at least this much (your own channels, and LiveTV channels that can replay their show on now) [0% Disabled, 5% Default]."
 msgstr ""
 
 msgctxt "#33155"
@@ -2552,6 +2552,10 @@ msgstr ""
 
 msgctxt "#30908"
 msgid "Skip smartplaylist discovery"
+msgstr ""
+
+msgctxt "#30909"
+msgid "Restart from beginning"
 msgstr ""
 
 msgctxt "#33900"

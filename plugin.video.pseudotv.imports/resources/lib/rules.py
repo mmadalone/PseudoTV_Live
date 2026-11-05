@@ -1040,7 +1040,11 @@ class DisableRestart(BaseRule):
             self.log("runAction, setting replayPercentage = %s"%(player.replayPercentage))
             
         elif actionid == RULES_ACTION_PLAYER_STOP:
-            player.replayPercentage = self.storedValues[0]
+            # madteevee (imports fork, imports.62): same fix as rule 53 (imports.60).
+            # runActions re-creates the rules on every call, so storedValues[0] is still
+            # [] here, and the old line switched the Restart pop-up off on every channel
+            # after the first stop on a rule-54 channel. Restore the global value.
+            player.replayPercentage = SETTINGS.getSettingInt('Replay_Percentage')
             self.log("runAction, restoring replayPercentage = %s"%(player.replayPercentage))
         return parameter
 
