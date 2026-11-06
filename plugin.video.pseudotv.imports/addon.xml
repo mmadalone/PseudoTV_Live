@@ -84,6 +84,7 @@
         <news>v0.8.0+imports.64
 - Fixed: the "Up next" pop-up no longer takes over the remote: buttons always work while it shows, and pressing one hides it.
 - Fixed: "Up next" in Text mode shows its text, OSD mode opens Kodi's info, and it appears near the end of every show (it could appear only once per tune).
+- Fixed: the channel rule "Show OnNext" works (it failed on every tune).
 - Changed: the next show's time on "Up next" and the end-of-show screen follows Kodi's clock format (13:30 rather than 01:30PM).
 v0.8.0+imports.63
 - Fixed: rebuilding one of your own channels no longer replaces a show that has already started; the new line-up begins when the show on now ends.

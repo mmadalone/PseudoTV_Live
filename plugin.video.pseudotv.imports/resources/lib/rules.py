@@ -443,11 +443,14 @@ class ShowOnNext(BaseRule):
         self.myId               = 2
         self.name               = LANGUAGE(30045)
         self.description        = LANGUAGE(33045)
-        self.optionLabels       = [LANGUAGE(30045),LANGUAGE(32229),LANGUAGE(30044),LANGUAGE(30196)]
+        # madteevee (imports fork, imports.64): three options, each list in step (from upstream
+        # 4c58e817): the third was labelled 'Select Diffuse Color' and its mode list sat one slot
+        # further on, so picking a mode showed an empty list.
+        self.optionLabels       = [LANGUAGE(30045),LANGUAGE(32229),LANGUAGE(30196)]
         self.optionValues       = [bool(SETTINGS.getSettingInt('OnNext_Mode')),SETTINGS.getSetting("OnNext_Position_XY"),SETTINGS.getSettingInt('OnNext_Mode')]
         self.optionDescriptions = [LANGUAGE(30045),LANGUAGE(33229),LANGUAGE(30196)]
         self.actions            = [RULES_ACTION_PLAYER_START,RULES_ACTION_PLAYER_STOP]
-        self.selectBoxOptions   = ["",[LANGUAGE(30022),LANGUAGE(32136)],"",{LANGUAGE(30021):0,LANGUAGE(30193):1,LANGUAGE(30194):2,LANGUAGE(30197):3,LANGUAGE(30195):4}]
+        self.selectBoxOptions   = ["",[LANGUAGE(30022),LANGUAGE(32136)],{LANGUAGE(30021):0,LANGUAGE(30193):1,LANGUAGE(30194):2,LANGUAGE(30197):3,LANGUAGE(30195):4}]
         self.storedValues       = [[],[],[],[]]
 
 
@@ -487,18 +490,27 @@ class ShowOnNext(BaseRule):
 
 
     def runAction(self, actionid, citem, parameter, player):
+        # madteevee (imports fork, imports.64): the player's attribute is OnNextMode (upstream
+        # 4c58e817 made the same fix): reading 'onNextMode' raised AttributeError, so the rule
+        # never applied, and the stop wrote the old mode to an attribute nothing reads. The rule's
+        # own 'Show OnNext' switch now counts: off means mode 0 on this channel.
         if actionid == RULES_ACTION_PLAYER_START:
             self.storedValues[0]  = bool(player.OnNextMode)
             self.storedValues[1]  = player.onNextPosition
-            self.storedValues[2]  = player.onNextMode
+            self.storedValues[2]  = player.OnNextMode
+            # The web dashboard saves a list choice as text ('1'): the overlay compares numbers.
+            try:    mode = int(self.optionValues[2])
+            except (TypeError, ValueError): mode = SETTINGS.getSettingInt('OnNext_Mode')
             player.onNextPosition = self.optionValues[1]
-            player.OnNextMode     = self.optionValues[2]
-            self.log("runAction, restoring onNextPosition = %s, onNextMode = %s"%(player.onNextPosition, player.onNextMode))
+            player.OnNextMode     = mode if self.optionValues[0] else 0
+            self.log("runAction, setting onNextPosition = %s, OnNextMode = %s"%(player.onNextPosition, player.OnNextMode))
             
         elif actionid == RULES_ACTION_PLAYER_STOP:
-            player.onNextPosition = self.storedValues[1]
-            player.onNextMode     = self.storedValues[2]
-            self.log("runAction, restoring onNextPosition = %s, onNextMode = %s"%(player.onNextPosition, player.onNextMode))
+            # runActions re-creates the rules on every call, so storedValues are still [] here
+            # (the rule 53 finding, imports.60): restore the global settings instead.
+            player.onNextPosition = SETTINGS.getSetting("OnNext_Position_XY")
+            player.OnNextMode     = SETTINGS.getSettingInt('OnNext_Mode')
+            self.log("runAction, restoring onNextPosition = %s, OnNextMode = %s"%(player.onNextPosition, player.OnNextMode))
         return parameter
 
 

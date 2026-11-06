@@ -471,6 +471,10 @@ class Player(xbmc.Player):
         newChan = oldInfo.get('chid',random.random()) != playingItem.get('chid')
         self.log('_onPlay, [%s], mode = %s, isPlaylist = %s, new channel = %s'%(playingItem.get('citem',{}).get('id'), playingItem.get('mode'), playingItem.get('isPlaylist',False), newChan))
         if newChan: #New channel
+            # madteevee (imports fork, imports.64): the same for rule 2 ('Show OnNext'): a channel
+            # change sends no stop, so the previous channel's rule values would carry over.
+            self.OnNextMode       = SETTINGS.getSettingInt('OnNext_Mode')
+            self.onNextPosition   = SETTINGS.getSetting("OnNext_Position_XY")
             # madteevee (imports fork, imports.62): start from the global value, so a
             # previous channel's rule 54 ('Restart Button') never carries over.
             self.replayPercentage = SETTINGS.getSettingInt('Replay_Percentage')
