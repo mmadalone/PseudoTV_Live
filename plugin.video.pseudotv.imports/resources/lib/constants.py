@@ -335,9 +335,7 @@ LOGO_HOST           = 'http://github.com/PseudoTV/PseudoTV_Live/blob/master/plug
 
 #skins
 BUSY_XML        = '%s.busy.xml'%(ADDON_ID)
-ONNEXT_XML      = '%s.onnext.xml'%(ADDON_ID)
 REPLAY_XML     = '%s.restart.xml'%(ADDON_ID)
-ONNEXT_XML      = '%s.onnext.xml'%(ADDON_ID)
 BACKGROUND_XML  = '%s.background.xml'%(ADDON_ID)
 MANAGER_XML     = '%s.manager.xml'%(ADDON_ID)
 WIZARD_XML      = '%s.wizard.xml'%(ADDON_ID)

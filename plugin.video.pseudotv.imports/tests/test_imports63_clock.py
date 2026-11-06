@@ -1214,10 +1214,13 @@ def test_default_guard_runs_before_the_realign():
 # ================================================================ displays and dormant features
 
 def test_up_next_time_is_true_local_time():
-    """overlay.py is not edited: its epochTime calls are right now that epochTime
-    no longer subtracts the offset."""
+    """imports.64: Up next and the end-of-show screen take the next show's time from
+    onnext_helpers.next_time, which converts the epoch to true local time like
+    epochTime (datetime.fromtimestamp); overlay.py no longer calls epochTime
+    (was: two epochTime(self.nitem['start']) calls, right since imports.63)."""
     calls = [ast.unparse(c) for c in _calls_in(ast.parse(_src('overlay.py'))) if ast.unparse(c.func) == 'epochTime']
-    assert calls == ["epochTime(self.nitem['start'])"] * 2
+    helpers = [ast.unparse(c.func) for c in _calls_in(ast.parse(_src('onnext_helpers.py')))]
+    assert calls == [] and 'datetime.datetime.fromtimestamp' in helpers
 
 
 def test_pause_rule_last_viewed_is_written_and_shown_on_the_real_clock():
@@ -1243,7 +1246,8 @@ RETIRED = {'getUTCstamp', 'getTimeoffset', 'getGMTstamp', 'roundTimeUp', 'getTZS
            '_stripXmltvTzSuffix', 'ntime', 'utcnow', 'utcfromtimestamp'}
 
 CHANGED = ['clock_helpers.py', 'globals.py', 'replay_helpers.py', 'restart_helpers.py', 'xmltvs.py', 'builder.py', 'tasks.py',
-           'plugin.py', 'default.py', 'rules.py', 'services.py', 'renderers.py', 'backup.py', 'm3u.py', 'server.py']
+           'plugin.py', 'default.py', 'rules.py', 'services.py', 'renderers.py', 'backup.py', 'm3u.py', 'server.py',
+           'onnext_helpers.py', 'overlay.py', 'constants.py']   # imports.64
 
 
 def _py_files():

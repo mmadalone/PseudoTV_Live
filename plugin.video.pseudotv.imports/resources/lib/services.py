@@ -26,6 +26,7 @@ from jsonrpc    import JSONRPC
 import playstate_helpers # madteevee (imports fork, imports.60): Rollback_Watched snapshot/restore
 import restart_helpers   # madteevee (imports fork, imports.62): restart from the beginning (pop-up, remote, guide entry)
 import clock_helpers     # madteevee (imports fork, imports.63): the one clock + time conversions
+import onnext_helpers    # madteevee (imports fork, imports.64): Up next drawn on the video
 
 class Player(xbmc.Player):
     # imports.16: pendingItem / playingItem live as instance attrs (set in
@@ -783,15 +784,18 @@ class Player(xbmc.Player):
                 self.toggleOverlay(self.enableOverlay)
 
         def __chkOnNext():
+            # madteevee (imports fork, imports.64): the same window (onnext_helpers, one copy), shown
+            # once per pass: before the window the pass is re-armed (a new show, or the same show
+            # restarted). toggleOnNext returns at once, so this idle loop never waits on Up next.
             played    = ceil(self.getPlayedTime())
             remaining = floor(self.getRemainingTime())
-            totalTime = int(self.getPlayerTime() * (self.maxProgress / 100))
-            threshold = abs((totalTime - (totalTime * .75)) - (ONNEXT_TIMER*3))
-            intTime   = roundupDIV(threshold,3)
-            if self.isPlayingPseudoTV() and not self.playingItem.get('isfiller',True) and not self.overlay is None:
-                if played > self.minDuration and (remaining <= threshold and remaining >= intTime): 
+            threshold, intTime = onnext_helpers.window(self.getPlayerTime(), self.maxProgress, ONNEXT_TIMER)
+            overlay   = self.overlay # one read: _onPlay's thread can replace it
+            if self.isPlayingPseudoTV() and not self.playingItem.get('isfiller',True) and not overlay is None:
+                if remaining > threshold: overlay.rearmOnNext()
+                elif onnext_helpers.in_window(played, remaining, threshold, intTime, self.minDuration):
                     self.log('__chkOnNext, played = %s, remaining = %s'%(played,remaining))
-                    self.overlay.toggleOnNext(bool(self.OnNextMode))
+                    overlay.toggleOnNext(bool(self.OnNextMode))
                 
         def __chkSleep():
             if self.sleepTime > 0 and (self.monitor.idleTime > (self.sleepTime * 10800)):

@@ -22,8 +22,12 @@
 from globals   import *
 from resources import Resources
 import restart_helpers # madteevee (imports fork, imports.62): Restart pop-up close rule
+import onnext_helpers  # madteevee (imports fork, imports.64): Up next drawn on the video
 
 WH, WIN = BUILTIN.getResolution()
+# madteevee (imports fork, imports.64): Home window property set while Up next shows (onnext.xml's
+# onload/onunload set it; nothing here reads it, kept for skins).
+ONNEXT_RUNNING = '%s.ONNEXT_OVERLAY.Running'%(ADDON_ID)
 
 class Busy(xbmcgui.WindowXMLDialog):
     def __init__(self, *args, **kwargs):
@@ -63,13 +67,10 @@ class Background(xbmcgui.WindowXMLDialog):
             nowTitle  = (self.fitem.get('label')       or BUILTIN.getInfoLabel('Title','VideoPlayer'))
             nextTitle = (self.nitem.get('showlabel')   or BUILTIN.getInfoLabel('NextTitle','VideoPlayer') or chname)
 
-            try: 
-                nextTime = (epochTime(self.nitem['start']).strftime('%I:%M%p') or BUILTIN.getInfoLabel('NextStartTime','VideoPlayer'))
-                if not nextTime: return
-            except Exception as e: return
-                
-            onNow  = '%s on %s'%(nowTitle,chname) if chname not in validString(nowTitle) else nowTitle
-            onNext = '@ %s: %s'%(nextTime,nextTitle)
+            # madteevee (imports fork, imports.64): Kodi's clock format (13:30 here, was '01:30PM') and
+            # the Kodi label when the guide has no start (it was never reached); shared with Up next.
+            nextTime = onnext_helpers.next_time(self.nitem.get('start'), onnext_helpers.time_format(xbmc.getRegion('time')), BUILTIN.getInfoLabel('NextStartTime','VideoPlayer'))
+            if not nextTime: return
         
             window_w, window_h = WH # window_h, window_w = (self.getHeight(), self.getWidth())
             onNextX, onNextY = abs(int(window_w // 9)), abs(int(window_h // 16) - window_h) - 356 #auto
@@ -83,7 +84,7 @@ class Background(xbmcgui.WindowXMLDialog):
                                                   ('Visible'    , 'effect=zoom start=80 end=100 center=%s,%s delay=160 tween=back time=240 reversible=false'%(onNextX, onNextY)),
                                                   ('Visible'    , 'effect=fade end=100 time=240 reversible=false')])
             self.getControl(40002).setImage(LOGO_COLOR if logo.endswith('wlogo.png') else logo)
-            self.getControl(40003).setText('%s %s[CR]%s [B]%s[/B]'%(LANGUAGE(32104),onNow,LANGUAGE(32116),onNext))
+            self.getControl(40003).setText(onnext_helpers.card_text(LANGUAGE(32104),LANGUAGE(32116),nowTitle,chname,nextTime,nextTitle))
             self.getControl(40004).setImage(Globals._getThumb(self.nitem))
         except Exception as e:
             self.log("onInit, failed! %s"%(e), xbmc.LOGERROR)
@@ -166,7 +167,6 @@ class Replay(xbmcgui.WindowXMLDialog):
 class Overlay(object):
     channelBug = None
     vignette   = None
-    onnext     = None
     # imports.18: cntrlManager moved to __init__ (instance attr). Class-level
     # mutable defaults are a Python footgun — if two Overlay instances ever
     # co-existed (which they used to, during the toggleOverlay race fixed by
@@ -185,6 +185,16 @@ class Overlay(object):
         self.nitem      = self.player.playingItem.get('nitem',{})
         self.resources  = Resources(service=self.service)
         self.cntrlManager = {}
+        # madteevee (imports fork, imports.64): Up next is drawn here, on the video window, as
+        # controls that never take focus (it was a modal dialog that took every key). Its own
+        # lock: the idle thread, the wait thread and close() (run under services'
+        # _overlay_lock, which the wait thread never takes) share this state.
+        self._onNextLock     = Lock()
+        self._onNextControls = {}    # 'frame' / 'art' / 'shadow' / 'text' -> control, made in open() (else on first use)
+        self._onNextShown    = False # shown (or tried) in this pass; rearmOnNext clears it
+        self._onNextVisible  = False
+        self._onNextToken    = 0     # moves at every show and hide: a wait thread exits when it moves
+        self._onNextClosed   = False
         
         self.window     = xbmcgui.Window(12005) 
         self.window_w, self.window_h = WH
@@ -274,139 +284,168 @@ class Overlay(object):
                     self.channelBug.setAnimations([('Conditional', 'effect=fade start=0 end=100 time=2000 delay=1000 condition=Control.IsVisible(%i) reversible=false'%(self.channelBug.getId())),
                                                    ('Conditional', 'effect=fade start=100 end=%i time=1000 delay=3000 condition=Control.IsVisible(%i) reversible=false'%(self.channelBugFade,self.channelBug.getId()))])
                     self.log('enableChannelBug, logo = %s, channelBugColor = %s, window = (%s,%s)'%(logo,self.channelBugColor,self.window_h, self.window_w))
+                self._prepareOnNext()
             else: self.close()
+
+
+    def _prepareOnNext(self):
+        # madteevee (imports fork, imports.64): Up next's controls are made now, hidden (on top of the
+        # logo), so Kodi has drawn them hidden long before the first show: it plays the 'Visible'
+        # zoom and fade only on a hidden->shown change of the condition it has seen (GUIControl.cpp
+        # UpdateVisibility), and a new control starts out as 'shown'.
+        if self.player.OnNextMode not in (1,2): return
+        try:
+            with self._onNextLock:
+                if self._onNextClosed or self._onNextVisible: return
+                xbmcgui.Window(10000).setProperty(ONNEXT_RUNNING,'false')
+                self._onNextCreate(onnext_helpers.NAMES)
+        except Exception as e: self.log('_prepareOnNext, failed! %s'%(e), xbmc.LOGERROR)
         
         
     def toggleOnNext(self, state: bool=bool(SETTINGS.getSettingInt('OnNext_Mode'))):
-        if state and self.onnext is None:
-            # OnNext.__init__ chains self.player.monitor / .service / .jsonRPC. Pass the actual
-            # Player instance (Overlay's .player), not the Overlay itself — Overlay only has
-            # .player/.service/.jsonRPC and lacks .monitor, so passing self crashes with
-            # AttributeError: 'Overlay' object has no attribute 'monitor'.
-            self.onnext = OnNext(ONNEXT_XML, ADDON_PATH, "default", "1080i", player=self.player, mode=self.player.OnNextMode, position=self.player.onNextPosition, next=self.jsonRPC.getNextItem(self.citem,self.nitem))
-        elif not state and hasattr(self.onnext,'onClose'):
-            self.onnext = self.onnext.onClose()
-        else: return
-        self.log("toggleOnNext, state = %s, onnext = %s"%(state,self.onnext))
-    
-    
-    def close(self):
-        self.log("close")
-        self.toggleOnNext(False)
-        self._delControl(self.vignette)
-        self._delControl(self.channelBug)
-        if self.vinView != self.defaultView: timerit(self.jsonRPC.setViewMode)(0.5,self.defaultView)
-        # self.runActions(RULES_ACTION_OVERLAY_CLOSE, self.citem, inherited=self) #debug NoneType, RULES_ACTION_OVERLAY_CLOSE obsolete? 
-        PROPERTIES.setRunning('Overlay',False)
-       
-       
-class OnNext(xbmcgui.WindowXMLDialog):
-    closing   = False
-    totalTime = 0
-    threshold = 0
-    remaining = 0
-    intTime   = 0
-    
-    def __init__(self, *args, **kwargs):
-        xbmcgui.WindowXMLDialog.__init__(self, *args, **kwargs)
-        self.player         = kwargs.get('player'  , None)
-        self.nitem          = kwargs.get('next'    , {})
-        self.onNextMode     = kwargs.get('mode'    , SETTINGS.getSettingInt('OnNext_Mode'))
-        self.onNextPosition = kwargs.get('position', SETTINGS.getSetting("OnNext_Position_XY"))
-        
-        self.service    = self.player.service
-        self.jsonRPC    = self.player.jsonRPC
-        self.monitor    = self.player.monitor
-        
-        self.citem      = self.player.playingItem.get('citem',{})
-        self.fitem      = self.player.playingItem.get('fitem',{})
-                
-        self.window     = xbmcgui.Window(12005) 
-        self.window_w, self.window_h = WH #self.window_h, self.window_w = (self.window.getHeight(), self.window.getWidth())
-                
-        try:    self.onNextX, self.onNextY = literal_eval(self.onNextPosition) #user
-        except Exception: self.onNextX, self.onNextY = abs(int(self.window_w // 9)), abs(int(self.window_h // 16) - self.window_h) - 356 #auto
-    
-        self.log('__init__, enableOnNext = %s, onNextMode = %s, onNextX = %s, onNextY = %s'%(bool(self.onNextMode),self.onNextMode,self.onNextX,self.onNextY))
-        
-        self.totalTime = int(self.player.getPlayerTime() * (self.player.maxProgress / 100))
-        self.threshold = abs((self.totalTime - (self.totalTime * .75)) - (ONNEXT_TIMER*3))
-        self.remaining = floor(self.totalTime - self.player.getPlayedTime())
-        self.intTime   = roundupDIV(self.threshold,3)
-        self.log('__init__, totalTime = %s, threshold = %s, remaining = %s, intTime = %s'%(self.totalTime,self.threshold,self.remaining,self.intTime))
-        if self.remaining >= self.intTime:
-            self.doModal()
-        
-        
-    def log(self, msg, level=xbmc.LOGDEBUG):
-        return log('%s: %s'%(self.__class__.__name__,msg),level)
+        # madteevee (imports fork, imports.64): once per pass through the end-of-show window
+        # (services.__chkOnNext calls it every idle tick in the window; rearmOnNext starts a new
+        # pass). Returns at once: a wait thread hides the card. Mode 3 asks for the info screen
+        # explicitly (toggleInfo's default is the Enable_OnInfo setting, so it did nothing with
+        # that setting off). Before: an OnNext dialog held the idle thread and every key for
+        # minutes, once per Overlay.
+        if not state: return self._hideOnNext('off')
+        with self._onNextLock:
+            if self._onNextShown or self._onNextClosed: return
+            self._onNextShown = True # also when nothing ends up shown: getNextItem once per pass
+        mode = self.player.OnNextMode
+        self.log('toggleOnNext, mode = %s'%(mode))
+        try: # runs on the service's idle thread: never let an error stop it
+            if mode == 3: self.player.toggleInfo(True)
+            elif mode in (1,2,4):
+                item  = self.player.playingItem # read now: this Overlay can outlive a programme (same channel)
+                nitem = self.jsonRPC.getNextItem(item.get('citem',{}),item.get('nitem',{}))
+                if mode == 4: self._updateUpNext(item.get('fitem',{}),nitem)
+                else:         self._showOnNext(mode,item,nitem)
+        except Exception as e: self.log('toggleOnNext, failed! %s'%(e), xbmc.LOGERROR)
 
-        
-    def onInit(self):
+
+    def rearmOnNext(self):
+        # madteevee (imports fork, imports.64): before the window (a new show, or the same show
+        # restarted from the beginning): the next pass shows Up next again. A card still up goes now:
+        # it is only shown inside the window, so the show was restarted or sought back (a remote's
+        # JSON-RPC restart moves neither Kodi's idle time nor the playback epoch).
+        with self._onNextLock:
+            hidden = self._onNextHide()
+            if self._onNextShown:
+                self._onNextShown = False
+                self.log('rearmOnNext')
+        if hidden: self.log('toggleOnNext, hidden, back before the window')
+
+
+    def _onNextText(self, item, nitem):
+        citem, fitem = item.get('citem',{}), item.get('fitem',{})
+        chname    = (citem.get('name')      or BUILTIN.getInfoLabel('ChannelName','VideoPlayer'))
+        nowTitle  = (fitem.get('label')     or BUILTIN.getInfoLabel('Title','VideoPlayer'))
+        nextTitle = (nitem.get('showlabel') or BUILTIN.getInfoLabel('NextTitle','VideoPlayer') or chname)
+        nextTime  = onnext_helpers.next_time(nitem.get('start'), onnext_helpers.time_format(xbmc.getRegion('time')), BUILTIN.getInfoLabel('NextStartTime','VideoPlayer'))
+        if not nextTime: return ''
+        return onnext_helpers.card_text(LANGUAGE(32104), LANGUAGE(32116), nowTitle, chname, nextTime, nextTitle)
+
+
+    def _onNextCreate(self, names):
+        # Created once with blank content; the visible condition keeps them hidden until
+        # ONNEXT_RUNNING is 'true'. Python controls on Window(12005) live in the skin's
+        # window, so textures are absolute paths and positions (1080 grid, like the Move
+        # tool's preview) are moved to the skin's grid. Returns True when it made any.
+        x, y = onnext_helpers.position(self.player.onNextPosition, self.window_w, self.window_h)
+        try:    fx, fy = onnext_helpers.grid(self.window.getWidth(), self.window.getHeight())
+        except Exception: fx, fy = 1.0, 1.0
+        rect = onnext_helpers.layout(x, y, fx, fy)
+        made = False
+        for name in names:
+            if name in self._onNextControls: continue
+            # the frame's middle is see-through; the art fills it (scale) like the old border hugged it
+            if   name == 'frame': control = xbmcgui.ControlImage(*rect[name], ' ', aspectRatio=onnext_helpers.FRAME_ASPECT)
+            elif name == 'art':   control = xbmcgui.ControlImage(*rect[name], ' ', aspectRatio=onnext_helpers.ART_ASPECT)
+            elif name == 'shadow': control = xbmcgui.ControlTextBox(*rect[name], onnext_helpers.TEXT_FONT, onnext_helpers.SHADOW_COLOR)
+            else:                  control = xbmcgui.ControlTextBox(*rect[name], onnext_helpers.TEXT_FONT, onnext_helpers.TEXT_COLOR)
+            self._addControl(control)
+            if not self._hasControl(control): continue
+            control.setVisibleCondition(onnext_helpers.condition(ONNEXT_RUNNING))
+            control.setAnimations(onnext_helpers.animations(*rect['frame'][:2]))
+            if name == 'frame':
+                control.setImage(os.path.join(MEDIA_LOC,onnext_helpers.FRAME_IMAGE))
+                control.setColorDiffuse(onnext_helpers.FRAME_COLOR)
+            self._onNextControls[name] = control
+            made = True
+        return made
+
+
+    def _showOnNext(self, mode, item, nitem):
+        text = self._onNextText(item, nitem)
+        if not text: return self.log('toggleOnNext, no time for the next programme, not shown')
+        names = onnext_helpers.NAMES if mode == 2 else onnext_helpers.NAMES[2:] # z-order
+        with self._onNextLock:
+            if self._onNextClosed or self._onNextVisible: return
+            xbmcgui.Window(10000).setProperty(ONNEXT_RUNNING,'false')
+            made = self._onNextCreate(names)
+        # Controls made just now (a mode change, or open() could not): let Kodi draw them hidden
+        # first, else they pop in without the zoom and fade (see _prepareOnNext).
+        if made and self.service._shutdown(onnext_helpers.SETTLE_WAIT): return
+        with self._onNextLock:
+            if self._onNextClosed or self._onNextVisible: return # closed while it waited
+            for name, control in list(self._onNextControls.items()):
+                if name not in names: self._setVisible(control, False) # mode 1 after mode 2 (a settings change)
+                elif name == 'art':   control.setImage((Globals._getThumb(nitem) or FANART_COLOR))
+                elif name in ('shadow','text'): control.setText(text)
+            for name in names:
+                if name in self._onNextControls: self._setVisible(self._onNextControls[name], True)
+            if not self._onNextControls: return self.log('toggleOnNext, no controls, not shown', xbmc.LOGERROR)
+            token  = self._onNextToken + 1
+            thread = Thread(target=self._waitOnNext, args=(token, self.player._play_epoch, BUILTIN.getIdle()), name='Overlay.waitOnNext', daemon=True)
+            self._onNextToken, self._onNextVisible = token, True
+            try: thread.start() # before the card shows: never a card with no thread to hide it
+            except Exception as e:
+                self._onNextToken  += 1
+                self._onNextVisible = False
+                return self.log('toggleOnNext, wait thread failed, not shown! %s'%(e), xbmc.LOGERROR)
+            xbmcgui.Window(10000).setProperty(ONNEXT_RUNNING,'true')
+        self.log('toggleOnNext, shown, mode = %s'%(mode))
+        if mode == 2: xbmc.playSFX(BING_WAV)
+
+
+    def _waitOnNext(self, token, epoch, idle):
+        # Up to 30 s, checked every 0.25 s; onnext_helpers.hide_reason decides. A key press
+        # lowers Kodi's idle seconds; the key itself goes to Kodi as usual.
+        started, reason = time.monotonic(), ''
         try:
-            self.log('onInit, citem = %s\nfitem = %ss\nnitem = %s'%(self.citem,self.fitem,self.nitem))
-            if self.onNextMode in [1,2]: 
-                logo      = (self.citem.get('logo')      or BUILTIN.getInfoLabel('Art(icon)','Player') or LOGO)
-                chname    = (self.citem.get('name')      or BUILTIN.getInfoLabel('ChannelName','VideoPlayer'))
-                nowTitle  = (self.fitem.get('label')     or BUILTIN.getInfoLabel('Title','VideoPlayer'))
-                nextTitle = (self.nitem.get('showlabel') or BUILTIN.getInfoLabel('NextTitle','VideoPlayer') or chname)
+            while not reason:
+                stopping = self.service._shutdown(onnext_helpers.WAIT_STEP)
+                idleNow  = BUILTIN.getIdle()
+                with self._onNextLock: closed = self._onNextClosed or self._onNextToken != token
+                reason = onnext_helpers.hide_reason(time.monotonic() - started, ONNEXT_TIMER*2, idleNow, idle,
+                                                    self.player._play_epoch, epoch, closed, self.player.isPlayingPseudoTV(), stopping)
+                idle = idleNow
+        except Exception as e:
+            reason = 'failed! %s'%(e)
+            self.log('_waitOnNext, failed! %s'%(e), xbmc.LOGERROR)
+        self._hideOnNext(reason, token)
 
-                try: nextTime = (epochTime(self.nitem['start']).strftime('%I:%M%p') or BUILTIN.getInfoLabel('NextStartTime','VideoPlayer'))
-                except Exception as e: return
 
-                if not nextTime: return
-                onNow  = '%s on %s'%(nowTitle,chname) if chname not in validString(nowTitle) else nowTitle
-                onNext = '@ %s: %s'%(nextTime,nextTitle)
-            
-                self.getControl(40001).setPosition(self.onNextX, self.onNextY)
-                self.getControl(40001).setVisibleCondition('[Player.Playing + !Window.IsVisible(fullscreeninfo) + Window.IsVisible(fullscreenvideo)]')
-                self.getControl(40001).setAnimations([('WindowOpen' , 'effect=zoom start=80 end=100 center=%s,%s delay=160 tween=back time=240 reversible=false'%(self.onNextX, self.onNextY)),
-                                                      ('WindowOpen' , 'effect=fade start=0 end=100 delay=160 time=240 reversible=false'),
-                                                      ('WindowClose', 'effect=zoom start=100 end=80 center=%s,%s delay=160 tween=back time=240 reversible=false'%(self.onNextX, self.onNextY)),
-                                                      ('WindowClose', 'effect=fade start=100 end=0 time=240 reversible=false'),
-                                                      ('Visible'    , 'effect=zoom start=80 end=100 center=%s,%s delay=160 tween=back time=240 reversible=false'%(self.onNextX, self.onNextY)),
-                                                      ('Visible'    , 'effect=fade end=100 time=240 reversible=false')])
-                self.onNext_Text = self.getControl(40003)
-                self.onNext_Text.setVisible(False)
-                self.onNext_Text.setText('%s %s[CR]%s [B]%s[/B]'%(LANGUAGE(32104),onNow,LANGUAGE(32116),onNext))
-                
-                if self.onNextMode == 2:
-                    self.onNext_Artwork = self.getControl(40004)
-                    self.onNext_Artwork.setVisible(False)
-                    self.onNext_Artwork.setImage(Globals._getThumb(self.nitem))
+    def _hideOnNext(self, reason='', token=None):
+        with self._onNextLock:
+            if token is not None and token != self._onNextToken: return
+            if not self._onNextHide(): return
+        self.log('toggleOnNext, hidden, %s'%(reason))
 
-                    self.onNext_Text.setVisible(True)
-                    self.onNext_Artwork.setVisible(True)
-                    xbmc.playSFX(BING_WAV)
-                    
-                    show = ONNEXT_TIMER*2
-                    while not self.monitor.abortRequested() and not self.closing:
-                        if self.service._shutdown(CPU_CYCLE) or not self.player.isPlayingPseudoTV() or show < 1: break
-                        else: show -= CPU_CYCLE
-                        
-                    self.onNext_Text.setVisible(False)
-                    self.onNext_Artwork.setVisible(False)
-                    
-            elif  self.onNextMode == 3: self.player.toggleInfo()
-            elif  self.onNextMode == 4: self._updateUpNext(self.fitem,self.nitem) 
 
-            wait = self.intTime*2
-            while not self.monitor.abortRequested() and not self.closing:
-                if self.service._shutdown(CPU_CYCLE) or not self.player.isPlayingPseudoTV() or wait < 1: break
-                else: wait -= CPU_CYCLE
-                        
-        except Exception as e: self.log("onInit, failed! %s"%(e), xbmc.LOGERROR)
-        finally:
-            # madteevee (imports fork, imports.63): every exit closes the window. The early
-            # returns above (no time for the next programme) skipped this close, so an
-            # invisible modal window stayed on screen until Kodi restarted: Kodi then
-            # refused window switches ("refused because there are active modal dialogs")
-            # and other dialogs, such as the Restart pop-up, could not open.
-            self.log("onInit, closing")
-            try: self.close()
-            except Exception as e: self.log("onInit, close failed! %s"%(e), xbmc.LOGERROR) # e.g. the window is gone at shutdown
-                
-                
+    def _onNextHide(self):
+        # Called with _onNextLock held. True when the card was up: the token moves (its wait thread
+        # ends quietly) and the property goes 'false' (the controls fade out, 240 ms).
+        if not self._onNextVisible: return False
+        self._onNextToken  += 1
+        self._onNextVisible = False
+        try: xbmcgui.Window(10000).setProperty(ONNEXT_RUNNING,'false')
+        except Exception as e: self.log('_hideOnNext, failed! %s'%(e), xbmc.LOGERROR)
+        return True
+
+
     def _updateUpNext(self, nowItem: dict={}, nextItem: dict={}):
         self.log('_updateUpNext')
         data = {}
@@ -443,18 +482,17 @@ class OnNext(xbmcgui.WindowXMLDialog):
 
         except Exception: pass
         if data: timerit(self.jsonRPC.notifyAll)(0.5,*('upnext_data', binascii.hexlify(FileAccess.dumpJSON(data).encode('utf-8')).decode('utf-8'), '%s.SIGNAL'%(ADDON_ID)))
-        
-        
-    def onAction(self, act):
-        actionId = act.getId()
-        self.log('onAction: actionId = %s'%(actionId))
-        self.closing = True
-        # if   actionId == ACTION_MOVE_UP:       BUILTIN.executebuiltin('AlarmClock(up,Action(up),.5,true,false)')
-        # elif actionId == ACTION_MOVE_DOWN:     BUILTIN.executebuiltin('AlarmClock(down,Action(down),.5,true,false)')
-        # elif actionId in ACTION_PREVIOUS_MENU: BUILTIN.executebuiltin('AlarmClock(back,Action(back),.5,true,false)')
 
 
-    def onClose(self):
-        self.log('onClose')
-        self.closing = True
-        return None
+    def close(self):
+        self.log("close")
+        with self._onNextLock: # madteevee (imports fork, imports.64): Up next's controls go with the overlay;
+            self._onNextClosed = True # closed first, so no show can start in between
+            for control in list(self._onNextControls.values()): self._delControl(control)
+            self._onNextControls = {}
+        self.toggleOnNext(False)
+        self._delControl(self.vignette)
+        self._delControl(self.channelBug)
+        if self.vinView != self.defaultView: timerit(self.jsonRPC.setViewMode)(0.5,self.defaultView)
+        # self.runActions(RULES_ACTION_OVERLAY_CLOSE, self.citem, inherited=self) #debug NoneType, RULES_ACTION_OVERLAY_CLOSE obsolete? 
+        PROPERTIES.setRunning('Overlay',False)
