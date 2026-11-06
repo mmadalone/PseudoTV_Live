@@ -86,6 +86,7 @@
 - Fixed: "Play programme" in the TV guide menu on a show that is on now joins it part-way through (when the guide passes the show's times) and no longer fails to play.
 - Fixed: the "Up next" time is right (it was an hour early, two in summer), and guide times stay right across the change to and from summer time.
 - Changed: past shows leave the guide exactly "Minimum (Past) Guide Days" after they end (an hour sooner than before).
+- Changed: the RESTART button appears as soon as Kodi's channel banner goes away (about 5 seconds sooner).
 v0.8.0+imports.62
 - New: restart a show that is already running from its beginning, on your own channels and on LiveTV channels that can replay it (Movistar+): a RESTART button after you tune in, "Restart from beginning" in the TV guide menu, and a remote button you set up (NotifyAll(pseudotv,restart)).
 - Changed: "Restart Percentage" starts at 5% on new installs (was 95%); existing installs keep their value: set it in Settings, Global, Overlay.

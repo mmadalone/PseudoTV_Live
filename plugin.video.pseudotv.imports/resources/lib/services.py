@@ -860,7 +860,7 @@ class Player(xbmc.Player):
             self.log("toggleOverlay, state = %s, overlay = %s, _overlay_chid = %s"%(state, self.overlay, self._overlay_chid))
 
 
-    @debounceit(OSD_TIMER)
+    @debounceit(restart_helpers.POPUP_DELAY) # imports.63: was OSD_TIMER (about 5 s later)
     def toggleReplay(self, state: bool=False, epoch=None):
         # madteevee (imports fork, imports.62): offers the Restart pop-up for the playback
         # `epoch` (Custom and LiveTV channels). restart_helpers decides; the dialog is a

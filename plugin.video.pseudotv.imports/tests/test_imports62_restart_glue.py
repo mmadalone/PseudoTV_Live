@@ -148,7 +148,7 @@ def test_onplay_triggers():
 
 
 def test_toggle_replay_always_releases_the_dialog():
-    assert _decorators(S_TREE, 'Player', 'toggleReplay') == ['debounceit(OSD_TIMER)']
+    assert _decorators(S_TREE, 'Player', 'toggleReplay') == ['debounceit(restart_helpers.POPUP_DELAY)']
     node  = _method(S_TREE, 'Player', 'toggleReplay')
     tries = [n for n in ast.walk(node) if isinstance(n, ast.Try)]
     assert len(tries) == 1
@@ -159,6 +159,16 @@ def test_toggle_replay_always_releases_the_dialog():
     lines = _code_lines(_body(SERVICES, S_TREE, 'Player', 'toggleReplay'))
     assert _index(lines, 'self.replay, chosen = dialog, False') < _index(lines, 'dialog.doModal()') < _index(lines, 'self.requestRestart(')
     assert 'epoch != self._play_epoch' in ''.join(lines)
+
+
+def test_popup_starts_soon_after_a_tune():
+    # imports.63: the pop-up starts waiting for Kodi's channel info to close about a second
+    # after the tune (it waited the 5 s OSD timer first, so it came about 5 s after the info).
+    assert isinstance(rh.POPUP_DELAY, float) and 0 < rh.POPUP_DELAY <= 2
+    assert 'OSD_TIMER' not in ''.join(_decorators(S_TREE, 'Player', 'toggleReplay'))
+    # the window wait still bounds the pop-up by the OSD timer and Kodi's channel info
+    assert '!Player.ShowInfo' in rh.WINDOW_READY and '!Player.ChannelPreviewActive' in rh.WINDOW_READY
+    assert [ast.unparse(d) for d in _method(S_TREE, 'Player', '_waitRestartWindow').args.defaults] == ['OSD_TIMER * 2']
 
 
 def test_request_restart_is_threaded_and_one_at_a_time():

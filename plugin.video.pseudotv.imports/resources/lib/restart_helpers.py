@@ -73,6 +73,11 @@ STOP_WAIT     = 5.0     # s: wait for a stop before re-tuning the same Custom ch
 SETTLE_TRIES  = 3       # decisions tried while a zap settles ('tune in progress') ...
 SETTLE_WAIT   = 1.0     # ... this many s apart; then 'Restart Unavailable...'
 POPUP_POLL    = 0.05    # s between the pop-up's checks (keys are handled during the wait)
+# imports.63: s after a tune before the pop-up starts waiting for WINDOW_READY (it waited
+# OSD_TIMER, 5 s, then for Kodi's 5 s channel info too). Long enough for quick channel
+# hopping to pass by; a hop still ends the wait (playback epoch), the window rule
+# still keeps it off Kodi's channel info.
+POPUP_DELAY   = 1.0
 # Keys pressed while the pop-up is up that go on to the video once it has closed
 # (Kodi action id -> builtin Action() name): Up/Down, Info and the number keys (channel
 # number entry; Kodi's PVR ignores them while a Python dialog is on top). OK restarts,
