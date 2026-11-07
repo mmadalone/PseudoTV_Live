@@ -60,22 +60,48 @@ def test_the_option_lists_are_in_step(rules):
     assert rule.optionValues == [True, GLOBAL_POS, GLOBAL_MODE]
 
 
+def _settings():
+    import types
+    return types.SimpleNamespace(getSettingBool=lambda key: False,
+                                 getSettingInt=lambda key: GLOBAL_MODE if key == 'OnNext_Mode' else 0,
+                                 getSetting=lambda key: GLOBAL_POS if key == 'OnNext_Position_XY' else '')
+
+
+def _next_channel(rules, rs, start):
+    """A channel without rule 2, tuned next: what the player publishes for it."""
+    other = {'id': 'y@PseudoTV_Live', 'name': 'Y'}
+    state = rs.RuleState(start)
+    rules.RulesList([other]).runActions(rules.RULES_ACTION_PLAYER_START, other, {}, inherited=state)
+    return rs.effective(start, state.overrides(), rs.FIELDS)
+
+
 @pytest.mark.parametrize('mode, pos', [(1, '(10,20)'), (3, 'Auto'), (4, '(300,600)')])
-def test_tune_applies_the_rule_and_stop_restores_the_settings(rules, mode, pos):
-    citem, player, run = _run(rules, {'0': True, '1': pos, '2': mode})
-    run(rules.RULES_ACTION_PLAYER_START, citem, {}, inherited=player)
-    assert (player.OnNextMode, player.onNextPosition) == (mode, pos)
-    run(rules.RULES_ACTION_PLAYER_STOP, citem, {}, inherited=player)
-    assert (player.OnNextMode, player.onNextPosition) == (GLOBAL_MODE, GLOBAL_POS)   # not the lost [] of a re-created rule
-    assert not hasattr(player, 'onNextMode')
+def test_tune_applies_the_rule_stop_leaves_it_and_the_next_channel_gets_the_settings(rules, mode, pos):
+    """imports.65: the stop does nothing (it used to restore a lost value, then the settings);
+    each tune starts from the settings (rulestate_helpers), so nothing carries over."""
+    import rulestate_helpers as rs
+    start = dict(rs.baseline(_settings()), lastSubState=False)
+    citem, _player, run = _run(rules, {'0': True, '1': pos, '2': mode})
+    state = rs.RuleState(start)
+    run(rules.RULES_ACTION_PLAYER_START, citem, {}, inherited=state)
+    assert (state.OnNextMode, state.onNextPosition) == (mode, pos)
+    rules.RulesList([citem]).runActions(rules.RULES_ACTION_PLAYER_STOP, citem, {}, inherited=state)   # fresh rules, as live
+    assert (state.OnNextMode, state.onNextPosition) == (mode, pos)
+    assert state.overrides() == {'OnNextMode': mode, 'onNextPosition': pos}
+    nxt = _next_channel(rules, rs, start)
+    assert (nxt['OnNextMode'], nxt['onNextPosition']) == (GLOBAL_MODE, GLOBAL_POS)
 
 
 def test_the_rule_switch_off_means_no_up_next(rules):
-    citem, player, run = _run(rules, {'0': False, '1': '(10,20)', '2': 2})
-    run(rules.RULES_ACTION_PLAYER_START, citem, {}, inherited=player)
-    assert player.OnNextMode == 0 and player.onNextPosition == '(10,20)'
-    run(rules.RULES_ACTION_PLAYER_STOP, citem, {}, inherited=player)
-    assert player.OnNextMode == GLOBAL_MODE
+    import rulestate_helpers as rs
+    start = dict(rs.baseline(_settings()), lastSubState=False)
+    citem, _player, run = _run(rules, {'0': False, '1': '(10,20)', '2': 2})
+    state = rs.RuleState(start)
+    run(rules.RULES_ACTION_PLAYER_START, citem, {}, inherited=state)
+    assert state.OnNextMode == 0 and state.onNextPosition == '(10,20)'
+    rules.RulesList([citem]).runActions(rules.RULES_ACTION_PLAYER_STOP, citem, {}, inherited=state)
+    assert state.OnNextMode == 0
+    assert _next_channel(rules, rs, start)['OnNextMode'] == GLOBAL_MODE
 
 
 @pytest.mark.parametrize('saved, mode', [('1', 1), ('4', 4), ('0', 0), (' 2 ', 2), ('text', GLOBAL_MODE), (None, GLOBAL_MODE), ([], GLOBAL_MODE)])
@@ -109,14 +135,28 @@ def _onplay_lines():
     return [' '.join(line.split('#')[0].split()) for line in text.splitlines() if line.split('#')[0].strip()]
 
 
+def _method_lines(name):
+    source = _src('services.py')
+    tree   = ast.parse(source, feature_version=(3, 8))
+    player = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'Player')
+    method = next(n for n in player.body if isinstance(n, ast.FunctionDef) and n.name == name)
+    text   = ast.get_source_segment(source, method)
+    return [' '.join(line.split('#')[0].split()) for line in text.splitlines() if line.split('#')[0].strip()]
+
+
 def test_a_new_channel_starts_from_the_settings_before_its_rules_run():
     """A channel change sends no stop: without this reset the previous channel's
-    rule values stayed on the next channel."""
+    rule values stayed on the next channel. imports.65: the reset is the scratch
+    RuleState the rules run on, built from the settings (rule 2's two settings
+    are in the table), in _applyChannelRules, the first step of a new channel."""
+    import rulestate_helpers as rs
     lines = _onplay_lines()
     new   = next(i for i, line in enumerate(lines) if line.startswith('if newChan:'))
-    mode  = lines.index("self.OnNextMode = SETTINGS.getSettingInt('OnNext_Mode')")
-    pos   = lines.index('self.onNextPosition = SETTINGS.getSetting("OnNext_Position_XY")')
-    rules = next(i for i, line in enumerate(lines) if 'RulesList(' in line)
-    start = next(i for i, line in enumerate(lines) if 'RULES_ACTION_PLAYER_START' in line)
-    assert new < mode < rules < start and new < pos < rules
-    assert sum("self.OnNextMode = SETTINGS.getSettingInt('OnNext_Mode')" == line for line in lines) == 1
+    assert lines[new + 1] == 'self.playingItem = self._applyChannelRules(playingItem)'
+    apply = _method_lines('_applyChannelRules')
+    state = next(i for i, line in enumerate(apply) if line.startswith('state = rulestate_helpers.RuleState(dict(rulestate_helpers.baseline(SETTINGS)'))
+    rules = next(i for i, line in enumerate(apply) if 'RulesList(' in line)
+    start = next(i for i, line in enumerate(apply) if 'RULES_ACTION_PLAYER_START' in line)
+    assert rules < start and state < start and 'inherited=state' in apply[start]
+    assert ('OnNextMode', 'OnNext_Mode', 'getSettingInt') in rs.SETTING_FIELDS
+    assert ('onNextPosition', 'OnNext_Position_XY', 'getSetting') in rs.SETTING_FIELDS

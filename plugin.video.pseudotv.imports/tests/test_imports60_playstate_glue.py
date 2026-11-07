@@ -11,6 +11,7 @@ for real under the stubs.
 import ast
 import os
 import re
+import threading
 import types
 
 import pytest
@@ -154,7 +155,8 @@ def test_handover_to_other_playback_restores_the_last_pseudotv_programme():
 
 def test_new_channel_syncs_after_the_start_rules_and_before_ui_work():
     lines = _code_lines(_body('Player', '_onPlay'))
-    rules = _index(lines, 'RULES_ACTION_PLAYER_START')
+    # imports.65: the start rules run (and their values are published) in _applyChannelRules
+    rules = _index(lines, 'self.playingItem = self._applyChannelRules(playingItem)')
     sync  = _index(lines, SYNC_NEW, rules)
     assert sync == rules + 1
     assert sync < _index(lines, 'self.setSubtitles(', rules) and sync < _index(lines, 'self.toggleOverlay(self.enableOverlay)', rules)
@@ -221,12 +223,30 @@ def test_cancel_runs_in_its_own_thread():
     assert _code_lines(_body('Player', '_cancelPlaystate'))[-1] == 'self.playstate.clear()'
 
 
+class _SwitchPlayer(object):
+    """The player side of the switch: imports.65's real _rollbackSwitched, under a real lock."""
+    _rollbackSwitched = _function('Player', '_rollbackSwitched')
+
+    def __init__(self, value, overrides=None):
+        self.rollbackPlaycount = value
+        self._rulesOverrides   = dict(overrides or {})
+        self._rules_lock       = threading.Lock()
+        self.cancels           = 0
+
+    def _cancelPlaystate(self):
+        self.cancels += 1
+
+
 class _SwitchMonitor(object):
-    def __init__(self, before, player_value):
+    def __init__(self, before, player_value, overrides=None):
         self.rollbackSwitch = before
-        self.player = types.SimpleNamespace(rollbackPlaycount=player_value, cancels=0)
-        self.player._cancelPlaystate = lambda: setattr(self.player, 'cancels', self.player.cancels + 1)
+        self.player = _SwitchPlayer(player_value, overrides)
     def log(self, msg, level=0): pass
+
+
+def _switch_check(now):
+    settings = types.SimpleNamespace(getSettingBool=lambda key: {'Rollback_Watched': now}[key])
+    return _function('Monitor', '_chkRollbackSwitch', SETTINGS=settings)
 
 
 @pytest.mark.parametrize('before, now, player_value, after_value, cancels', [
@@ -236,8 +256,8 @@ class _SwitchMonitor(object):
     (False, False, True, True, 0),      # (and nothing is cancelled)
 ], ids=['off', 'on', 'unchanged-on', 'unchanged-off'])
 def test_switch_runs_for_real(before, now, player_value, after_value, cancels):
-    settings = types.SimpleNamespace(getSettingBool=lambda key: {'Rollback_Watched': now}[key])
-    check = _function('Monitor', '_chkRollbackSwitch', SETTINGS=settings)
+    """A channel without rule 53 (imports.65: through the real Player._rollbackSwitched)."""
+    check = _switch_check(now)
     monitor = _SwitchMonitor(before, player_value)
     check(monitor)
     assert monitor.player.rollbackPlaycount is after_value
@@ -255,7 +275,7 @@ def test_tune_timestamp_still_stamped_for_the_programme_key():
 
 
 @pytest.mark.parametrize('name', ['services.py', 'jsonrpc.py', 'rules.py', 'builder.py', 'playstate_helpers.py',
-                                  os.path.join('parsers', 'MP4Parser.py')])
+                                  os.path.join('parsers', 'MP4Parser.py'), 'rulestate_helpers.py'])
 def test_changed_files_pass_the_ast_python38_check(name):
     """Best effort only: ast's feature_version rejects some newer syntax (e.g.
     `match`) but not all of it (3.12 f-string quote reuse, parenthesised `with`
@@ -265,23 +285,23 @@ def test_changed_files_pass_the_ast_python38_check(name):
 
 # --- rule 53 (per-channel Rollback Playcount) -----------------------------------------
 
-class _Player(object):
-    rollbackPlaycount = None
-    disableTrakt      = False
-
-
 @pytest.mark.parametrize('setting, rule_value', [(True, False), (False, True)])
-def test_rule53_stop_restores_the_global_switch(monkeypatch, setting, rule_value):
+def test_rule53_stop_leaves_the_value_and_the_next_channel_gets_the_global(setting, rule_value):
     """runActions re-creates the rules on every call, so the stop step used to
-    restore a lost value ([]), switching rollback off on every channel."""
+    restore a lost value ([]), switching rollback off on every channel.
+    imports.65: the stop does nothing; each tune starts from the settings."""
     import rules
-    real = rules.SETTINGS.getSettingBool
-    monkeypatch.setattr(rules.SETTINGS, 'getSettingBool', lambda key: setting if key == 'Rollback_Watched' else real(key))
-    citem  = {'id': 'x@PseudoTV_Live', 'name': 'X', 'rules': {'53': {'values': {'0': rule_value}}}}
-    player = _Player()
-    player.rollbackPlaycount = setting
-    run = rules.RulesList([citem]).runActions
-    run(rules.RULES_ACTION_PLAYER_START, citem, {}, inherited=player)
-    assert player.rollbackPlaycount is rule_value
-    run(rules.RULES_ACTION_PLAYER_STOP, citem, {}, inherited=player)
-    assert player.rollbackPlaycount is setting
+    import rulestate_helpers as rs
+    settings = types.SimpleNamespace(getSettingBool=lambda key: setting if key == 'Rollback_Watched' else False,
+                                     getSettingInt=lambda key: 0, getSetting=lambda key: '')
+    start = dict(rs.baseline(settings), lastSubState=False)
+    citem = {'id': 'x@PseudoTV_Live', 'name': 'X', 'rules': {'53': {'values': {'0': rule_value}}}}
+    state = rs.RuleState(start)
+    rules.RulesList([citem]).runActions(rules.RULES_ACTION_PLAYER_START, citem, {}, inherited=state)
+    assert state.rollbackPlaycount is rule_value
+    rules.RulesList([citem]).runActions(rules.RULES_ACTION_PLAYER_STOP, citem, {}, inherited=state)   # fresh rules, as live
+    assert state.rollbackPlaycount is rule_value and state.overrides() == {'rollbackPlaycount': rule_value}
+    other = {'id': 'y@PseudoTV_Live', 'name': 'Y'}
+    nxt   = rs.RuleState(start)
+    rules.RulesList([other]).runActions(rules.RULES_ACTION_PLAYER_START, other, {}, inherited=nxt)
+    assert rs.effective(start, nxt.overrides(), rs.FIELDS)['rollbackPlaycount'] is setting

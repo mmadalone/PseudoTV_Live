@@ -27,6 +27,7 @@ import playstate_helpers # madteevee (imports fork, imports.60): Rollback_Watche
 import restart_helpers   # madteevee (imports fork, imports.62): restart from the beginning (pop-up, remote, guide entry)
 import clock_helpers     # madteevee (imports fork, imports.63): the one clock + time conversions
 import onnext_helpers    # madteevee (imports fork, imports.64): Up next drawn on the video
+import rulestate_helpers # madteevee (imports fork, imports.65): channel player rules = settings + the tuned channel's rules
 
 class Player(xbmc.Player):
     # imports.16: pendingItem / playingItem live as instance attrs (set in
@@ -110,7 +111,8 @@ class Player(xbmc.Player):
         # madteevee (imports fork, imports.62): restart from the beginning (restart_helpers).
         # _play_epoch counts playback changes (started, AV started, ended, stopped, error),
         # so the pop-up and a restart can tell that what they were for no longer plays.
-        # _retune marks the next tune after a Stop (the same channel tuned again).
+        # _retune marks the next tune after a Stop: it counts as a fresh tune, so the
+        # channel's rules run again even on the same channel (imports.65).
         # _pendingRestart is a guide-entry restart of a Custom channel waiting for its tune.
         # _restart_lock lets one restart run at a time (@threadit alone doesn't serialize).
         # _play_stops / _play_errors count stop and error events, so a LiveTV restart can
@@ -121,6 +123,16 @@ class Player(xbmc.Player):
         self._restart_lock   = Lock()
         self._play_stops     = 0
         self._play_errors    = 0
+        # madteevee (imports fork, imports.65): the rule-controlled values (rulestate_helpers)
+        # always equal effective(settings, _rulesOverrides). Only _applyChannelRules,
+        # _releaseChannelRules, _refreshChannelRules and _rollbackSwitched write them, each
+        # under _rules_lock, which covers setting reads, dict work and attribute writes only
+        # (never rule code, UI, JSON-RPC or another lock). _rulesOverrides is what the last
+        # tuned Custom channel's rules set ({} after a hand-over); _rulesBaseline is the
+        # settings last published (None before the first write).
+        self._rules_lock     = Lock()
+        self._rulesOverrides = {}
+        self._rulesBaseline  = None
 
 
     def log(self, msg, level=xbmc.LOGDEBUG):
@@ -454,6 +466,9 @@ class Player(xbmc.Player):
             if oldInfo.get('isPseudoTV'): self._syncPlaystate(oldInfo)
             self.toggleOverlay(False)
             self.lastSubState = BUILTIN.isSubtitle()
+            # madteevee (imports fork, imports.65): no Custom channel plays now, so its rules
+            # stop applying: back to the settings (Kodi sends no stop on this hand-over).
+            self._releaseChannelRules()
             # madteevee (imports fork, imports.62): the Restart pop-up for LiveTV channels
             # that can replay their show on now. LiveTV follows the global setting
             # (channel rule 54 belongs to Custom channels).
@@ -468,18 +483,14 @@ class Player(xbmc.Player):
         self.lastSubState = BUILTIN.isSubtitle()
         retune, self._retune = self._retune, False # madteevee (imports fork, imports.62): see onPlayBackStopped
         oldInfo = self.playingItem
-        newChan = oldInfo.get('chid',random.random()) != playingItem.get('chid')
-        self.log('_onPlay, [%s], mode = %s, isPlaylist = %s, new channel = %s'%(playingItem.get('citem',{}).get('id'), playingItem.get('mode'), playingItem.get('isPlaylist',False), newChan))
+        # madteevee (imports fork, imports.65): a tune after a Stop is a tune: the channel's rules run again
+        newChan = retune or oldInfo.get('chid',random.random()) != playingItem.get('chid')
+        self.log('_onPlay, [%s], mode = %s, isPlaylist = %s, new channel = %s, retune = %s'%(playingItem.get('citem',{}).get('id'), playingItem.get('mode'), playingItem.get('isPlaylist',False), newChan, retune))
         if newChan: #New channel
-            # madteevee (imports fork, imports.64): the same for rule 2 ('Show OnNext'): a channel
-            # change sends no stop, so the previous channel's rule values would carry over.
-            self.OnNextMode       = SETTINGS.getSettingInt('OnNext_Mode')
-            self.onNextPosition   = SETTINGS.getSetting("OnNext_Position_XY")
-            # madteevee (imports fork, imports.62): start from the global value, so a
-            # previous channel's rule 54 ('Restart Button') never carries over.
-            self.replayPercentage = SETTINGS.getSettingInt('Replay_Percentage')
-            self.runActions  = RulesList([playingItem.get('citem',{})]).runActions
-            self.playingItem = self._runActions(RULES_ACTION_PLAYER_START, playingItem.get('citem',{}), playingItem, inherited=self)
+            # madteevee (imports fork, imports.65): the channel's rules are worked out on a scratch
+            # copy and published as settings + what they set, so no previous channel's value
+            # (imports.62 rule 54, imports.64 rule 2, and every other player rule) carries over.
+            self.playingItem = self._applyChannelRules(playingItem)
             # madteevee (imports fork, imports.60): roll back the previous programme and
             # snapshot this one. Started before the subtitle/overlay work so the snapshot
             # is read right after playback starts; the switch value is the one this
@@ -510,10 +521,10 @@ class Player(xbmc.Player):
             if getattr(self, 'smartSubsMode', 'legacy') == 'smart':
                 self.setSubtitles(self.lastSubState)
             self.toggleInfo(self.infoOnChange)
-            # madteevee (imports fork, imports.62): the same channel tuned again after a
-            # Stop offers the Restart pop-up like any tune. The add-on's own programme
-            # changes end the previous file (no Stop), so they never offer it.
-            if retune: self.toggleReplay(bool(self.replayPercentage), epoch)
+            # madteevee (imports fork, imports.65): the add-on's own programme changes end the
+            # previous file (no Stop), so they never offer the Restart pop-up. The same channel
+            # tuned again after a Stop takes the new-channel branch (newChan above), which offers
+            # it (imports.62) with the channel's own rule 54 value.
         # madteevee (imports fork, imports.62): a guide-entry restart of this channel was
         # waiting for this tune: jump to the start of the programme.
         self._restartPending(playingItem)
@@ -612,6 +623,59 @@ class Player(xbmc.Player):
     def _runActions(self, action, citem={}, parameter=None, inherited=None):
         if self.runActions: return self.runActions(action, citem, parameter, inherited)
         else:               return parameter
+
+
+    # madteevee (imports fork, imports.65): the four writers of the rule-controlled values
+    # (rulestate_helpers). The invariant: those values always equal the settings plus what
+    # the last tuned Custom channel's PLAYER_START rules set. runActions re-creates the rules
+    # on every call, so the old per-rule restores at Stop could only restore a lost value.
+    def _applyChannelRules(self, playingItem):
+        # A tune (a channel change, a return from LiveTV, or Stop then the same channel). The
+        # rules run on a scratch RuleState with no lock held (PauseRule's START may read a file
+        # or the network); only the publish is locked.
+        citem = playingItem.get('citem',{})
+        self.runActions = RulesList([citem]).runActions
+        state = rulestate_helpers.RuleState(dict(rulestate_helpers.baseline(SETTINGS), lastSubState=self.lastSubState))
+        playingItem = self._runActions(RULES_ACTION_PLAYER_START, citem, playingItem, inherited=state)
+        overrides = state.overrides()
+        with self._rules_lock:
+            base = rulestate_helpers.baseline(SETTINGS) # read here: a refresh that ran during the rules is not undone
+            values = rulestate_helpers.effective(dict(base, lastSubState=self.lastSubState), overrides, rulestate_helpers.TUNE_FIELDS)
+            rulestate_helpers.publish(values, self, rulestate_helpers.TUNE_FIELDS)
+            self._rulesOverrides, self._rulesBaseline = overrides, base
+        if overrides: self.log('[%s] channel rules: %s'%(citem.get('id'), overrides), xbmc.LOGINFO)
+        return playingItem
+
+
+    def _releaseChannelRules(self):
+        # A hand-over to LiveTV or a library file: no Custom channel's rules apply.
+        with self._rules_lock:
+            base = rulestate_helpers.baseline(SETTINGS)
+            rulestate_helpers.publish(base, self, rulestate_helpers.FIELDS)
+            self._rulesOverrides, self._rulesBaseline = {}, base
+        self.log('_releaseChannelRules, back to the settings')
+
+
+    def _refreshChannelRules(self):
+        # A settings change: the new settings under the same overrides. Runs no rule code, so
+        # the add-on's own saves (ZeroConf_Status, Update_Status) leave the values unchanged.
+        # A channel's own rule keeps winning while it plays (decision Q1 = a).
+        with self._rules_lock:
+            old, base = self._rulesBaseline, rulestate_helpers.baseline(SETTINGS)
+            overrides = self._rulesOverrides
+            rulestate_helpers.publish(rulestate_helpers.effective(base, overrides, rulestate_helpers.FIELDS), self, rulestate_helpers.FIELDS)
+            self._rulesOverrides, self._rulesBaseline = overrides, base
+        changed = sorted(k for k in base if old is not None and base[k] != old.get(k))
+        if changed: self.log('_refreshChannelRules, settings changed: %s; channel keeps: %s'%(changed, sorted(set(overrides) & set(rulestate_helpers.FIELDS))), xbmc.LOGINFO)
+        return bool(changed)
+
+
+    def _rollbackSwitched(self, state):
+        # The 'Rollback watched' switch acts at once (imports.60), except on a channel with its
+        # own rule 53, which keeps its value (Q1 = a). Returns the value now in effect.
+        with self._rules_lock:
+            if 'rollbackPlaycount' not in self._rulesOverrides: self.rollbackPlaycount = state
+            return self.rollbackPlaycount
 
 
     # madteevee (imports fork, imports.60): Rollback_Watched Kodi glue. The logic
@@ -1177,8 +1241,10 @@ class Monitor(xbmc.Monitor):
         if state == self.rollbackSwitch: return
         self.log('_chkRollbackSwitch, Rollback_Watched = %s'%(state))
         self.rollbackSwitch = state
-        self.player.rollbackPlaycount = state
-        if not state: self.player._cancelPlaystate()
+        # madteevee (imports fork, imports.65): through the player's lock; a channel with its
+        # own rule 53 keeps its value, so its pending rollback is cancelled only when off.
+        effective = self.player._rollbackSwitched(state)
+        if not state and not effective: self.player._cancelPlaystate()
 
 
     @debounceit(15)
@@ -1196,17 +1262,16 @@ class Monitor(xbmc.Monitor):
         
     def _updatePlayerSettings(self):
         self.log('_updatePlayerSettings')
-        self.player.enableOverlay     = SETTINGS.getSettingBool('Overlay_Enable')
-        self.player.infoOnChange      = SETTINGS.getSettingBool('Enable_OnInfo')
-        self.player.disableTrakt      = SETTINGS.getSettingBool('Disable_Trakt')
-        self.player.rollbackPlaycount = SETTINGS.getSettingBool('Rollback_Watched')
         self.player.minDuration       = SETTINGS.getSettingInt('Seek_Tolerance')
         self.player.maxProgress       = SETTINGS.getSettingInt('Seek_Threshold')
         self.player.sleepTime         = SETTINGS.getSettingInt('Idle_Timer')
         self.player.runWhilePlaying   = SETTINGS.getSettingBool('Run_While_Playing')
-        self.player.replayPercentage  = SETTINGS.getSettingInt('Replay_Percentage')
-        self.player.OnNextMode        = SETTINGS.getSettingInt('OnNext_Mode')
-        self.player.onNextPosition    = SETTINGS.getSetting("OnNext_Position_XY")
+        # madteevee (imports fork, imports.65): the rule-controlled values are the settings plus
+        # the playing Custom channel's rules. Every settings save lands here: the add-on's own
+        # ZeroConf_Status (server.py discovery loop) and Update_Status (tasks.chkVersion) saves,
+        # the dashboard settings API and the settings dialog. Writing the globals here used to
+        # put them back over the playing channel's rules.
+        self.player._refreshChannelRules()
         
         
 class Service(object):

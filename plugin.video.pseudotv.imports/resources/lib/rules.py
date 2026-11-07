@@ -449,7 +449,9 @@ class ShowOnNext(BaseRule):
         self.optionLabels       = [LANGUAGE(30045),LANGUAGE(32229),LANGUAGE(30196)]
         self.optionValues       = [bool(SETTINGS.getSettingInt('OnNext_Mode')),SETTINGS.getSetting("OnNext_Position_XY"),SETTINGS.getSettingInt('OnNext_Mode')]
         self.optionDescriptions = [LANGUAGE(30045),LANGUAGE(33229),LANGUAGE(30196)]
-        self.actions            = [RULES_ACTION_PLAYER_START,RULES_ACTION_PLAYER_STOP]
+        # madteevee (imports fork, imports.65): no PLAYER_STOP. The player owns the reset (Player._applyChannelRules,
+        # rulestate_helpers); runActions re-creates the rules on every call, so a stop here could only restore a lost value.
+        self.actions            = [RULES_ACTION_PLAYER_START]
         self.selectBoxOptions   = ["",[LANGUAGE(30022),LANGUAGE(32136)],{LANGUAGE(30021):0,LANGUAGE(30193):1,LANGUAGE(30194):2,LANGUAGE(30197):3,LANGUAGE(30195):4}]
         self.storedValues       = [[],[],[],[]]
 
@@ -495,22 +497,12 @@ class ShowOnNext(BaseRule):
         # never applied, and the stop wrote the old mode to an attribute nothing reads. The rule's
         # own 'Show OnNext' switch now counts: off means mode 0 on this channel.
         if actionid == RULES_ACTION_PLAYER_START:
-            self.storedValues[0]  = bool(player.OnNextMode)
-            self.storedValues[1]  = player.onNextPosition
-            self.storedValues[2]  = player.OnNextMode
             # The web dashboard saves a list choice as text ('1'): the overlay compares numbers.
             try:    mode = int(self.optionValues[2])
             except (TypeError, ValueError): mode = SETTINGS.getSettingInt('OnNext_Mode')
             player.onNextPosition = self.optionValues[1]
             player.OnNextMode     = mode if self.optionValues[0] else 0
             self.log("runAction, setting onNextPosition = %s, OnNextMode = %s"%(player.onNextPosition, player.OnNextMode))
-            
-        elif actionid == RULES_ACTION_PLAYER_STOP:
-            # runActions re-creates the rules on every call, so storedValues are still [] here
-            # (the rule 53 finding, imports.60): restore the global settings instead.
-            player.onNextPosition = SETTINGS.getSetting("OnNext_Position_XY")
-            player.OnNextMode     = SETTINGS.getSettingInt('OnNext_Mode')
-            self.log("runAction, restoring onNextPosition = %s, OnNextMode = %s"%(player.onNextPosition, player.OnNextMode))
         return parameter
 
 
@@ -663,7 +655,9 @@ class DisableOverlay(BaseRule): #PLAYER RULES [50-99]
         self.optionLabels       = [LANGUAGE(30042)]
         self.optionValues       = [SETTINGS.getSettingBool('Overlay_Enable')]
         self.optionDescriptions = [LANGUAGE(33042)]
-        self.actions            = [RULES_ACTION_PLAYER_START,RULES_ACTION_PLAYER_STOP]
+        # madteevee (imports fork, imports.65): no PLAYER_STOP. The player owns the reset (Player._applyChannelRules,
+        # rulestate_helpers); runActions re-creates the rules on every call, so a stop here could only restore a lost value.
+        self.actions            = [RULES_ACTION_PLAYER_START]
         self.storedValues       = [[]]
 
 
@@ -686,13 +680,8 @@ class DisableOverlay(BaseRule): #PLAYER RULES [50-99]
 
     def runAction(self, actionid, citem, parameter, player):
         if actionid == RULES_ACTION_PLAYER_START:
-            self.storedValues[0] = player.enableOverlay
             player.enableOverlay = self.optionValues[0]
             self.log("runAction, setting enableOverlay = %s"%(player.enableOverlay))
-            
-        elif actionid == RULES_ACTION_PLAYER_STOP:
-            player.enableOverlay = self.storedValues[0]
-            self.log("runAction, restore enableOverlay = %s"%(player.enableOverlay))
         return parameter
 
 
@@ -754,9 +743,10 @@ class ForceSubtitles(BaseRule):
             'What to do in Smart mode when no subtitle stream matches the preferred sub language.',
             'What to do in Smart mode when the audio stream has no language tag (empty / und).',
         ]
+        # madteevee (imports fork, imports.65): no PLAYER_STOP. The player owns the reset (Player._applyChannelRules,
+        # rulestate_helpers); runActions re-creates the rules on every call, so a stop here could only restore a lost value.
         self.actions            = [
             RULES_ACTION_PLAYER_START,
-            RULES_ACTION_PLAYER_STOP,
             RULES_ACTION_CHANNEL_BUILD_FILELIST_POST,
         ]
         self.selectBoxOptions   = [
@@ -890,18 +880,12 @@ class ForceSubtitles(BaseRule):
         if actionid == RULES_ACTION_PLAYER_START:
             # parameter is the playingItem dict.
             mode = self._modeValue()
-            self.storedValues[0] = inherited.lastSubState
             inherited.smartSubsMode = mode
             if mode == 'legacy':
                 inherited.lastSubState = bool(self.optionValues[0])
                 self.log("runAction PLAYER_START, mode=legacy lastSubState=%s"%(inherited.lastSubState))
             else:
                 self.log("runAction PLAYER_START, mode=%s"%(mode))
-
-        elif actionid == RULES_ACTION_PLAYER_STOP:
-            inherited.lastSubState  = self.storedValues[0]
-            inherited.smartSubsMode = 'legacy'
-            self.log("runAction PLAYER_STOP, restored lastSubState=%s, smartSubsMode=legacy"%(inherited.lastSubState))
 
         elif actionid == RULES_ACTION_CHANNEL_BUILD_FILELIST_POST:
             # parameter is the fileList (list of fitems). For Smart mode write a
@@ -937,7 +921,9 @@ class DisableTrakt(BaseRule):
         self.optionLabels       = [LANGUAGE(30131)]
         self.optionValues       = [SETTINGS.getSettingBool('Disable_Trakt')]
         self.optionDescriptions = [LANGUAGE(33131)]
-        self.actions            = [RULES_ACTION_PLAYER_START,RULES_ACTION_PLAYER_STOP]
+        # madteevee (imports fork, imports.65): no PLAYER_STOP. The player owns the reset (Player._applyChannelRules,
+        # rulestate_helpers); runActions re-creates the rules on every call, so a stop here could only restore a lost value.
+        self.actions            = [RULES_ACTION_PLAYER_START]
         self.storedValues       = [[]]
 
 
@@ -960,13 +946,8 @@ class DisableTrakt(BaseRule):
 
     def runAction(self, actionid, citem, parameter, player):
         if actionid == RULES_ACTION_PLAYER_START:
-            self.storedValues[0] = player.disableTrakt
             player.disableTrakt = self.optionValues[0]
             self.log("runAction, setting disableTrakt = %s"%(player.disableTrakt))
-            
-        elif actionid == RULES_ACTION_PLAYER_STOP:
-            player.disableTrakt = self.storedValues[0]
-            self.log("runAction, restoring disableTrakt = %s"%(player.disableTrakt))
         return parameter
 
 
@@ -978,7 +959,9 @@ class RollbackPlaycount(BaseRule):
         self.optionLabels       = [LANGUAGE(30132)]
         self.optionValues       = [SETTINGS.getSettingBool('Rollback_Watched')]
         self.optionDescriptions = [LANGUAGE(33132)]
-        self.actions            = [RULES_ACTION_PLAYER_START,RULES_ACTION_PLAYER_STOP]
+        # madteevee (imports fork, imports.65): no PLAYER_STOP. The player owns the reset (Player._applyChannelRules,
+        # rulestate_helpers); runActions re-creates the rules on every call, so a stop here could only restore a lost value.
+        self.actions            = [RULES_ACTION_PLAYER_START]
         self.storedValues       = [[]]
 
 
@@ -1001,18 +984,8 @@ class RollbackPlaycount(BaseRule):
 
     def runAction(self, actionid, citem, parameter, player):
         if actionid == RULES_ACTION_PLAYER_START:
-            self.storedValues[0] = player.rollbackPlaycount
             player.rollbackPlaycount = self.optionValues[0]
             self.log("runAction, setting rollbackPlaycount = %s"%(player.rollbackPlaycount))
-            
-        elif actionid == RULES_ACTION_PLAYER_STOP:
-            # madteevee (imports fork, imports.60): runActions re-creates the rules on
-            # every call (fresh rules from the citem), so storedValues[0] is still []
-            # here, and the old line switched rollback off on every channel after the
-            # first stop on a rule-53 channel. Now that Rollback_Watched is acted on,
-            # restore the global switch instead.
-            player.rollbackPlaycount = SETTINGS.getSettingBool('Rollback_Watched')
-            self.log("runAction, restoring rollbackPlaycount = %s"%(player.rollbackPlaycount))
         return parameter
 
 
@@ -1024,7 +997,9 @@ class DisableRestart(BaseRule):
         self.optionLabels       = [LANGUAGE(30153)]
         self.optionValues       = [SETTINGS.getSettingInt('Replay_Percentage')]
         self.optionDescriptions = [LANGUAGE(33153)]
-        self.actions            = [RULES_ACTION_PLAYER_START,RULES_ACTION_PLAYER_STOP]
+        # madteevee (imports fork, imports.65): no PLAYER_STOP. The player owns the reset (Player._applyChannelRules,
+        # rulestate_helpers); runActions re-creates the rules on every call, so a stop here could only restore a lost value.
+        self.actions            = [RULES_ACTION_PLAYER_START]
         self.selectBoxOptions   = [list(range(25,100,5))]
         self.storedValues       = [[]]
 
@@ -1048,17 +1023,8 @@ class DisableRestart(BaseRule):
 
     def runAction(self, actionid, citem, parameter, player):
         if actionid == RULES_ACTION_PLAYER_START:
-            self.storedValues[0] = player.replayPercentage
             player.replayPercentage = self.optionValues[0]
             self.log("runAction, setting replayPercentage = %s"%(player.replayPercentage))
-            
-        elif actionid == RULES_ACTION_PLAYER_STOP:
-            # madteevee (imports fork, imports.62): same fix as rule 53 (imports.60).
-            # runActions re-creates the rules on every call, so storedValues[0] is still
-            # [] here, and the old line switched the Restart pop-up off on every channel
-            # after the first stop on a rule-54 channel. Restore the global value.
-            player.replayPercentage = SETTINGS.getSettingInt('Replay_Percentage')
-            self.log("runAction, restoring replayPercentage = %s"%(player.replayPercentage))
         return parameter
 
         
@@ -1070,7 +1036,9 @@ class DisableOnChange(BaseRule):
         self.optionLabels       = [LANGUAGE(30170)]
         self.optionValues       = [SETTINGS.getSettingBool('Enable_OnInfo')]
         self.optionDescriptions = [LANGUAGE(33171)]
-        self.actions            = [RULES_ACTION_PLAYER_START,RULES_ACTION_PLAYER_STOP]
+        # madteevee (imports fork, imports.65): no PLAYER_STOP. The player owns the reset (Player._applyChannelRules,
+        # rulestate_helpers); runActions re-creates the rules on every call, so a stop here could only restore a lost value.
+        self.actions            = [RULES_ACTION_PLAYER_START]
         self.storedValues       = [[]]
 
 
@@ -1093,13 +1061,8 @@ class DisableOnChange(BaseRule):
 
     def runAction(self, actionid, citem, parameter, player):
         if actionid == RULES_ACTION_PLAYER_START:
-            self.storedValues[0] = player.infoOnChange
             player.infoOnChange = self.optionValues[0]
             self.log("runAction, setting infoOnChange = %s"%(player.infoOnChange))
-            
-        elif actionid == RULES_ACTION_PLAYER_STOP:
-            player.infoOnChange = self.storedValues[0]
-            self.log("runAction, restoring infoOnChange = %s"%(player.infoOnChange))
         return parameter
 
 

@@ -138,11 +138,16 @@ def test_onplay_triggers():
     ret    = _index(lines, 'return', start)
     assert sync < live < ret and lines[live - 1] == 'self._retune = False'
     # Custom: the retune flag is read once; rule 54 can't leak into the next channel
-    assert _index(lines, 'retune, self._retune = self._retune, False') > ret
-    assert _index(lines, "self.replayPercentage = SETTINGS.getSettingInt('Replay_Percentage')") + 1 == _index(lines, 'RulesList(')
+    # (imports.65: the channel's rules are applied first, over the settings, in _applyChannelRules)
+    flag = _index(lines, 'retune, self._retune = self._retune, False')
+    assert flag > ret
+    # imports.65: a tune after a Stop takes the new-channel branch, whose one call offers the pop-up
+    assert _index(lines, 'newChan = retune or ', flag) > flag
+    branch = _index(lines, 'if newChan:')
+    assert lines[branch + 1] == 'self.playingItem = self._applyChannelRules(playingItem)'
     assert sum(line == 'self.toggleReplay(bool(self.replayPercentage), epoch)' for line in lines) == 1
-    assert sum(line == 'if retune: self.toggleReplay(bool(self.replayPercentage), epoch)' for line in lines) == 1
-    assert _index(lines, 'if retune: self.toggleReplay(') > _index(lines, 'self.toggleInfo(self.infoOnChange)')
+    assert _index(lines, 'self.toggleReplay(bool(self.replayPercentage), epoch)') < _index(lines, 'else:', branch)
+    assert not any('if retune: self.toggleReplay(' in line for line in lines)
     assert _index(lines, 'self._restartPending(playingItem)') + 1 == _index(lines, 'self.jsonRPC._setRuntime(')
     assert "'epoch'" not in ''.join(lines) and '"epoch"' not in ''.join(lines)
 
@@ -656,24 +661,25 @@ def test_on_notification(sender, method, data, source):
 
 # --- rule 54 ('Restart Button') ----------------------------------------------------------------
 
-class _Player(object):
-    replayPercentage = None
-
-
-def test_rule54_stop_restores_the_global_value(monkeypatch):
+def test_rule54_stop_leaves_the_value_and_the_next_channel_gets_the_global(monkeypatch):
     """runActions re-creates the rules on every call, so the stop step used to restore a lost
-    value ([]), switching the pop-up off on every channel after one stop on a rule-54 channel."""
+    value ([]), switching the pop-up off on every channel after one stop on a rule-54 channel.
+    imports.65: the stop does nothing; each tune starts from the settings (rulestate_helpers)."""
     import rules
-    real = rules.SETTINGS.getSettingInt
-    monkeypatch.setattr(rules.SETTINGS, 'getSettingInt', lambda key: 5 if key == 'Replay_Percentage' else real(key))
-    citem  = {'id': 'x@PseudoTV_Live', 'name': 'X', 'rules': {'54': {'values': {'0': 50}}}}
-    player = _Player()
-    player.replayPercentage = 5
-    run = rules.RulesList([citem]).runActions
-    run(rules.RULES_ACTION_PLAYER_START, citem, {}, inherited=player)
-    assert player.replayPercentage == 50
-    run(rules.RULES_ACTION_PLAYER_STOP, citem, {}, inherited=player)
-    assert player.replayPercentage == 5
+    import rulestate_helpers as rs
+    settings = types.SimpleNamespace(getSettingBool=lambda key: False, getSetting=lambda key: '',
+                                     getSettingInt=lambda key: 5 if key == 'Replay_Percentage' else 0)
+    start = dict(rs.baseline(settings), lastSubState=False)
+    citem = {'id': 'x@PseudoTV_Live', 'name': 'X', 'rules': {'54': {'values': {'0': 50}}}}
+    state = rs.RuleState(start)
+    rules.RulesList([citem]).runActions(rules.RULES_ACTION_PLAYER_START, citem, {}, inherited=state)
+    assert state.replayPercentage == 50 and state.overrides() == {'replayPercentage': 50}
+    rules.RulesList([citem]).runActions(rules.RULES_ACTION_PLAYER_STOP, citem, {}, inherited=state)   # fresh rules, as live
+    assert state.replayPercentage == 50 and state.overrides() == {'replayPercentage': 50}
+    other = {'id': 'y@PseudoTV_Live', 'name': 'Y'}
+    nxt   = rs.RuleState(start)
+    rules.RulesList([other]).runActions(rules.RULES_ACTION_PLAYER_START, other, {}, inherited=nxt)
+    assert nxt.overrides() == {} and rs.effective(start, nxt.overrides(), rs.FIELDS)['replayPercentage'] == 5
 
 
 # --- jsonrpc reads -----------------------------------------------------------------------------
