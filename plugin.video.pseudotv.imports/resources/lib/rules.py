@@ -1047,7 +1047,7 @@ class DisableOnChange(BaseRule):
                   
 
     def copy(self):
-        return DisableOverlay()
+        return DisableOnChange() # madteevee (imports fork, imports.65): was DisableOverlay(), so rule 55 acted as a second rule 50 (upstream's fix)
 
 
     def getTitle(self):
