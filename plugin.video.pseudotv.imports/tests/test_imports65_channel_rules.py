@@ -176,6 +176,7 @@ class FakePlayerBase(object):
         self.calls.append(('subState', state))   # the on/off value rule 51 legacy mode forces
     def _syncPlaystate(self, oldInfo=None, newInfo=None, allow=False): self.calls.append(('sync', allow))
     def _restartPending(self, playingItem): self.calls.append(('restartPending', None))
+    def _restoreLiveSubtitles(self, epoch): self.calls.append(('restoreLiveSubtitles', epoch)) # imports.67
 
     def infos(self):
         return [msg for msg, level in self.logged if level == xbmc.LOGINFO]

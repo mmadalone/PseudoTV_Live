@@ -28,6 +28,7 @@ import restart_helpers   # madteevee (imports fork, imports.62): restart from th
 import clock_helpers     # madteevee (imports fork, imports.63): the one clock + time conversions
 import onnext_helpers    # madteevee (imports fork, imports.64): Up next drawn on the video
 import rulestate_helpers # madteevee (imports fork, imports.65): channel player rules = settings + the tuned channel's rules
+import livesubs_helpers # madteevee (imports fork, imports.67): LiveTV subtitles follow the channel
 
 class Player(xbmc.Player):
     # imports.16: pendingItem / playingItem live as instance attrs (set in
@@ -133,6 +134,16 @@ class Player(xbmc.Player):
         self._rules_lock     = Lock()
         self._rulesOverrides = {}
         self._rulesBaseline  = None
+        # madteevee (imports fork, imports.67): LiveTV subtitles follow the channel (livesubs_helpers).
+        # _liveSubs is the remembered on/off per LiveTV channel ({key: bool}, the memory file,
+        # loaded once here). _liveSubsState is the settled LiveTV playback the monitor may record
+        # for ({'epoch','key','seed','baseline'}), None until _restoreLiveSubtitles settles one.
+        # No lock: both are only ever replaced whole (an atomic reference swap; the memory is
+        # copied on write by livesubs_helpers.remember). The monitor thread (_chkLiveSubtitles)
+        # is the only writer of the memory and its file; the _onPlay worker only reads the
+        # memory, and every reader checks the state's epoch against _play_epoch.
+        self._liveSubs       = self._loadLiveSubs()
+        self._liveSubsState  = None
 
 
     def log(self, msg, level=xbmc.LOGDEBUG):
@@ -474,6 +485,10 @@ class Player(xbmc.Player):
             # (channel rule 54 belongs to Custom channels).
             self._retune = False
             self.toggleReplay(bool(SETTINGS.getSettingInt('Replay_Percentage')), epoch)
+            # madteevee (imports fork, imports.67): a LiveTV channel (live or a replay) gets its
+            # remembered subtitle on/off. Last, because it waits RECHECK_S for its re-check (this
+            # is the @threadit worker, so no player callback waits for it).
+            self._restoreLiveSubtitles(epoch)
             # imports.16: non-PTV path now early-returns. Previously the
             # method fell through to a redundant `else: self.playingItem =
             # playingItem` at the bottom — a second write of the same value.
@@ -531,6 +546,211 @@ class Player(xbmc.Player):
         # madteevee (imports fork, imports.60): quePlaycount removed (the rollback runs in
         # _syncPlaystate above); _setRuntime now only caches the player's runtime.
         self.jsonRPC._setRuntime(playingItem.get('fitem',{}),playingItem.get('fitem',{}).get('runtime'))
+
+
+    # madteevee (imports fork, imports.67): LiveTV subtitles follow the channel. Kodi keeps video
+    # settings per video and starts a video it has none for with the default (subtitles off on
+    # this box); every replay (the RESTART pop-up, a guide replay, Kodi's "Play next programme
+    # automatically") is a new video. The add-on remembers the on/off per LiveTV channel and
+    # applies it whenever that channel plays. The decisions are in livesubs_helpers (tested
+    # without Kodi); these methods only read Kodi, act and keep the memory file.
+    def _liveSubsPath(self):
+        # Built on every call (as imports.py's _pictureVerdictsPath), so tests can move CACHE_LOC.
+        return FileAccess.translatePath(os.path.join(CACHE_LOC, livesubs_helpers.MEMORY_FILE))
+
+
+    def _loadLiveSubs(self):
+        # The usable entries of the memory file; {} when it is missing, unreadable or damaged.
+        # Never raises (it runs in __init__). The lock-free read is safe: the only writer
+        # replaces the file in one step (FileAccess.setJSON, imports.59 S3).
+        path = None
+        try:
+            path   = self._liveSubsPath()
+            memory = livesubs_helpers.valid_memory(FileAccess.getJSON(path))
+        except Exception as e:
+            self.log('_loadLiveSubs, could not read %s: %s'%(path, e), xbmc.LOGWARNING)
+            return {}
+        self.log('_loadLiveSubs, %s channel choice(s) remembered'%(len(memory)))
+        return memory
+
+
+    def _saveLiveSubs(self, memory):
+        # Writes the memory file (temp file + os.replace). True when written. Never raises: after
+        # a failure (logged) the file keeps its previous content; the memory in RAM still applies.
+        path = None
+        try:
+            path = self._liveSubsPath()
+            if FileAccess.setJSON(path, memory): return True
+            self.log('_saveLiveSubs, could not write %s'%(path), xbmc.LOGWARNING)
+        except Exception as e:
+            self.log('_saveLiveSubs, could not write %s: %s'%(path, e), xbmc.LOGWARNING)
+        return False
+
+
+    def _liveSubsInfo(self):
+        # Kodi read directly, not through BUILTIN.getInfoBool/getInfoLabel, which log every call
+        # at debug level: _chkLiveSubtitles runs this about once a second during LiveTV.
+        return {'live'   : xbmc.getCondVisibility('Pvr.IsPlayingTv'),
+                'epgtag' : xbmc.getCondVisibility('Pvr.IsPlayingEpgTag'),
+                'number' : xbmc.getInfoLabel('VideoPlayer.ChannelNumberLabel'),
+                'name'   : xbmc.getInfoLabel('VideoPlayer.ChannelName'),
+                'current': xbmc.getCondVisibility('VideoPlayer.SubtitlesEnabled'),
+                'has'    : xbmc.getCondVisibility('VideoPlayer.HasSubtitles')}
+
+
+    def _liveSubsFile(self):
+        # The playing file ('' when nothing plays): ties a settled state to the video it was
+        # settled on (a replay of the same channel has the same channel labels).
+        try: return self.getPlayingFile() or ''
+        except Exception: return ''
+
+
+    def _liveSubsChannels(self):
+        # A fresh channel list for each LiveTV tune (Channels() reads channels.json), so a channel
+        # imported or renamed since the service started resolves to its id; the service's list
+        # (refreshed only on a settings save) when that read fails.
+        try: return list(self.service.tasks.getChannels() or [])
+        except Exception as e:
+            self.log('_liveSubsChannels, channel list unavailable: %s'%(e), xbmc.LOGWARNING)
+            return list(getattr(self.service, 'channels', None) or [])
+
+
+    def _waitChannelPreview(self, epoch, limit=10.0):
+        # Kodi's channel preview (Up/Down during live TV with "confirm channel switch" on) shows
+        # the previewed channel's labels while the old one keeps playing. Waits (epoch-checked,
+        # at most `limit` seconds) until it ends, so the labels read next are the playing
+        # channel's. False when a newer playback started, Kodi is closing or it never ends.
+        waited = 0.0
+        while xbmc.getCondVisibility('Player.ChannelPreviewActive'):
+            if waited >= limit or self.monitor.waitForAbort(0.25): return False
+            waited += 0.25
+        return self._play_epoch == epoch
+
+
+    def _showLiveSubtitles(self, on, epoch):
+        # "On" goes through the track: when a video starts with subtitles off, Kodi also disables
+        # the subtitle track in the stream (inputstream.adaptive on Movistar+), and showSubtitles
+        # (True) would only flip the visibility flag -- Kodi reports them on, nothing shows.
+        # setSubtitleStream re-selects the track (reopening it) and makes it visible, as the OSD
+        # does and as _applySmartSubsFromPlan does. "Off" is the visibility flag.
+        # True when applied; False when a newer playback (another epoch) started first -- also
+        # during the track read, which skips the RPC_Delay pause (delay=False) because the switch
+        # follows it at once -- so a late call never lands on the next channel.
+        if not on:
+            if self._play_epoch != epoch: return False
+            self.showSubtitles(False)
+            return True
+        resp  = self.jsonRPC.sendJSON({'method': 'Player.GetProperties',
+                                       'params': {'playerid': 1, 'properties': ['subtitles', 'currentsubtitle']}},
+                                      delay=False)
+        if self._play_epoch != epoch: return False
+        index = livesubs_helpers.subtitle_index((resp or {}).get('result'))
+        if index is None: self.showSubtitles(True) # no track list from Kodi: the flag at least
+        else:             self.setSubtitleStream(index)
+        return True
+
+
+    def _restoreLiveSubtitles(self, epoch):
+        # The end of _onPlay's LiveTV branch, on its @threadit worker. Applies the channel's
+        # remembered on/off, checks once more after RECHECK_S (Kodi applies its per-video settings
+        # before onAVStarted on the same queue, but that order couldn't be confirmed in Kodi's
+        # queue code), then marks the playback settled so the monitor records your toggles.
+        # A newer playback (another epoch) ends it at any step, and is checked again right before
+        # each change, so a late worker never acts on the next channel. Never raises.
+        try:
+            # imports.67: a newer playback already started (this worker came late, e.g. after a slow
+            # PseudoTV hand-over): its own _onPlay restores it, and clearing the state below would
+            # cancel that playback's recording.
+            if self._play_epoch != epoch: return
+            self._liveSubsState = None # nothing is recorded until this playback is settled
+            info = self._liveSubsInfo()
+            if not livesubs_helpers.is_livetv(info['live'], info['epgtag'], False): return
+            key = livesubs_helpers.channel_key(info['number'], info['name'], self._liveSubsChannels())
+            if not key: return
+            labels = (info['number'], info['name'])
+            saved  = self._liveSubs.get(key)
+            act    = livesubs_helpers.restore_action(saved, info['current'], info['has'])
+            if act is not None:
+                if not self._showLiveSubtitles(act, epoch): return
+                self.log('live subtitles: %s restored %s'%(key, 'on' if act else 'off'), xbmc.LOGINFO)
+            # Always re-checked: with no restore above, a track that arrives late can still get "on".
+            if self.monitor.waitForAbort(livesubs_helpers.RECHECK_S): return
+            if not self._waitChannelPreview(epoch): return
+            info = self._liveSubsInfo()
+            if not livesubs_helpers.is_livetv(info['live'], info['epgtag'], False): return
+            if (info['number'], info['name']) != labels: return
+            again = livesubs_helpers.restore_action(saved, info['current'], info['has'])
+            if again is not None: # Kodi changed it after the first restore
+                if not self._showLiveSubtitles(again, epoch): return
+                self.log('live subtitles: %s re-applied %s'%(key, 'on' if again else 'off'), xbmc.LOGINFO)
+                # Kodi queues the change: read the state it left, not the one before it.
+                if self.monitor.waitForAbort(livesubs_helpers.APPLY_WAIT_S): return
+                info = self._liveSubsInfo()
+            if self._play_epoch != epoch: return
+            self._liveSubsState = {'epoch'   : epoch,
+                                   'key'     : key,
+                                   'labels'  : labels,
+                                   'file'    : self._liveSubsFile(),
+                                   'has'     : bool(info['has']),
+                                   'seed'    : bool(info['live']) and not isinstance(saved, bool),
+                                   'baseline': bool(info['current'])}
+        except Exception as e:
+            self.log('_restoreLiveSubtitles, failed: %s'%(e), xbmc.LOGWARNING)
+
+
+    def _chkLiveSubtitles(self):
+        # Monitor thread, about once a second while no Custom channel plays (Monitor._chkIdle):
+        # a subtitle toggle fires no player event, so a settled LiveTV playback is read here and
+        # a change you make is remembered for its channel. Returns at once when no settled LiveTV
+        # playback is current. The only writer of the memory and its file. Never raises.
+        try:
+            state = self._liveSubsState
+            if not state or state.get('epoch') != self._play_epoch: return
+            if not self.isPlayingVideo(): return
+            # The channel preview shows another channel's labels: nothing to read until it ends.
+            if xbmc.getCondVisibility('Player.ChannelPreviewActive'): return
+            info = self._liveSubsInfo()
+            if not livesubs_helpers.is_livetv(info['live'], info['epgtag'], False): return
+            # Read again after the labels: a new playback that started meanwhile must not be
+            # recorded as a change on this one (a replay of the same channel has the same key).
+            if state.get('epoch') != self._play_epoch: return
+            # The video and channel it was settled on: Kodi can show the next video (a RESTART
+            # replay, its automatic next show) with its default a moment before the add-on hears
+            # of it, and that default must not be saved as your choice for this channel.
+            if (info['number'], info['name']) != state.get('labels'): return
+            if self._liveSubsFile() != state.get('file'): return
+            key = state.get('key')
+            if info['has'] and not state.get('has'):
+                # A subtitle track that appeared after the start: the channel's choice is applied
+                # to it (it couldn't be at the start), not Kodi's off saved over it.
+                act = livesubs_helpers.restore_action(self._liveSubs.get(key), info['current'], True)
+                if act is not None:
+                    try: applied = self._showLiveSubtitles(act, state.get('epoch'))
+                    except Exception as e:
+                        # Not retried every tick, and nothing more recorded for this playback:
+                        # Kodi's value would be saved over the channel's choice.
+                        if self._liveSubsState is state: self._liveSubsState = None
+                        self.log('_chkLiveSubtitles, %s: the choice could not be applied to the new track: %s'%(key, e), xbmc.LOGWARNING)
+                        return
+                    if not applied: return
+                    self.log('live subtitles: %s restored %s (track appeared)'%(key, 'on' if act else 'off'), xbmc.LOGINFO)
+                    # Kodi queues the change: read the state it left (as the restore's re-apply).
+                    if self.monitor.waitForAbort(livesubs_helpers.APPLY_WAIT_S): return
+                    if state.get('epoch') != self._play_epoch: return
+                    info = self._liveSubsInfo()
+                if self._liveSubsState is state:
+                    self._liveSubsState = dict(state, has=True, baseline=bool(info['current']))
+                return
+            value = livesubs_helpers.record_action(self._liveSubs.get(key), info['current'], info['has'],
+                                                   state.get('seed'), state.get('baseline'))
+            if value is None: return
+            self._liveSubs = livesubs_helpers.remember(self._liveSubs, key, value)
+            self._saveLiveSubs(self._liveSubs)
+            # Only over the state read above: never over a newer playback's (or its None).
+            if self._liveSubsState is state: self._liveSubsState = dict(state, seed=False, baseline=value)
+            self.log('live subtitles: %s saved %s'%(key, 'on' if value else 'off'), xbmc.LOGINFO)
+        except Exception as e:
+            self.log('_chkLiveSubtitles, failed: %s'%(e), xbmc.LOGWARNING)
 
 
     @threadit
@@ -1208,6 +1428,9 @@ class Monitor(xbmc.Monitor):
                     # a fast no-op when no transition is pending — safe to call every tick.
                     # Keeps the second _shutdown wait so shutdown stays responsive and the
                     # not-playing loop cadence stays ~1s (matches pre-imports.47 timing).
+                    # madteevee (imports fork, imports.67): LiveTV plays in this branch; a subtitle
+                    # toggle fires no player event, so it is read on this tick (fast no-op otherwise).
+                    self.player._chkLiveSubtitles()
                     self.player._chkTransition()
                     if self.service._shutdown(0.5): break
             self.isRunning = False
