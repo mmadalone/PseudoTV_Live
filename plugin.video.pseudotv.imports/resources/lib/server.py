@@ -29,6 +29,7 @@ from replay_helpers             import xmltv_to_epoch
 from resources                 import Resources
 from six.moves.BaseHTTPServer  import BaseHTTPRequestHandler, HTTPServer
 from six.moves.socketserver    import ThreadingMixIn
+import picture_helpers # madteevee (imports fork, imports.66): show pictures in the guide (per-channel Auto / Show / Hide)
 #todo proper REST API to handle server/client communication incl. sync/update triggers.
 #todo incorporate experimental webserver UI to master branch.
 
@@ -1088,7 +1089,9 @@ class MyHandler(BaseHTTPRequestHandler):
                         # 'logo' added so the Imports-tab logo editor (post-consolidation)
                         # can stage per-channel logo overrides. syncAll preserves the
                         # operator_overrides set, so the manual logo survives next sync.
-                        ALLOWED_FIELDS = {'number', 'enabled', 'name', 'logo'}
+                        # imports.66: 'show_pictures' = the channel's guide-pictures
+                        # setting (Auto / Show / Hide), validated below.
+                        ALLOWED_FIELDS = {'number', 'enabled', 'name', 'logo', 'show_pictures'}
                         channel_id = incoming.get('channel_id')
                         fields     = incoming.get('fields') or {}
                         if not channel_id or not isinstance(fields, dict):
@@ -1107,6 +1110,16 @@ class MyHandler(BaseHTTPRequestHandler):
                                 if fields['number'] < 1 or fields['number'] > CHANNEL_LIMIT:
                                     self.send_error(400, "number out of range 1..%d"%(CHANNEL_LIMIT))
                                     return
+                            # imports.66: checked before any channel is loaded or
+                            # written, so a bad value can't half-apply an edit.
+                            # picture_helpers.normalize_mode is the one list of
+                            # accepted values (syncAll reads the stored value through
+                            # the same module); null and '' mean Auto.
+                            if 'show_pictures' in fields:
+                                try: fields['show_pictures'] = picture_helpers.normalize_mode(fields['show_pictures'])
+                                except ValueError:
+                                    self.send_error(400, "show_pictures must be auto, on or off")
+                                    return
                             channels = Channels(writable=True)
                             ch_list = list(channels.getChannels() or [])
                             found = False
@@ -1116,6 +1129,19 @@ class MyHandler(BaseHTTPRequestHandler):
                                 if c.get('id') == channel_id:
                                     overrides = set(c.get('operator_overrides') or [])
                                     for k, v in fields.items():
+                                        # imports.66: Auto is "no setting": the field and
+                                        # its override entry go, so the record reads as
+                                        # Auto (picture_helpers.record_mode) and the
+                                        # dashboard's edited marker clears. Show / Hide
+                                        # are stored and marked like any manual edit.
+                                        if k == 'show_pictures':
+                                            if v == 'auto':
+                                                c.pop('show_pictures', None)
+                                                overrides.discard('show_pictures')
+                                            else:
+                                                c['show_pictures'] = v
+                                                overrides.add('show_pictures')
+                                            continue
                                         c[k] = bool(v) if k == 'enabled' else v
                                         overrides.add(k)
                                     c['operator_overrides'] = sorted(overrides)
@@ -1920,6 +1946,18 @@ class MyHandler(BaseHTTPRequestHandler):
                         elif bare_path.lower() == '/imports.json':
                             channels = Channels(writable=False)
                             ch_list = channels.getChannels() or []
+                            # imports.66: the placeholder-picture check results
+                            # (written only by syncAll), read once per request.
+                            # loadPictureVerdicts hands back only well-formed entries,
+                            # and {} for a missing or damaged file. The 200 has already
+                            # been started here, so a failure is logged and every
+                            # channel shows as not checked yet instead.
+                            try:
+                                from imports import loadPictureVerdicts
+                                verdicts = loadPictureVerdicts()
+                            except Exception as _e:
+                                self.log('do_GET /imports.json: picture check results read failed: %s' % (_e), xbmc.LOGWARNING)  # noqa: F405 — xbmc comes from globals' star import, as everywhere in this file
+                                verdicts = {}
                             slim_channels = []
                             for c in ch_list:
                                 # logo + group + path + catchup + radio + favorite
@@ -1940,6 +1978,11 @@ class MyHandler(BaseHTTPRequestHandler):
                                     'catchup'         : c.get('catchup'),
                                     'radio'           : c.get('radio'),
                                     'favorite'        : c.get('favorite'),
+                                    # imports.66: the guide-pictures setting ('auto' /
+                                    # 'on' / 'off') and the channel's last check result
+                                    # (None = not checked yet).
+                                    'show_pictures'   : picture_helpers.record_mode(c),
+                                    'pictures_check'  : verdicts.get(c.get('id')),
                                 })
                             # imports.28: enrich each import with derived
                             # retry-state fields so manager.html's statusBadge

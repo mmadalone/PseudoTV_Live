@@ -45,6 +45,17 @@ from m3u         import M3U
 from logo_links  import own_logo_basename, port_set
 from xmltv       import parseExternalSource as _parse_xmltv_stream
 import replay_helpers
+import picture_helpers
+
+
+# madteevee (imports fork, imports.66): the User-Agent this add-on sends to
+# picture hosts -- channel logos (Imports._fetchLogo) and the show-picture
+# check (Imports._pictureFingerprint). Wikimedia (upload.wikimedia.org) and a
+# few other providers block the default `python-requests/X.Y.Z` User-Agent;
+# an identifying one follows the Wikimedia UA policy
+# (https://meta.wikimedia.org/wiki/User-Agent_policy). Same value _fetchLogo
+# has always sent.
+_HTTP_USER_AGENT = 'PseudoTV-imports/%s (Kodi addon; https://github.com/mmadalone/PseudoTV_Live)' % ADDON_VERSION
 
 
 # Allowlist for source URL schemes (plan H2 — basic SSRF/path-traversal mitigation).
@@ -359,6 +370,40 @@ def logo_file_channel_id(name):
     if LOGO_VERSION_SEP in name:
         return name.split(LOGO_VERSION_SEP, 1)[0]
     return name.rsplit('.', 1)[0]
+
+
+# madteevee (imports fork, imports.66): show pictures in the guide. The
+# placeholder-picture check's results ("verdicts") live in their own file in
+# the cache folder (picture_helpers.VERDICTS_FILE; the format is described
+# there), not in the channel records: machine-made state stays out of
+# channels.json, as with the imports.58 logo bookkeeping. One writer,
+# Imports.syncAll (_savePictureVerdicts); two readers, syncAll and server.py
+# (GET /imports.json), both through loadPictureVerdicts.
+
+def _pictureVerdictsPath():
+    """imports.66: the verdicts file as a real filesystem path -- the same
+    translation as Imports._epgCachePath. CACHE_LOC is read on every call,
+    so tests can point it at a temporary folder."""
+    return FileAccess.translatePath(os.path.join(CACHE_LOC, picture_helpers.VERDICTS_FILE))
+
+
+def loadPictureVerdicts():
+    """imports.66: the usable entries of the verdicts file, {channel id:
+    verdict}, through picture_helpers.valid_verdicts. A missing, unreadable
+    or damaged file gives {} -- "not checked yet", so every channel keeps
+    its pictures until a check says otherwise. Never raises.
+
+    FileAccess.getJSON takes no lock. That is safe here: the only writer
+    replaces the file in one step (FileAccess.setJSON writes a temp file and
+    os.replace's it, imports.59 S3), so a reader gets the old file or the
+    new one, never half of one."""
+    path = None
+    try:
+        path = _pictureVerdictsPath()
+        return picture_helpers.valid_verdicts(FileAccess.getJSON(path))
+    except Exception as e:
+        log('Imports: loadPictureVerdicts, could not read %s: %s' % (path, e), xbmc.LOGWARNING)
+        return {}
 
 
 # --------------------------------------------------------------------------
@@ -1648,6 +1693,19 @@ class Imports(object):
                         if icon:
                             c['icon'] = [{'src': icon}]
 
+            # imports.66: show pictures. The check results are loaded once per
+            # sync; the fresh-guide path in the loop below adds new ones and
+            # the choke point after the loop applies them. records_by_id is
+            # every imported channel's record: the ones known when this sync
+            # started (imports skipped by their refresh interval included),
+            # overlaid by the records this sync merged.
+            verdicts = loadPictureVerdicts()
+            verdicts_changed = False
+            pic_now = int(time.time())
+            records_by_id = {c.get('id'): c for c in existing_channels
+                             if c.get('type') == 'import' and c.get('id')}
+            records_by_id.update(all_imported_now)
+
             for iid, res in per_import_results.items():
                 id_map = res['epg_id_map']
                 if not id_map:
@@ -1819,6 +1877,24 @@ class Imports(object):
                     if merged is not None:
                         new_chans, new_progs = merged
 
+                # imports.66: check this import's show pictures against its
+                # fresh guide. Only here: the three keep-previous paths above
+                # (guide unavailable, nothing matched, links merge failed)
+                # `continue` before this point -- they have no fresh data, so
+                # the saved check results apply as they are. The check only
+                # records results; pictures are removed at the choke point
+                # after this loop. A failed check must never cost the import
+                # its guide, so it is caught here, and whatever it recorded
+                # before failing is still saved.
+                try:
+                    summary = self._checkShowPictures(iid, res['updated_cfg'], new_progs,
+                                                      records_by_id, verdicts, pic_now)
+                    verdicts_changed = verdicts_changed or summary['changed']
+                except Exception as e:
+                    verdicts_changed = True
+                    self.log('syncAll, [%s] show pictures check failed: %s' % (iid, e),
+                             level=xbmc.LOGERROR)
+
                 # madteevee (imports fork): drop ALL stale entries for this
                 # import's namespace before appending the freshly-matched ones.
                 # Without this, the existing entries (loaded from disk by
@@ -1832,6 +1908,48 @@ class Imports(object):
                              % (iid, pruned_chan, pruned_prog), level=xbmc.LOGINFO)
                 xtv_channels.extend(new_chans)
                 xtv_programmes.extend(new_progs)
+
+            # imports.66: show pictures -- one choke point, on the guide about
+            # to be published. Here it covers the fresh path, the three
+            # keep-previous paths and imports skipped by their refresh
+            # interval (their shows were loaded from disk), and running it
+            # again changes nothing. A channel's own show pictures are removed
+            # when its setting is Hide, or Auto while its import's check is on
+            # and its last result says placeholder (picture_helpers.
+            # pictures_hidden); Kodi then shows the channel logo for those
+            # shows (CFileItem, xbmc/FileItem.cpp). import_cfg_by_id is the
+            # import list loaded at the top of syncAll; a channel whose import
+            # is no longer listed counts as having the check off.
+            # Results of channels that no longer exist are dropped (the logo
+            # cache's "present" rule, imports.56), but never on an empty
+            # channel list -- a failed read must not wipe every result. The
+            # file is saved once, only when something changed. Never fatal:
+            # the guide is published either way.
+            try:
+                hidden_ids = set()
+                for cid, rec in records_by_id.items():
+                    cfg = import_cfg_by_id.get(rec.get('import_source'))
+                    detect_on = picture_helpers.detect_enabled(cfg) if cfg is not None else False
+                    if picture_helpers.pictures_hidden(rec, verdicts.get(cid), detect_on):
+                        hidden_ids.add(cid)
+                if hidden_ids:
+                    stripped = picture_helpers.strip_pictures(self.xmltv.XMLTVDATA.get('programmes') or [],
+                                                              hidden_ids)
+                    self.log('syncAll, show pictures hidden on %d channel(s) (%d programmes)'
+                             % (len(hidden_ids), stripped), level=xbmc.LOGINFO)
+                pic_present = {c.get('id') for c in existing_channels if c.get('id')}
+                pic_present |= {c.get('id') for c in all_imported_now.values() if c.get('id')}
+                gone = [cid for cid in verdicts if cid not in pic_present] if pic_present else []
+                for cid in gone:
+                    del verdicts[cid]
+                if gone:
+                    verdicts_changed = True
+                    self.log('syncAll, show pictures: dropped the check results of %d channel(s) no longer present'
+                             % (len(gone),))
+                if verdicts_changed:
+                    self._savePictureVerdicts(verdicts)
+            except Exception as e:
+                self.log('syncAll, show pictures step failed: %s' % (e,), level=xbmc.LOGERROR)
 
         # imports.59 (S9): a channel whose replay needs per-show links offers
         # replay only while the show on air in the guide about to be
@@ -2580,8 +2698,10 @@ class Imports(object):
         # block the default `python-requests/X.Y.Z` User-Agent. Send an
         # identifying UA per the Wikimedia UA policy
         # (https://meta.wikimedia.org/wiki/User-Agent_policy).
+        # imports.66: the module constant, shared with the show-picture
+        # check; the value is unchanged.
         headers = {
-            'User-Agent': 'PseudoTV-imports/%s (Kodi addon; https://github.com/mmadalone/PseudoTV_Live)' % ADDON_VERSION,
+            'User-Agent': _HTTP_USER_AGENT,
         }
         if etag:          headers['If-None-Match']     = etag
         if last_modified: headers['If-Modified-Since'] = last_modified
@@ -3069,6 +3189,230 @@ class Imports(object):
                     stats['overlap_details'], stats['plain'], stats['links_in'], stats['history_in'],
                     stats['history_kept'], stats['fresh_kept'], stats['fresh_dropped']), level=xbmc.LOGINFO)
         return list(guide_chans) + extra, programmes
+
+    # ------------------------------------------------------------------
+    # imports.66: show pictures in the guide
+    # ------------------------------------------------------------------
+    # Some guide providers answer every show's picture link with one filler
+    # image (epg.best serves a "BesTivi / Get it on Google Play" advert for
+    # every show on its Spanish channels), and Kodi shows it like a real show
+    # picture. syncAll compares up to 8 of each channel's show pictures about
+    # once a day (_checkShowPictures) and records whether most of them are
+    # one identical image (picture_helpers.judge); the choke point after its
+    # XML loop then removes the
+    # pictures of the channels that should not show them, so Kodi shows the
+    # channel logo instead. The decisions themselves live in picture_helpers.
+
+    def _savePictureVerdicts(self, verdicts):
+        """imports.66: write the check results file through FileAccess.setJSON
+        (temp file + os.replace, imports.59 S3), so loadPictureVerdicts never
+        reads half a file. True when written. Never raises: after a failure
+        (logged) the file keeps its previous content, and channels whose new
+        result was lost are simply checked again at a later sync."""
+        path = None
+        try:
+            path = _pictureVerdictsPath()
+            if FileAccess.setJSON(path, verdicts):
+                return True
+            self.log('_savePictureVerdicts, could not write %s' % (path,), level=xbmc.LOGWARNING)
+        except Exception as e:
+            self.log('_savePictureVerdicts, could not write %s: %s' % (path, e), level=xbmc.LOGWARNING)
+        return False
+
+    def _pictureFingerprint(self, url):
+        """imports.66: the sha256 hex digest of the first
+        picture_helpers.FP_BYTES bytes of the picture at `url` (all of it when
+        it is smaller), or None when it can't be read as a picture.
+
+          - Only HTTP 200 with a Content-Type of image/* counts, so a host
+            outage that answers every link with one error page can never
+            look like a placeholder.
+          - The body is streamed and read only that far. The response is used
+            in a with-block, which closes it and releases the connection even
+            though most of the body is never read (requests docs, "Body
+            Content Workflow").
+          - No retries; timeout=(5, 10): connecting, then between reads.
+          - A failure is logged at DEBUG with the exception's type and the
+            link's host only: a guide's picture links can carry access
+            tokens, and an exception's message can quote the whole link."""
+        host = '?'
+        try:
+            host = urllib.parse.urlsplit(url).hostname or '?'
+            import requests
+            limit = picture_helpers.FP_BYTES
+            data = bytearray()
+            with requests.get(url, headers={'User-Agent': _HTTP_USER_AGENT},
+                              timeout=(5, 10), stream=True) as r:
+                if r.status_code != 200:
+                    self.log('_pictureFingerprint, picture from %s not used: HTTP %s' % (host, r.status_code))
+                    return None
+                media_type = (r.headers.get('Content-Type') or '').split(';', 1)[0].strip().lower()
+                if not media_type.startswith('image/'):
+                    self.log('_pictureFingerprint, picture from %s not used: not an image (%s)'
+                             % (host, media_type or 'no content type'))
+                    return None
+                for chunk in r.iter_content(16384):
+                    if chunk:
+                        data.extend(chunk)
+                        if len(data) >= limit:
+                            break
+            if not data:
+                self.log('_pictureFingerprint, picture from %s not used: empty' % (host,))
+                return None
+            return hashlib.sha256(bytes(data[:limit])).hexdigest()
+        except Exception as e:
+            self.log('_pictureFingerprint, picture from %s not read: %s' % (host, e.__class__.__name__))
+            return None
+
+    def _checkShowPictures(self, iid, import_cfg, programmes, records_by_id, verdicts, now):
+        """imports.66: the placeholder-picture check for one import, on its
+        fresh guide `programmes` (namespaced channel ids) in syncAll. Records
+        results in `verdicts` (in place) and returns
+        {'checked': channels judged, 'placeholder': the ids judged
+         placeholder, 'left': channels not reached or cut off, 'changed':
+         whether `verdicts` changed, 'seconds': time spent}.
+
+          - Nothing at all (no downloads) while the import's switch is off
+            (picture_helpers.detect_enabled).
+          - Candidates: the import's live channels (enabled, not orphaned,
+            allocated) that are due a check (check_due: never checked, or
+            checked MAX_AGE_S ago) and have at least MIN_SAMPLES show
+            pictures to compare (pick_samples). Never-checked channels go
+            first, then the oldest checks (due_order).
+          - A channel's pictures are downloaded one at a time
+            (_pictureFingerprint; a link already read in this call is not
+            read again), and the channel stops as soon as the pictures not
+            read yet can no longer change its result (picture_helpers.
+            settled): with 8 samples, real pictures cost 6 downloads, a
+            placeholder 5.
+          - The result is picture_helpers.judge (most of the pictures one
+            identical image = placeholder; a buffer keeps the previous
+            result when it is one short), recorded with checked_at = now.
+            "Can't tell" (too few pictures read) records nothing: the
+            previous result stays and the channel is retried at the next
+            sync.
+          - A due channel with fewer than MIN_SAMPLES shows with pictures
+            can't be judged from its guide; a placeholder result recorded
+            earlier is dropped (pictures show again), a real one stays.
+          - Before each channel: stop once BUDGET_S seconds have passed (so
+            one slow picture host can't hold up the imports after this one).
+            A started channel finishes, so every sync judges at least one;
+            within it, only a hard stop at twice the budget and Kodi asking
+            to stop (service._interrupt, as syncAll checks between imports)
+            cut in. A channel cut off there is recorded only if its result
+            is already settled; it and the channels not reached are left
+            for a later sync."""
+        summary = {'checked': 0, 'placeholder': [], 'left': 0, 'changed': False, 'seconds': 0.0}
+        if not picture_helpers.detect_enabled(import_cfg):
+            return summary
+
+        due = set()
+        for cid, rec in (records_by_id or {}).items():
+            if not isinstance(rec, dict) or rec.get('import_source') != iid:
+                continue
+            if not rec.get('enabled', True) or rec.get('is_orphan') or rec.get('unallocated'):
+                continue
+            if picture_helpers.check_due(verdicts.get(cid), now):
+                due.add(cid)
+        if not due:
+            return summary
+        # One pass over the guide picks each due channel's own shows, instead
+        # of one pass per channel (Movistar+ has ~50 channels and a week of
+        # shows); pick_samples keeps only the channel's shows either way, so
+        # the samples are the same.
+        shows = {}
+        for programme in programmes or ():
+            cid = programme.get('channel') if isinstance(programme, dict) else None
+            if isinstance(cid, str) and cid in due:
+                shows.setdefault(cid, []).append(programme)
+        samples_by_id = {}
+        dropped = []
+        for cid in due:
+            samples = picture_helpers.pick_samples(shows.get(cid, ()), cid)
+            if len(samples) >= picture_helpers.MIN_SAMPLES:
+                samples_by_id[cid] = samples
+                continue
+            # Fewer than MIN_SAMPLES shows with pictures: the guide itself
+            # can't be judged (not a failed download, which keeps the old
+            # result). A placeholder result recorded earlier would otherwise
+            # hide these few pictures for good -- the channel is never a
+            # candidate again (epg.best removed its advert on 2026-11-09 and
+            # left À Punt 1 pictured title, MTV 2). Drop it: back to "not
+            # checked", so the pictures show; a real result hides nothing and
+            # stays.
+            previous = verdicts.get(cid)
+            if isinstance(previous, dict) and previous.get('placeholder') is True:
+                del verdicts[cid]
+                dropped.append(cid)
+                summary['changed'] = True
+        if dropped:
+            self.log('syncAll, [%s] show pictures: placeholder result dropped for %d channel(s) with fewer than %d pictured shows: %s'
+                     % (iid, len(dropped), picture_helpers.MIN_SAMPLES, ', '.join(sorted(dropped))),
+                     level=xbmc.LOGINFO)
+        if not samples_by_id:
+            return summary
+
+        started = time.monotonic()
+        deadline = started + picture_helpers.BUDGET_S
+        # The budget is checked before a channel starts, so a started channel
+        # finishes its reads (at most SAMPLES) and every sync judges at least
+        # one channel, even from a picture host slow enough that the budget
+        # wouldn't cover a whole channel (otherwise the same never-checked
+        # channel would be cut off and go first again at every sync). Within a
+        # channel only this hard stop and Kodi closing cut in.
+        hard_stop = started + 2 * picture_helpers.BUDGET_S
+
+        def _closing():
+            return bool(self.service is not None and hasattr(self.service, '_interrupt')
+                        and self.service._interrupt())
+
+        fingerprints = {}   # {link: fingerprint, or None when unreadable} -- this call only
+        stopped = False
+        unsure = 0
+        for cid in picture_helpers.due_order(list(samples_by_id), verdicts):
+            if not stopped and (time.monotonic() >= deadline or _closing()):
+                stopped = True
+            if stopped:
+                summary['left'] += 1
+                continue
+            previous = verdicts.get(cid)
+            previous = previous.get('placeholder') if isinstance(previous, dict) else None
+            samples = samples_by_id[cid]
+            fps = []
+            for url in samples:
+                if url not in fingerprints:
+                    if time.monotonic() >= hard_stop or _closing():
+                        stopped = True
+                        break
+                    fingerprints[url] = self._pictureFingerprint(url)
+                fps.append(fingerprints[url])
+                if picture_helpers.settled(fps, len(samples) - len(fps), previous) is not None:
+                    break
+            if stopped:
+                # Cut off: recorded only when the pictures not read can't
+                # change the result; otherwise left for a later sync.
+                verdict = picture_helpers.settled(fps, len(samples) - len(fps), previous)
+                if verdict is None:
+                    summary['left'] += 1
+                    continue
+            else:
+                verdict = picture_helpers.judge(fps, previous)
+            if verdict is None:
+                unsure += 1
+                continue
+            verdicts[cid] = picture_helpers.make_verdict(verdict, now, sum(1 for fp in fps if fp))
+            summary['changed'] = True
+            summary['checked'] += 1
+            if verdict:
+                summary['placeholder'].append(cid)
+        summary['seconds'] = time.monotonic() - started
+        msg = ('syncAll, [%s] show pictures: checked %d channel(s) in %.1fs, placeholder: %s; %d left for a later sync'
+               % (iid, summary['checked'], summary['seconds'], ', '.join(summary['placeholder']) or 'none',
+                  summary['left']))
+        if unsure:
+            msg += '; %d with too few readable pictures (retried at the next sync)' % (unsure,)
+        self.log(msg, level=xbmc.LOGINFO)
+        return summary
 
     def cascadeAllocate(self, parsed_imports, existing_channels):
         """

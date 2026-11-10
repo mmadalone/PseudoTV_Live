@@ -286,6 +286,17 @@
         .channel-row .marker { flex: 0 0 auto; }
         .channel-row label { display: flex; align-items: center; gap: 4px; cursor: pointer; flex: 0 0 auto; margin-left: 4px; }
         .channel-row .badge { font-size: 0.65rem; padding: 1px 5px; border-radius: 3px; background: var(--pstv-warn); color: #002b4d; }
+        /* imports.66: the imported-channel row's "Pictures: Auto / Show / Hide"
+           selector, sized like the row's 🖼 Logo button (the page-wide select
+           rule is full-width with 12px padding). .dirty marks a staged change
+           that isn't saved yet, in the same yellow as the Settings tab's
+           unsaved marker and the pending-adds strip. The "placeholder → logo"
+           note reuses .badge in grey: it reports what the automatic check
+           did, not a problem like "orphan". */
+        .channel-row .pic-select { width: auto; flex: 0 0 auto; padding: 1px 4px; font-size: 0.7rem; background: var(--pstv-input-bg); color: var(--pstv-accent); border: 1px solid var(--pstv-border); border-radius: 3px; }
+        .channel-row .pic-select:focus { outline: 1px solid var(--pstv-focus); }
+        .channel-row .pic-select.dirty { border-color: #f1c40f; box-shadow: 0 0 0 1px #f1c40f; }
+        .channel-row .badge.pic-badge { background: rgba(255,255,255,0.18); color: var(--pstv-accent); }
         .channel-row .row-actions { display: flex; gap: 4px; }
         .channel-row .row-actions button { padding: 1px 6px; font-size: 0.7rem; }
 
@@ -502,6 +513,13 @@
                     <label><input type="checkbox" id="f-rediscover" /> Re-discover deleted channels</label>
                     <label><input type="checkbox" id="f-enabled" checked /> Enabled</label>
                 </div>
+                <!-- imports.66: the import's automatic placeholder-picture check
+                     (on unless the import says false). Its own row, so the help
+                     line sits right under it. -->
+                <div class="checkboxes">
+                    <label><input type="checkbox" id="f-detect-pictures" checked /> Hide placeholder show pictures automatically</label>
+                </div>
+                <p class="help">About once a day, compares up to 8 show pictures per channel; if most of them are one same image (a placeholder), the channel shows its logo instead of its show pictures. Channels set to Show or Hide ignore this.</p>
                 <div class="actions">
                     <button class="subtle" id="import-cancel-btn">Cancel</button>
                     <button class="primary" id="import-save-btn">Save</button>
@@ -686,7 +704,7 @@
     const PENDING_NEW_CHANNELS = [];
     const PENDING_CUSTOM_EDITS = {};   // {cid: {field: val}}         — Manager tab
     const PENDING_RULES        = {};   // {cid: {ruleId:{values:...}}} — Manager + Imports tabs
-    const PENDING_IMP_EDITS    = {};   // {cid: {field: val}}         — Imports tab (logo)
+    const PENDING_IMP_EDITS    = {};   // {cid: {field: val}}         — Imports tab (name, logo; imports.66: show_pictures)
     let CF_CURRENT_CID    = null;
     let RULES_CURRENT_CID = null;
     let RULES_CATALOG_CACHE = null;    // [{id,name,description,options:[...]}, ...]
@@ -1531,6 +1549,31 @@
         return synced ? `<span class="ok">last sync ${fmtAge(synced)}${nextStr}</span>` : '<span class="warn">never synced</span>';
     }
 
+    // imports.66: an imported channel row's "Pictures" selector (Auto / Show /
+    // Hide) plus, when the automatic check is what hides that channel's
+    // pictures, a small "placeholder → logo" note. GET /imports.json sends
+    // show_pictures as 'auto' / 'on' / 'off' (picture_helpers.record_mode) and
+    // pictures_check as the channel's last check result ({placeholder,
+    // checked_at, samples}) or null when it hasn't been checked yet. Any other
+    // value reads as Auto, as record_mode does on the server. The note follows
+    // picture_helpers.pictures_hidden: an Auto channel loses its pictures only
+    // while its import's check is on, so it isn't shown once the import has
+    // the check switched off (its last result is still on file).
+    function picturesControl(c, imp) {
+        let mode = c.show_pictures || 'auto';
+        if (mode !== 'on' && mode !== 'off') mode = 'auto';
+        const opt = (value, label) =>
+            `<option value="${escapeHtml(value)}"${mode === value ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+        const select = `<select class="pic-select" data-action="setpictures" data-cid="${escapeHtml(c.id)}" data-original="${escapeHtml(mode)}" title="Show pictures in the TV guide. Auto hides them when most of this channel's guide pictures are one placeholder image; Hide always shows the channel logo instead.">`
+            + opt('auto', 'Pictures: Auto') + opt('on', 'Pictures: Show') + opt('off', 'Pictures: Hide')
+            + '</select>';
+        const check = c.pictures_check;
+        if (mode !== 'auto' || imp.detect_placeholder_pictures === false || !check || check.placeholder !== true) return select;
+        // fmtAge gives "5m ago" / "3h ago" / "2d ago".
+        const title = 'Checked ' + fmtAge(check.checked_at) + ': most show pictures are one placeholder image';
+        return select + `<span class="badge pic-badge" title="${escapeHtml(title)}">placeholder → logo</span>`;
+    }
+
     function renderImportRow(imp, idx) {
         const channelsForImport = (IMPORTS_DATA.channels || []).filter(c =>
             (c.type === 'import') && (c.import_source === imp.id)
@@ -1550,7 +1593,7 @@
                     <span class="arrow">▸</span> ${channelsForImport.length} channels
                 </div>
                 <div class="channels-list" id="channels-${escapeHtml(imp.id)}">
-                    <div class="channels-help">Edit channel numbers and toggle enable/disable inline. Shift+click an enabled checkbox to set/unset a range. All changes stage locally — click the sticky <b>Save</b> at bottom-right to commit. Press Escape to revert a single field.</div>
+                    <div class="channels-help">Edit channel numbers and toggle enable/disable inline. Shift+click an enabled checkbox to set/unset a range. Pictures (Auto / Show / Hide) sets whether the TV guide shows the provider's show pictures. All changes stage locally — click the sticky <b>Save</b> at bottom-right to commit. Press Escape to revert a single field.</div>
                     ${channelsForImport.sort((a,b) => {
                         const ae = a.enabled === false ? 1 : 0;
                         const be = b.enabled === false ? 1 : 0;
@@ -1564,6 +1607,7 @@
                             <div class="name"><input type="text" value="${escapeHtml(c.name || '')}" data-action="setname" data-cid="${escapeHtml(c.id)}" data-original="${escapeHtml(c.name || '')}" placeholder="(unnamed)" /></div>
                             <label><input type="checkbox" ${c.enabled === false ? '' : 'checked'} data-action="togglech-enable" data-cid="${escapeHtml(c.id)}"> enabled</label>
                             <button class="btn-action" data-action="edit-imp-logo" data-cid="${escapeHtml(c.id)}" style="padding:1px 6px;font-size:0.7rem;" title="Edit logo (browse Kodi VFS)">🖼 Logo</button>
+                            ${picturesControl(c, imp)}
                             <div class="marker" title="${(c.operator_overrides||[]).length ? 'Edited: ' + (c.operator_overrides||[]).join(', ') : ''}">${(c.operator_overrides||[]).length ? '✏️' : ''}</div>
                             ${c.is_orphan ? '<span class="badge">orphan</span>' : ''}
                         </div>
@@ -1652,6 +1696,17 @@
                 const inp = document.querySelector(`input[data-action="setname"][data-cid="${cid}"]`);
                 if (inp) inp.value = edits.name;
             }
+            // imports.66: so does a staged Pictures choice. Staging it again
+            // on the freshly drawn selector puts its dirty marker back, and
+            // drops it if the saved setting now matches it (same rule as a
+            // change made by hand).
+            if ('show_pictures' in edits) {
+                const sel = document.querySelector(`select[data-action="setpictures"][data-cid="${CSS.escape(cid)}"]`);
+                if (sel) {
+                    sel.value = edits.show_pictures;
+                    _stagePictures(sel);
+                }
+            }
             // Note: logo is opened via inline editor, no inline UI to update.
         });
         // Reapply active search filter to the freshly rendered rows.
@@ -1725,6 +1780,13 @@
         $('f-respect').checked   = imp ? !!imp.respect_source_numbers : false;
         $('f-rediscover').checked= imp ? !!imp.rediscover_deleted : false;
         $('f-enabled').checked   = imp ? imp.enabled !== false : true;
+        // imports.66: the automatic placeholder-picture check is on unless the
+        // import says false (a missing setting counts as on, as in
+        // picture_helpers.detect_enabled). data-original keeps the value the
+        // window opened with, so saveImport can tell when an existing import's
+        // switch was flipped ('' when adding a new import).
+        $('f-detect-pictures').checked = imp ? imp.detect_placeholder_pictures !== false : true;
+        $('f-detect-pictures').dataset.original = imp ? String($('f-detect-pictures').checked) : '';
         $('import-modal-overlay').classList.add('open');
     }
     function closeImportModal() { $('import-modal-overlay').classList.remove('open'); }
@@ -1744,16 +1806,31 @@
             respect_source_numbers: $('f-respect').checked,
             rediscover_deleted: $('f-rediscover').checked,
             enabled: $('f-enabled').checked,
+            // imports.66: always sent, so a Save keeps it (the form rebuilds
+            // the whole import entry).
+            detect_placeholder_pictures: $('f-detect-pictures').checked,
         };
     }
     async function saveImport() {
         const item = gatherImportForm();
         if (!item) return;
+        // imports.66: when an existing import's picture check is switched on
+        // or off, refresh that import after a successful save so the guide
+        // follows now: an import Save on its own doesn't sync, and the
+        // import's next sync can be hours away. A new import has no channels
+        // until its first sync, which already goes by the saved switch.
+        const detectOpened = $('f-detect-pictures').dataset.original;
+        const detectChanged = IMP_EDITING_INDEX >= 0 && detectOpened !== ''
+            && detectOpened !== String(item.detect_placeholder_pictures);
         const list = (IMPORTS_DATA.imports || []).slice();
         if (IMP_EDITING_INDEX >= 0) list[IMP_EDITING_INDEX] = item;
         else                        list.push(item);
-        await postImports(list);
+        const saved = await postImports(list);
+        if (saved && detectChanged) await refreshOne(item.id);
     }
+    // imports.66: returns true when the save went through and false on any
+    // failure (already reported with a toast), so saveImport knows whether to
+    // follow up. Callers that ignore the result (Delete) behave as before.
     async function postImports(list) {
         try {
             const res = await fetch(`http://${REMOTE_HOST}/imports.json`, {
@@ -1764,13 +1841,15 @@
                 const t = await res.text();
                 const msg = (t.match(/<p>Message: ([^<]+)/) || [, 'HTTP ' + res.status])[1];
                 toast('Save failed: ' + msg, 'err');
-                return;
+                return false;
             }
             toast('Imports saved', 'ok');
             closeImportModal();
             setTimeout(loadImports, 400);
+            return true;
         } catch (e) {
             toast('Network error: ' + e.message, 'err');
+            return false;
         }
     }
 
@@ -2257,6 +2336,27 @@
         else                 PENDING_NUMBERS[cid] = target;
         updateGlobalSave();
     }
+    // imports.66: stage (or unstage) a channel row's Pictures selector into
+    // PENDING_IMP_EDITS[cid].show_pictures, the pool the global Save sends
+    // through /imports/channel/edit.json together with name and logo. The
+    // saved value (data-original) means "no change": its key goes, and the
+    // channel's entry too once nothing else is staged on it (same rule as the
+    // name field). The .dirty class shows a staged choice. Callers update
+    // the Save count.
+    function _stagePictures(sel) {
+        const cid = sel.dataset.cid;
+        const existing = PENDING_IMP_EDITS[cid] || {};
+        if (sel.value === sel.dataset.original) {
+            if ('show_pictures' in existing) {
+                delete existing.show_pictures;
+                if (Object.keys(existing).length === 0) delete PENDING_IMP_EDITS[cid];
+                else PENDING_IMP_EDITS[cid] = existing;
+            }
+        } else {
+            PENDING_IMP_EDITS[cid] = Object.assign(existing, {show_pictures: sel.value});
+        }
+        sel.classList.toggle('dirty', 'show_pictures' in (PENDING_IMP_EDITS[cid] || {}));
+    }
 
     // (setChannelName retired — name edits stage into PENDING_IMP_EDITS and
     //  flush via globalSave alongside toggles/numbers.)
@@ -2351,10 +2451,33 @@
 
     // -------- Inline name/number blur + Escape revert (Imports + Manager tabs)
     function _onChannelKeydown(e) {
+        // imports.66: Escape on a focused Pictures selector puts its saved
+        // value back and unstages it, like the name/number fields. Setting
+        // .value from script fires no 'change' event, so this unstages
+        // directly instead of through _onPicturesChange.
+        const sel = e.target.closest('select[data-action="setpictures"]');
+        if (sel) {
+            if (e.key === 'Escape') {
+                sel.value = sel.dataset.original;
+                _stagePictures(sel);
+                updateGlobalSave();
+                sel.blur();
+            }
+            return;
+        }
         const inp = e.target.closest('input[data-action="setnumber"], input[data-action="setname"]');
         if (!inp) return;
         if (e.key === 'Enter')  inp.blur();
         if (e.key === 'Escape') { inp.value = inp.dataset.original; inp.blur(); }
+    }
+    // imports.66: a Pictures selector stages as soon as it changes (there is
+    // no typing to wait out, unlike the name/number fields, which stage on
+    // blur).
+    function _onPicturesChange(e) {
+        const sel = e.target.closest('select[data-action="setpictures"]');
+        if (!sel) return;
+        _stagePictures(sel);
+        updateGlobalSave();
     }
     function _onChannelBlur(e) {
         const inp = e.target.closest('input[data-action="setnumber"], input[data-action="setname"]');
@@ -2588,9 +2711,10 @@
             const r = await _editImport(cid, {number: PENDING_NUMBERS[cid]});
             if (r) ok++; else fail++;
         }
-        // Imports-channel field edits (currently only logo). Same endpoint
-        // as toggles/numbers; defer_kick=true; trailing /imports/refresh.json
-        // below bounces the syncAll for M3U/XMLTV regen.
+        // Imports-channel field edits (name, logo; imports.66: the Pictures
+        // setting, show_pictures). Same endpoint as toggles/numbers;
+        // defer_kick=true; trailing /imports/refresh.json below bounces the
+        // syncAll for M3U/XMLTV regen.
         for (const cid of Object.keys(PENDING_IMP_EDITS)) {
             const r = await _editImport(cid, PENDING_IMP_EDITS[cid]);
             if (r) ok++; else fail++;
@@ -2751,6 +2875,9 @@
         $('pseudo-list')?.addEventListener('keydown', _onChannelKeydown);
         $('imports-list')?.addEventListener('blur', _onChannelBlur, true);
         $('pseudo-list')?.addEventListener('blur', _onChannelBlur, true);
+        // imports.66: the imported-channel rows' Pictures selectors (the
+        // Imports tab only; PseudoTV channel rows have none).
+        $('imports-list')?.addEventListener('change', _onPicturesChange);
         // Drag-to-reorder (single-import). Bind at document level so they
         // survive renderImports() innerHTML rewrites.
         document.body.addEventListener('dragstart', _onChannelDragStart);

@@ -298,6 +298,20 @@ def _norm_title(programme):
     return _NON_ALNUM.sub(' ', text).strip()
 
 
+# imports.66: public names for picture_helpers (the same function objects,
+# the same label pattern): norm_title; the first title's text; and that text
+# with Kodi colour / bold / italic labels removed.
+norm_title = _norm_title
+title_text = _title_text
+
+
+def strip_labels(text):
+    """imports.66: `text` with Kodi colour labels (and their contents, e.g.
+    davidmuma's season/episode tags) and [B]/[I] markers replaced by a
+    space -- the same removal norm_title does."""
+    return _LABELS.sub(' ', text)
+
+
 def _same_title(a, b):
     """Same show title: equal once normalised, or one extends the other."""
     ta, tb = _norm_title(a), _norm_title(b)
