@@ -156,7 +156,11 @@ def test_module_does_no_io():
 def test_public_api_is_the_planned_one():
     public = {name for name in vars(ls) if not name.startswith('_')}
     assert public == {'MEMORY_FILE', 'RECHECK_S', 'APPLY_WAIT_S', 'is_livetv', 'listed', 'channel_key',
-                      'subtitle_index', 'valid_memory', 'restore_action', 'record_action', 'remember'}
+                      'subtitle_index', 'valid_memory', 'restore_action', 'record_action', 'remember',
+                      # imports.68: audio follows the channel (tested in test_imports68_audio_helpers.py)
+                      'AUDIO_MEMORY_FILE', 'lang_code', 'valid_audio_memory', 'audio_tracks', 'audio_track',
+                      'audio_restore_action', 'audio_settle_record', 'audio_change_record',
+                      'audio_return_action', 'remember_audio'}
 
 
 def test_module_has_no_shared_state_and_no_mutable_defaults():

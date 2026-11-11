@@ -57,6 +57,10 @@ RECHECK_S = 1.0
 # queues the change), so the monitor never reads the value from before it.
 APPLY_WAIT_S = 0.5
 
+# imports.68: audio memory file name (same folder): {channel key: language
+# code} -- the audio language that last played on each LiveTV channel.
+AUDIO_MEMORY_FILE = 'livetv_audio.json'
+
 # Key prefix of a LiveTV channel the add-on doesn't import (another PVR
 # source): its name, which Kodi shows the same way live and in replays.
 _NAME_PREFIX = 'name:'
@@ -185,4 +189,121 @@ def remember(memory, key, value):
     holding the old dict never sees it change)."""
     out = dict(memory or {})
     out[key] = bool(value)
+    return out
+
+
+
+# ------------------------------------------------------------------ imports.68: audio
+# Audio follows the channel too: the language that last played on a LiveTV
+# channel (whether you picked it or Kodi did -- the user's rule, 2026-11-11)
+# starts that channel next time, live or replay. Kodi otherwise starts a
+# replay in the preferred audio language (no saved setting for a new video)
+# and a live channel in whatever it saved for it last (Neox live: Spanish).
+# Tracks are matched by language code, which Movistar+ gives the same live and
+# in replays (spa, eng, es-[ADS]); only the flags differ (on live, English is
+# labelled "impaired" -- normal English, the user confirmed). A language the
+# stream doesn't offer (a Spanish-only show) never replaces the remembered
+# one; a switch Kodi had to make because the playing language disappeared
+# ("forced") isn't recorded, and the remembered language is switched back to
+# when it reappears in the same playback.
+
+
+def lang_code(value):
+    """A language code for comparing: stripped and case-folded ('' when not
+    text). Stored values keep Kodi's own spelling."""
+    return value.strip().casefold() if isinstance(value, str) else ''
+
+
+def valid_audio_memory(data):
+    """The usable entries of a loaded audio memory file: text keys with a
+    non-empty text value ({} for anything that isn't a dict)."""
+    if not isinstance(data, dict):
+        return {}
+    return {key: value.strip() for key, value in data.items()
+            if isinstance(key, str) and key and isinstance(value, str) and value.strip()}
+
+
+def audio_tracks(props):
+    """[(index, code, impaired)] from JSON-RPC Player.GetProperties
+    ('audiostreams'), in Kodi's order; tracks without a usable index or
+    language are left out."""
+    props = props if isinstance(props, dict) else {}
+    listing = props.get('audiostreams')
+    if not isinstance(listing, (list, tuple)):
+        return []
+    out = []
+    for stream in listing:
+        if not isinstance(stream, dict):
+            continue
+        index, code = _track(stream.get('index')), lang_code(stream.get('language'))
+        if index is not None and code:
+            out.append((index, code, bool(stream.get('isimpaired'))))
+    return out
+
+
+def audio_track(props, lang):
+    """The index of the track in language `lang`: one not labelled
+    "impaired" when there are several, else the first; None when the stream
+    doesn't offer it."""
+    code = lang_code(lang)
+    if not code:
+        return None
+    same = [(index, impaired) for index, track_code, impaired in audio_tracks(props) if track_code == code]
+    plain = [index for index, impaired in same if not impaired]
+    if plain:
+        return plain[0]
+    return same[0][0] if same else None
+
+
+def audio_restore_action(saved, playing, props):
+    """The track to switch to when a LiveTV channel starts (or at the
+    re-check), or None: the remembered language when it differs from the
+    playing one and the stream offers it."""
+    if not lang_code(saved) or lang_code(saved) == lang_code(playing):
+        return None
+    return audio_track(props, saved)
+
+
+def audio_settle_record(saved, playing, saved_offered):
+    """The language to remember once a playback has settled, or None:
+      - nothing playing (no language): None;
+      - nothing remembered yet: the playing language (Kodi's pick counts);
+      - the remembered language plays: None (nothing new);
+      - the remembered language is offered but another plays (the restore
+        didn't win, or you switched during the start-up): the playing one;
+      - the remembered language isn't offered (a Spanish-only show): None,
+        so it isn't replaced for good."""
+    if not lang_code(playing):
+        return None
+    if not lang_code(saved):
+        return playing.strip()
+    if lang_code(saved) == lang_code(playing):
+        return None
+    return playing.strip() if saved_offered else None
+
+
+def audio_change_record(playing, baseline, baseline_offered):
+    """A change of the playing language during a settled playback ->
+    (language to remember or None, forced). A change while the previous
+    language is still offered is a switch (yours): remembered. One made
+    because the previous language disappeared (Kodi had to switch, e.g. a
+    Spanish-only next show on live) is forced: not remembered. No change, or
+    no language: (None, False)."""
+    if not lang_code(playing) or lang_code(playing) == lang_code(baseline):
+        return None, False
+    if baseline_offered:
+        return playing.strip(), False
+    return None, True
+
+
+def audio_return_action(saved, playing, props):
+    """After a forced change: the track to switch back to once the
+    remembered language is offered again, or None."""
+    return audio_restore_action(saved, playing, props)
+
+
+def remember_audio(memory, key, lang):
+    """A new audio memory dict with `key` set to `lang` (copy on write)."""
+    out = dict(memory or {})
+    out[key] = lang.strip()
     return out

@@ -144,6 +144,12 @@ class Player(xbmc.Player):
         # memory, and every reader checks the state's epoch against _play_epoch.
         self._liveSubs       = self._loadLiveSubs()
         self._liveSubsState  = None
+        # madteevee (imports fork, imports.68): LiveTV audio follows the channel. _liveAudio is the
+        # language that last played per LiveTV channel ({key: code}, its own memory file, loaded
+        # once here); the settled playback's audio fields ride on _liveSubsState. Same rule as
+        # _liveSubs: only ever replaced whole (copied on write by livesubs_helpers.remember_audio),
+        # the monitor thread is its only writer, the _onPlay worker only reads it.
+        self._liveAudio      = self._loadLiveAudio()
 
 
     def log(self, msg, level=xbmc.LOGDEBUG):
@@ -587,15 +593,57 @@ class Player(xbmc.Player):
         return False
 
 
+    # madteevee (imports fork, imports.68): LiveTV audio follows the channel. Kodi starts a replay
+    # (a new video, no saved settings) in the preferred audio language and a live channel in the
+    # audio it saved for it, so the same channel can play different languages live and in a
+    # replay. The language that last played on each LiveTV channel is remembered in its own file
+    # (the subtitle file's format stays untouched) and applied by the imports.67 restore; the
+    # decisions are in livesubs_helpers. Same key, same single writer (the monitor thread).
+    def _liveAudioPath(self):
+        # imports.68: built on every call (as _liveSubsPath), so tests can move CACHE_LOC.
+        return FileAccess.translatePath(os.path.join(CACHE_LOC, livesubs_helpers.AUDIO_MEMORY_FILE))
+
+
+    def _loadLiveAudio(self):
+        # imports.68: the usable entries of the audio memory file; {} when it is missing,
+        # unreadable or damaged. Never raises (it runs in __init__), as _loadLiveSubs.
+        path = None
+        try:
+            path   = self._liveAudioPath()
+            memory = livesubs_helpers.valid_audio_memory(FileAccess.getJSON(path))
+        except Exception as e:
+            self.log('_loadLiveAudio, could not read %s: %s'%(path, e), xbmc.LOGWARNING)
+            return {}
+        self.log('_loadLiveAudio, %s channel language(s) remembered'%(len(memory)))
+        return memory
+
+
+    def _saveLiveAudio(self, memory):
+        # imports.68: writes the audio memory file (temp file + os.replace). True when written.
+        # Never raises, as _saveLiveSubs: after a failure (logged) the file keeps its previous
+        # content and the memory in RAM still applies.
+        path = None
+        try:
+            path = self._liveAudioPath()
+            if FileAccess.setJSON(path, memory): return True
+            self.log('_saveLiveAudio, could not write %s'%(path), xbmc.LOGWARNING)
+        except Exception as e:
+            self.log('_saveLiveAudio, could not write %s: %s'%(path, e), xbmc.LOGWARNING)
+        return False
+
+
     def _liveSubsInfo(self):
         # Kodi read directly, not through BUILTIN.getInfoBool/getInfoLabel, which log every call
         # at debug level: _chkLiveSubtitles runs this about once a second during LiveTV.
+        # imports.68: 'audio' is the playing audio track's language code ('eng'), the value the
+        # audio memory keeps.
         return {'live'   : xbmc.getCondVisibility('Pvr.IsPlayingTv'),
                 'epgtag' : xbmc.getCondVisibility('Pvr.IsPlayingEpgTag'),
                 'number' : xbmc.getInfoLabel('VideoPlayer.ChannelNumberLabel'),
                 'name'   : xbmc.getInfoLabel('VideoPlayer.ChannelName'),
                 'current': xbmc.getCondVisibility('VideoPlayer.SubtitlesEnabled'),
-                'has'    : xbmc.getCondVisibility('VideoPlayer.HasSubtitles')}
+                'has'    : xbmc.getCondVisibility('VideoPlayer.HasSubtitles'),
+                'audio'  : xbmc.getInfoLabel('VideoPlayer.AudioLanguage')}
 
 
     def _liveSubsFile(self):
@@ -650,6 +698,26 @@ class Player(xbmc.Player):
         return True
 
 
+    def _readAudioProps(self):
+        # imports.68: the audio tracks Kodi lists for the playing video (index, language, flags)
+        # and the current one, from JSON-RPC Player.GetProperties -- {} when Kodi gives none.
+        # delay=False skips the RPC_Delay pause: a switch may follow at once (as in
+        # _showLiveSubtitles). Its index is the one Player.setAudioStream takes.
+        resp = self.jsonRPC.sendJSON({'method': 'Player.GetProperties',
+                                      'params': {'playerid': 1, 'properties': ['audiostreams', 'currentaudiostream']}},
+                                     delay=False)
+        return (resp or {}).get('result') or {}
+
+
+    def _applyLiveAudio(self, index, epoch):
+        # imports.68: switches to audio track `index`. True when applied; False when a newer
+        # playback (another epoch) started first -- checked right before the switch, so a late
+        # call never lands on the next channel.
+        if self._play_epoch != epoch: return False
+        self.setAudioStream(index)
+        return True
+
+
     def _restoreLiveSubtitles(self, epoch):
         # The end of _onPlay's LiveTV branch, on its @threadit worker. Applies the channel's
         # remembered on/off, checks once more after RECHECK_S (Kodi applies its per-video settings
@@ -663,6 +731,10 @@ class Player(xbmc.Player):
             # cancel that playback's recording.
             if self._play_epoch != epoch: return
             self._liveSubsState = None # nothing is recorded until this playback is settled
+            # imports.68: a channel preview (Up/Down while this channel still loads) shows another
+            # channel's labels: the key read now would be that channel's, and its subtitle and audio
+            # choice would be applied to this one. Waited out before anything is read.
+            if not self._waitChannelPreview(epoch): return
             info = self._liveSubsInfo()
             if not livesubs_helpers.is_livetv(info['live'], info['epgtag'], False): return
             key = livesubs_helpers.channel_key(info['number'], info['name'], self._liveSubsChannels())
@@ -673,6 +745,15 @@ class Player(xbmc.Player):
             if act is not None:
                 if not self._showLiveSubtitles(act, epoch): return
                 self.log('live subtitles: %s restored %s'%(key, 'on' if act else 'off'), xbmc.LOGINFO)
+            # imports.68: the channel's remembered audio language, when the stream offers it and
+            # another plays (the track list skips the RPC_Delay pause; the epoch is checked right
+            # before the switch). Nothing is switched when the language isn't offered.
+            saved_audio = self._liveAudio.get(key)
+            props       = self._readAudioProps()
+            idx         = livesubs_helpers.audio_restore_action(saved_audio, info['audio'], props)
+            if idx is not None:
+                if not self._applyLiveAudio(idx, epoch): return
+                self.log('live audio: %s restored %s'%(key, saved_audio), xbmc.LOGINFO)
             # Always re-checked: with no restore above, a track that arrives late can still get "on".
             if self.monitor.waitForAbort(livesubs_helpers.RECHECK_S): return
             if not self._waitChannelPreview(epoch): return
@@ -683,17 +764,42 @@ class Player(xbmc.Player):
             if again is not None: # Kodi changed it after the first restore
                 if not self._showLiveSubtitles(again, epoch): return
                 self.log('live subtitles: %s re-applied %s'%(key, 'on' if again else 'off'), xbmc.LOGINFO)
+            # imports.68: the audio re-check, once: Kodi may have put its own choice back.
+            props       = self._readAudioProps()
+            again_audio = livesubs_helpers.audio_restore_action(saved_audio, info['audio'], props)
+            if again_audio is not None:
+                if not self._applyLiveAudio(again_audio, epoch): return
+                self.log('live audio: %s re-applied %s'%(key, saved_audio), xbmc.LOGINFO)
+            if again is not None or again_audio is not None:
                 # Kodi queues the change: read the state it left, not the one before it.
+                # imports.68: one wait for either re-apply (subtitles, audio or both).
                 if self.monitor.waitForAbort(livesubs_helpers.APPLY_WAIT_S): return
                 info = self._liveSubsInfo()
+                # imports.68: and the tracks after the audio switch, for the settle record below.
+                if again_audio is not None: props = self._readAudioProps()
             if self._play_epoch != epoch: return
-            self._liveSubsState = {'epoch'   : epoch,
-                                   'key'     : key,
-                                   'labels'  : labels,
-                                   'file'    : self._liveSubsFile(),
-                                   'has'     : bool(info['has']),
-                                   'seed'    : bool(info['live']) and not isinstance(saved, bool),
-                                   'baseline': bool(info['current'])}
+            # imports.68: the audio fields. 'audio' is the language playing now (the monitor's
+            # baseline for a change), 'audio_forced' marks a language Kodi had to play, and
+            # 'audio_pending' is the language to remember for this settle (or None; the monitor,
+            # the memory's only writer, saves it at its first tick).
+            # A live tune that lands on a show without the remembered language (a Spanish-only
+            # show) plays another one because it has to, as when the language disappears mid-
+            # playback: forced, so the monitor switches back once the next show offers it again
+            # (Kodi itself keeps the stream it plays). Live only: a replay's tracks don't change.
+            saved_offered = livesubs_helpers.audio_track(props, saved_audio) is not None
+            forced        = (bool(info['live']) and not saved_offered and livesubs_helpers.lang_code(saved_audio)
+                             not in ('', livesubs_helpers.lang_code(info['audio'])))
+            self._liveSubsState = {'epoch'        : epoch,
+                                   'key'          : key,
+                                   'labels'       : labels,
+                                   'file'         : self._liveSubsFile(),
+                                   'has'          : bool(info['has']),
+                                   'seed'         : bool(info['live']) and not isinstance(saved, bool),
+                                   'baseline'     : bool(info['current']),
+                                   'audio'        : info['audio'] or '',
+                                   'audio_forced' : forced,
+                                   'audio_pending': livesubs_helpers.audio_settle_record(
+                                       saved_audio, info['audio'], saved_offered)}
         except Exception as e:
             self.log('_restoreLiveSubtitles, failed: %s'%(e), xbmc.LOGWARNING)
 
@@ -720,6 +826,9 @@ class Player(xbmc.Player):
             if (info['number'], info['name']) != state.get('labels'): return
             if self._liveSubsFile() != state.get('file'): return
             key = state.get('key')
+            # imports.68: the audio memory, behind the same gates; the subtitle logic below goes on
+            # with the state it leaves (a new dict when it changed one).
+            state = self._chkLiveAudio(state, info, key)
             if info['has'] and not state.get('has'):
                 # A subtitle track that appeared after the start: the channel's choice is applied
                 # to it (it couldn't be at the start), not Kodi's off saved over it.
@@ -751,6 +860,74 @@ class Player(xbmc.Player):
             self.log('live subtitles: %s saved %s'%(key, 'on' if value else 'off'), xbmc.LOGINFO)
         except Exception as e:
             self.log('_chkLiveSubtitles, failed: %s'%(e), xbmc.LOGWARNING)
+
+
+    def _chkLiveAudio(self, state, info, key):
+        # madteevee (imports fork, imports.68): the audio part of _chkLiveSubtitles' tick, called
+        # behind all its gates (settled epoch, no preview, LiveTV, same labels and file), on the
+        # monitor thread -- the only writer of the audio memory and its file. Saves the language
+        # the settle left to remember, then a change of the playing language (yours, or Kodi's
+        # pick while the previous language is still offered); a change Kodi had to make (the
+        # previous language disappeared) is only marked forced, and the remembered language is
+        # switched back to once the stream offers it again. Returns the state to go on with: a
+        # new dict when it replaced the current one, else `state` (a newer playback's state is
+        # never overwritten). Raises into _chkLiveSubtitles' handler (one warning).
+        pending = state.get('audio_pending')
+        if pending:
+            self._liveAudio = livesubs_helpers.remember_audio(self._liveAudio, key, pending)
+            self._saveLiveAudio(self._liveAudio)
+            self.log('live audio: %s saved %s'%(key, pending), xbmc.LOGINFO)
+            if self._liveSubsState is not state: return state
+            state = dict(state, audio_pending=None)
+            self._liveSubsState = state
+        playing = info['audio']
+        code    = livesubs_helpers.lang_code(playing)
+        if code and code != livesubs_helpers.lang_code(state.get('audio')):
+            props = self._readAudioProps()
+            # imports.68: the track list must be this playback's: a newer one that started during
+            # the read would answer whether the previous language is offered for the wrong video.
+            if state.get('epoch') != self._play_epoch: return state
+            saved = self._liveAudio.get(key)
+            if not livesubs_helpers.lang_code(state.get('audio')):
+                # The first language Kodi shows after a settle without one (the label was still
+                # blank): what the settle would have done, not a change -- a blank was never offered.
+                offered = livesubs_helpers.audio_track(props, saved) is not None
+                save    = livesubs_helpers.audio_settle_record(saved, playing, offered)
+                forced  = bool(livesubs_helpers.lang_code(saved)) and not offered
+            else:
+                save, forced = livesubs_helpers.audio_change_record(
+                    playing, state.get('audio'), livesubs_helpers.audio_track(props, state.get('audio')) is not None)
+            # "Forced" only while there is a different remembered language to go back to;
+            # otherwise the track list would be read every second for nothing.
+            forced = bool(forced) and livesubs_helpers.lang_code(saved) not in ('', code)
+            # imports.68: written only on change (as the subtitle memory): a change back to the
+            # remembered language (Kodi's own after a forced one) ends "forced" but writes nothing.
+            if save and livesubs_helpers.lang_code(save) != livesubs_helpers.lang_code(self._liveAudio.get(key)):
+                self._liveAudio = livesubs_helpers.remember_audio(self._liveAudio, key, save)
+                self._saveLiveAudio(self._liveAudio)
+                self.log('live audio: %s saved %s'%(key, save), xbmc.LOGINFO)
+            elif forced:
+                self.log('live audio: %s forced to %s (not remembered)'%(key, playing.strip()), xbmc.LOGINFO)
+            if self._liveSubsState is not state: return state
+            state = dict(state, audio=playing,
+                         audio_forced=bool(forced or (state.get('audio_forced') and not save)))
+            self._liveSubsState = state
+        elif state.get('audio_forced'):
+            # imports.68: after a forced change, the remembered language back as soon as the stream
+            # offers it again (the next show on live); _applyLiveAudio checks the epoch.
+            props = self._readAudioProps()
+            idx   = livesubs_helpers.audio_return_action(self._liveAudio.get(key), playing, props)
+            if idx is not None and self._applyLiveAudio(idx, state.get('epoch')):
+                self.log('live audio: %s switched back to %s'%(key, self._liveAudio.get(key)), xbmc.LOGINFO)
+                # Kodi queues the switch: read the language it left, not the one before it.
+                if self.monitor.waitForAbort(livesubs_helpers.APPLY_WAIT_S): return state
+                # A newer playback that started during the wait isn't this one's language.
+                if state.get('epoch') != self._play_epoch: return state
+                playing = self._liveSubsInfo()['audio']
+                if self._liveSubsState is not state: return state
+                state = dict(state, audio=playing or state.get('audio'), audio_forced=False)
+                self._liveSubsState = state
+        return state
 
 
     @threadit

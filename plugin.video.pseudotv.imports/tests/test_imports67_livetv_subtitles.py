@@ -31,12 +31,21 @@ keeps the memory file:
 services.py can't be imported under the test stubs, so (as in
 test_imports65_channel_rules.py) the real methods are compiled out of the
 source with their decorators dropped and run on a fake player. Kodi is a
-dict (the six reads _liveSubsInfo makes, the playing file, the subtitle
-tracks JSON-RPC lists); a switch lands at once or, queued, at the next wait
-or tick; the monitor's waitForAbort runs whatever happens in Kodi during a
-wait; the channel list is the fake service's tasks.getChannels; and the
-memory file is written for real (the real FileAccess) into a tmp folder. The
-structure (where the calls sit, who writes what) is checked with ast.
+dict (the seven reads _liveSubsInfo makes, the playing file, the subtitle
+and audio tracks JSON-RPC lists); a switch lands at once or, queued, at the
+next wait or tick; the monitor's waitForAbort runs whatever happens in Kodi
+during a wait; the channel list is the fake service's tasks.getChannels; and
+the memory file is written for real (the real FileAccess) into a tmp folder.
+The structure (where the calls sit, who writes what) is checked with ast.
+
+imports.68 (LiveTV audio follows the channel) rides on the same restore and
+tick, so this rig also carries Kodi's audio: VideoPlayer.AudioLanguage is the
+language of the playing audio track, JSON-RPC lists the tracks, and
+setAudioStream switches them. Here the audio stays out of the way -- no
+audio tracks, no language, nothing remembered -- so these tests still see
+only the subtitle behaviour, plus the two audio track reads every LiveTV
+restore makes (AUDIO_READ). test_imports68_livetv_audio.py reuses this rig
+with real tracks.
 """
 import ast
 import json
@@ -126,11 +135,15 @@ CUSTOM_CN     = {'live': True,  'epgtag': False, 'number': '304', 'name': 'Carto
 LIBRARY       = {'live': False, 'epgtag': False, 'number': '',    'name': ''}
 
 INFO_READS = ['Pvr.IsPlayingTv', 'Pvr.IsPlayingEpgTag', 'VideoPlayer.ChannelNumberLabel', 'VideoPlayer.ChannelName',
-              'VideoPlayer.SubtitlesEnabled', 'VideoPlayer.HasSubtitles']
+              'VideoPlayer.SubtitlesEnabled', 'VideoPlayer.HasSubtitles',
+              'VideoPlayer.AudioLanguage']                      # imports.68: the playing audio language
 
+# imports.68: the audio methods ride on the restore and the tick, so the fake player has them too.
+AUDIO_METHODS = ('_liveAudioPath', '_loadLiveAudio', '_saveLiveAudio', '_readAudioProps', '_applyLiveAudio',
+                 '_chkLiveAudio')
 LIVE_METHODS = ('_liveSubsPath', '_loadLiveSubs', '_saveLiveSubs', '_liveSubsInfo', '_liveSubsFile',
                 '_liveSubsChannels', '_waitChannelPreview', '_showLiveSubtitles', '_restoreLiveSubtitles',
-                '_chkLiveSubtitles')
+                '_chkLiveSubtitles') + AUDIO_METHODS
 
 # What reaches Kodi's player: "on" re-selects the current track (Kodi lists tracks 0 and 1, 1 current);
 # "off" is the flag; FLAG_ON only when Kodi lists no track.
@@ -140,6 +153,10 @@ OFF     = ('showSubtitles', False)
 FLAG_ON = ('showSubtitles', True)
 TRACKS_READ = {'method': 'Player.GetProperties',
                'params': {'playerid': 1, 'properties': ['subtitles', 'currentsubtitle']}}
+# imports.68: the audio track read. Every LiveTV restore makes two (at the start and at the re-check),
+# and a third after an audio re-apply; with nothing remembered they never switch anything.
+AUDIO_READ  = {'method': 'Player.GetProperties',
+               'params': {'playerid': 1, 'properties': ['audiostreams', 'currentaudiostream']}}
 
 
 def playing_file(kodi_state, epoch):
@@ -153,16 +170,20 @@ class FakeKodi(object):
     """The xbmc module the compiled methods see: the stub's log levels, and the reads answered from
     `state` (what Kodi shows now). `on_read` runs before a read is answered (a playback event landing
     mid-read); `fail` makes every read raise. A switch from the add-on lands at once, or with `queued`
-    when Kodi's player gets to it: at the next wait or tick (flush)."""
+    when Kodi's player gets to it: at the next wait or tick (flush).
+    imports.68: `astreams` are the audio tracks Kodi lists (JSON-RPC 'audiostreams' entries) and
+    `atrack` the playing one's index; VideoPlayer.AudioLanguage reads that track's language ('' when
+    none plays), as Kodi's label does."""
     LOGDEBUG, LOGINFO, LOGWARNING, LOGERROR = xbmc.LOGDEBUG, xbmc.LOGINFO, xbmc.LOGWARNING, xbmc.LOGERROR
     CONDS  = {'Pvr.IsPlayingTv': 'live', 'Pvr.IsPlayingEpgTag': 'epgtag',
               'VideoPlayer.SubtitlesEnabled': 'subs', 'VideoPlayer.HasSubtitles': 'has',
               'Player.ChannelPreviewActive': 'preview'}
-    LABELS = {'VideoPlayer.ChannelNumberLabel': 'number', 'VideoPlayer.ChannelName': 'name'}
+    LABELS = {'VideoPlayer.ChannelNumberLabel': 'number', 'VideoPlayer.ChannelName': 'name',
+              'VideoPlayer.AudioLanguage': 'audio'}
 
     def __init__(self):
         self.state = dict(LIBRARY, subs=False, has=True, playing=True, file=playing_file(LIBRARY, 0),
-                          tracks=[0, 1], track=CURRENT_TRACK, preview=False)
+                          tracks=[0, 1], track=CURRENT_TRACK, preview=False, astreams=[], atrack=None)
         self.reads, self.on_read, self.fail = [], None, None
         self.queued, self.pending = False, []
 
@@ -170,7 +191,13 @@ class FakeKodi(object):
         self.reads.append(name)
         if self.fail is not None: raise self.fail
         if self.on_read is not None: self.on_read(name)
-        return self.state[table[name]]
+        return self.value(table[name])
+
+    def value(self, key):
+        """What Kodi shows for `key`; 'audio' is the language of the playing audio track."""
+        if key != 'audio': return self.state[key]
+        playing = [s for s in self.state['astreams'] if s['index'] == self.state['atrack']]
+        return playing[0]['language'] if playing else ''
 
     def getCondVisibility(self, condition): return bool(self._read(self.CONDS, condition))
     def getInfoLabel(self, label): return self._read(self.LABELS, label)
@@ -187,10 +214,12 @@ class FakeKodi(object):
 class Files(object):
     """FileAccess for the compiled methods: the real one (crash-safe setJSON included), counting the
     memory file writes. fail_write 'false' / 'raise' and fail_read make it fail; on_write runs while
-    a write is in progress (a slow disk)."""
+    a write is in progress (a slow disk). `files` names the file of each write (imports.68: the
+    subtitle and the audio memory are two files)."""
 
     def __init__(self):
         self.writes, self.fail_write, self.fail_read, self.on_write = [], None, None, None
+        self.files = []
 
     def translatePath(self, path): return FileAccess.translatePath(path)
 
@@ -200,6 +229,7 @@ class Files(object):
 
     def setJSON(self, path, data):
         self.writes.append(dict(data))
+        self.files.append(os.path.basename(path))
         if self.on_write is not None: self.on_write(data)
         if self.fail_write == 'false': return False
         if self.fail_write == 'raise': raise OSError('No space left on device')
@@ -236,25 +266,41 @@ class Tasks(object):
 
 class RPC(object):
     """Player.jsonRPC: sendJSON records the request and answers Player.GetProperties from Kodi's tracks
-    (`answer` replaces that answer when a test sets it; `fail` makes it raise)."""
+    (`answer` replaces the subtitle track answer when a test sets it; `fail` makes every read raise;
+    `during` runs during every read). imports.68: an audio track read is answered from Kodi's audio
+    tracks; `audio_answer` replaces that answer and `audio_during` runs during audio reads only."""
     FROM_KODI = object()
 
     def __init__(self, kodi, calls):
         self.kodi, self.calls, self.sent, self.delays = kodi, calls, [], []
         self.answer, self.fail, self.during = self.FROM_KODI, None, None
+        self.audio_answer, self.audio_during = self.FROM_KODI, None
 
     def sendJSON(self, param, delay=True):
         self.sent.append(json.loads(json.dumps(param)))
         self.delays.append(delay)
         self.calls.append(('sendJSON', param.get('method')))
         if self.during is not None: self.during()
+        audio = 'audiostreams' in param.get('params', {}).get('properties', [])
+        if audio and self.audio_during is not None: self.audio_during()
         if self.fail is not None: raise self.fail
+        if audio: return self._audio()
         if self.answer is not self.FROM_KODI: return self.answer
         tracks = [{'index': i, 'language': 'spa', 'name': 'Spanish', 'codec': 'webvtt', 'isdefault': i == 0,
                    'isforced': False, 'isimpaired': False} for i in self.kodi.state['tracks']]
         current = [t for t in tracks if t['index'] == self.kodi.state['track']]
         return {'id': 'plugin.video.pseudotv.imports', 'jsonrpc': '2.0',
                 'result': {'subtitles': tracks, 'currentsubtitle': current[0] if current else None}}
+
+    def _audio(self):
+        # imports.68: Kodi's answer shape for 'audiostreams' / 'currentaudiostream'.
+        if self.audio_answer is not self.FROM_KODI: return self.audio_answer
+        streams = [dict({'name': '', 'codec': 'aac', 'channels': 2, 'bitrate': 0, 'samplerate': 48000,
+                         'isdefault': False, 'isimpaired': False, 'isoriginal': False}, **s)
+                   for s in self.kodi.state['astreams']]
+        current = [s for s in streams if s['index'] == self.kodi.state['atrack']]
+        return {'id': 'plugin.video.pseudotv.imports', 'jsonrpc': '2.0',
+                'result': {'audiostreams': streams, 'currentaudiostream': current[0] if current else {}}}
 
 
 class PlayerBase(object):
@@ -267,7 +313,7 @@ class PlayerBase(object):
         self.logged, self.calls, self.switches, self.on_switch = [], [], [], None
         self.jsonRPC, self.file_fail = RPC(kodi, self.calls), None
         self.playingItem, self._retune, self.lastSubState = {}, False, False
-        self._liveSubs, self._liveSubsState = {}, None
+        self._liveSubs, self._liveSubsState, self._liveAudio = {}, None, {}
 
     def log(self, msg, level=xbmc.LOGDEBUG): self.logged.append((msg, level))
 
@@ -281,6 +327,9 @@ class PlayerBase(object):
 
     # Kodi's Player.setSubtitleStream selects the track and makes subtitles visible.
     def setSubtitleStream(self, index): self._switch(('setSubtitleStream', index), {'subs': True, 'track': index})
+
+    # imports.68: Kodi's Player.setAudioStream plays the audio track with that index.
+    def setAudioStream(self, index): self._switch(('setAudioStream', index), {'atrack': index})
 
     def getPlayingFile(self):
         if self.file_fail is not None: raise self.file_fail
@@ -303,26 +352,37 @@ class PlayerBase(object):
 class Rig(object):
     """A fake player whose imports.67 methods (and _onPlay) are the real ones, its memory file in
     `tmp_path` (written there first when `memory` or `raw` is given). `channels` is both the list the
-    service loaded at start and what channels.json holds now (tests change either)."""
+    service loaded at start and what channels.json holds now (tests change either). imports.68: the
+    audio memory file sits next to it (written first when `audio` or `audio_raw` is given)."""
 
-    def __init__(self, tmp_path, memory=None, raw=None, channels=None):
-        self.path = tmp_path / lh.MEMORY_FILE
+    def __init__(self, tmp_path, memory=None, raw=None, channels=None, audio=None, audio_raw=None):
+        self.path  = tmp_path / lh.MEMORY_FILE
+        self.apath = tmp_path / lh.AUDIO_MEMORY_FILE
         if raw is not None: self.path.write_text(raw, encoding='utf-8')
         elif memory is not None: self.path.write_text(json.dumps(memory), encoding='utf-8')
+        if audio_raw is not None: self.apath.write_text(audio_raw, encoding='utf-8')
+        elif audio is not None: self.apath.write_text(json.dumps(audio), encoding='utf-8')
         self.kodi, self.files = FakeKodi(), Files()
         g = dict(livesubs_helpers=lh, xbmc=self.kodi, FileAccess=self.files, os=os, CACHE_LOC=str(tmp_path),
                  BUILTIN=types.SimpleNamespace(isSubtitle=lambda: self.kodi.state['subs']),
                  SETTINGS=types.SimpleNamespace(getSettingInt=lambda key: {'Replay_Percentage': 5}[key]))
         ns = {name: _function('Player', name, **g) for name in LIVE_METHODS + ('_onPlay',)}
         self.player = type('FakePlayer', (PlayerBase,), ns)(self.kodi, CHANNELS if channels is None else channels)
-        # as Player.__init__ does (test_init_loads_the_memory_once checks those two lines)
+        # as Player.__init__ does (test_init_loads_the_memory_once checks those lines, and imports.68's
+        # test_init_loads_the_audio_memory_once_per_instance the audio one)
         self.player._liveSubs      = self.player._loadLiveSubs()
         self.player._liveSubsState = None
+        self.player._liveAudio     = self.player._loadLiveAudio()
 
     def saved(self):
         """The memory file as JSON (None when there is none)."""
         if not self.path.exists(): return None
         with open(str(self.path), encoding='utf-8') as fh: return json.load(fh)
+
+    def asaved(self):
+        """imports.68: the audio memory file as JSON (None when there is none)."""
+        if not self.apath.exists(): return None
+        with open(str(self.apath), encoding='utf-8') as fh: return json.load(fh)
 
 
 def tune(rig, kodi_state, subs, has=True, file=None):
@@ -344,10 +404,14 @@ def tick(rig, times=1):
         rig.player._chkLiveSubtitles()
 
 
-def settled(rig, epoch, key, kodi_state, has=True, seed=False, baseline=True):
-    """The state a settled playback leaves for the monitor (the file: what Kodi plays now)."""
+def settled(rig, epoch, key, kodi_state, has=True, seed=False, baseline=True, audio='', audio_forced=False,
+            audio_pending=None):
+    """The state a settled playback leaves for the monitor (the file: what Kodi plays now). imports.68:
+    the audio fields -- the language playing ('' here: no audio tracks), whether a change was forced,
+    and the language the monitor saves at its first tick."""
     return {'epoch': epoch, 'key': key, 'labels': (kodi_state['number'], kodi_state['name']),
-            'file': rig.kodi.state['file'], 'has': has, 'seed': seed, 'baseline': baseline}
+            'file': rig.kodi.state['file'], 'has': has, 'seed': seed, 'baseline': baseline,
+            'audio': audio, 'audio_forced': audio_forced, 'audio_pending': audio_pending}
 
 
 def once(action):
@@ -410,12 +474,14 @@ def test_liveSubsInfo_reads_kodi_directly():
     assert 'BUILTIN' not in ast.unparse(node)
 
 
-def test_liveSubsInfo_reads_the_six_labels(tmp_path):
+def test_liveSubsInfo_reads_the_seven_labels(tmp_path):
+    """imports.68 added the seventh: VideoPlayer.AudioLanguage, the playing audio track's language."""
     rig = Rig(tmp_path)
-    rig.kodi.state.update(WARNER_REPLAY, subs=True, has=False)
+    rig.kodi.state.update(WARNER_REPLAY, subs=True, has=False,
+                          astreams=[{'index': 0, 'language': 'spa'}, {'index': 1, 'language': 'eng'}], atrack=1)
     rig.kodi.reads[:] = []
     assert rig.player._liveSubsInfo() == {'live': False, 'epgtag': True, 'number': '12', 'name': 'Warner TV',
-                                          'current': True, 'has': False}
+                                          'current': True, 'has': False, 'audio': 'eng'}
     assert sorted(rig.kodi.reads) == sorted(INFO_READS)
 
 
@@ -427,8 +493,10 @@ def test_the_memory_has_one_writer():
     stores = [n for n in ast.walk(S_TREE) if isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Store)]
     assert sorted({owner(n) for n in stores if n.attr == '_liveSubs'}) == \
         [('Player', '__init__'), ('Player', '_chkLiveSubtitles')]
+    # imports.68: _chkLiveAudio (the audio part of the monitor's tick) also moves the settled state on.
     assert sorted({owner(n) for n in stores if n.attr == '_liveSubsState'}) == \
-        [('Player', '__init__'), ('Player', '_chkLiveSubtitles'), ('Player', '_restoreLiveSubtitles')]
+        [('Player', '__init__'), ('Player', '_chkLiveAudio'), ('Player', '_chkLiveSubtitles'),
+         ('Player', '_restoreLiveSubtitles')]
     saves = [owner(n) for n in _calls(S_TREE, '_saveLiveSubs')]
     assert saves == [('Player', '_chkLiveSubtitles')]
     memory = [n for n in ast.walk(S_TREE) if isinstance(n, ast.Attribute) and n.attr == '_liveSubs']
@@ -484,7 +552,7 @@ def test_on_reselects_the_current_track(tmp_path, current):
     rig = Rig(tmp_path, memory={WARNER: True})
     rig.kodi.state['track'] = current
     tune(rig, WARNER_REPLAY, subs=False)
-    assert rig.player.jsonRPC.sent == [TRACKS_READ]
+    assert rig.player.jsonRPC.sent == [TRACKS_READ, AUDIO_READ, AUDIO_READ]
     assert rig.player.switches == [('setSubtitleStream', current)]
     assert FLAG_ON not in rig.player.calls
     assert rig.kodi.state['subs'] is True and rig.kodi.state['track'] == current
@@ -507,7 +575,7 @@ def test_on_falls_back_to_the_flag_when_kodi_lists_no_track(tmp_path, answer):
     rig = Rig(tmp_path, memory={WARNER: True})
     rig.player.jsonRPC.answer = answer
     tune(rig, WARNER_REPLAY, subs=False)
-    assert rig.player.jsonRPC.sent == [TRACKS_READ]
+    assert rig.player.jsonRPC.sent == [TRACKS_READ, AUDIO_READ, AUDIO_READ]
     assert rig.player.switches == [FLAG_ON]
     assert rig.player.warnings() == []
 
@@ -516,7 +584,7 @@ def test_off_is_the_flag(tmp_path):
     rig = Rig(tmp_path, memory={WARNER: False})
     tune(rig, WARNER_LIVE, subs=True)
     assert rig.player.switches == [OFF]
-    assert rig.player.jsonRPC.sent == []
+    assert rig.player.jsonRPC.sent == [AUDIO_READ, AUDIO_READ]       # no subtitle track read for "off"
 
 
 # === restore: a LiveTV channel starts playing =====================================================
@@ -545,7 +613,8 @@ def test_a_live_tune_gets_the_saved_choice(tmp_path, saved):
 def test_a_choice_already_in_place_changes_nothing(tmp_path, saved, state):
     rig = Rig(tmp_path, memory={WARNER: saved})
     tune(rig, state, subs=saved)
-    assert rig.player.switches == [] and rig.player.jsonRPC.sent == [] and rig.player.infos() == []
+    assert rig.player.switches == [] and rig.player.jsonRPC.sent == [AUDIO_READ, AUDIO_READ]
+    assert rig.player.infos() == []
     assert rig.player._liveSubsState['baseline'] is saved
 
 
@@ -561,7 +630,7 @@ def test_no_saved_choice_changes_nothing(tmp_path, state, subs):
 def test_restore_never_turns_on_without_a_track(tmp_path):
     rig = Rig(tmp_path, memory={WARNER: True})
     epoch = tune(rig, WARNER_REPLAY, subs=False, has=False)
-    assert rig.player.switches == [] and rig.player.jsonRPC.sent == []
+    assert rig.player.switches == [] and rig.player.jsonRPC.sent == [AUDIO_READ, AUDIO_READ]
     assert rig.player._liveSubsState == settled(rig, epoch, WARNER, WARNER_REPLAY, has=False, baseline=False)
 
 
@@ -588,7 +657,8 @@ def test_the_recheck_reapplies_once_when_kodi_puts_its_setting_back(tmp_path):
     rig = Rig(tmp_path, memory={WARNER: True})
     rig.player.monitor.during = once(lambda: rig.kodi.state.update(subs=False))
     epoch = tune(rig, WARNER_REPLAY, subs=False)
-    assert rig.player.switches == [ON, ON] and rig.player.jsonRPC.sent == [TRACKS_READ] * 2
+    assert rig.player.switches == [ON, ON]
+    assert rig.player.jsonRPC.sent == [TRACKS_READ, AUDIO_READ, TRACKS_READ, AUDIO_READ]
     assert rig.player.monitor.waits == [lh.RECHECK_S, lh.APPLY_WAIT_S]
     assert rig.player.infos() == ['live subtitles: %s restored on' % WARNER,
                                   'live subtitles: %s re-applied on' % WARNER]
@@ -629,8 +699,8 @@ def test_the_reapply_goes_through_showLiveSubtitles_and_waits_before_reading(tmp
     epoch = tune(rig, WARNER_REPLAY, subs=False)
     assert asked == [True, True]
     assert rig.player.monitor.waits == [lh.RECHECK_S, lh.APPLY_WAIT_S]
-    assert len(rig.kodi.reads) == 3 * len(INFO_READS) + 1      # start, re-check, after the re-apply
-    assert rig.kodi.reads.count('Player.ChannelPreviewActive') == 1   # + the re-check's preview read
+    assert len(rig.kodi.reads) == 3 * len(INFO_READS) + 2      # start, re-check, after the re-apply
+    assert rig.kodi.reads.count('Player.ChannelPreviewActive') == 2   # + the start's and the re-check's preview read
     assert rig.player._liveSubsState == settled(rig, epoch, WARNER, WARNER_REPLAY, baseline=True)
 
 
@@ -699,7 +769,7 @@ def test_the_epoch_is_read_again_right_before_the_reapply(tmp_path):
             if len(seen) == 2: rig.player._play_epoch += 1     # the re-check's read
     rig.kodi.on_read = event
     tune(rig, WARNER_REPLAY, subs=False)
-    assert rig.player.switches == [ON] and rig.player.jsonRPC.sent == [TRACKS_READ, TRACKS_READ]
+    assert rig.player.switches == [ON] and rig.player.jsonRPC.sent == [TRACKS_READ, AUDIO_READ, TRACKS_READ]
     assert rig.player.monitor.waits == [lh.RECHECK_S]
     assert rig.player._liveSubsState is None
 
@@ -709,7 +779,7 @@ def test_abort_during_the_wait_returns(tmp_path):
     rig.player.monitor.abort = True
     rig.player.monitor.during = lambda: rig.kodi.state.update(subs=False)
     tune(rig, WARNER_REPLAY, subs=False)
-    assert rig.player.switches == [ON] and len(rig.kodi.reads) == len(INFO_READS)
+    assert rig.player.switches == [ON] and len(rig.kodi.reads) == len(INFO_READS) + 1   # + the start's preview read
     assert rig.player._liveSubsState is None
 
 
@@ -1097,7 +1167,8 @@ def test_a_late_track_gets_the_channels_choice_once(tmp_path, saved, shown, swit
     rig.kodi.state.update(has=True, subs=shown)                # the track appears
     tick(rig)
     assert rig.player.switches == [switch]
-    assert rig.player.jsonRPC.sent == ([TRACKS_READ] if saved else [])
+    # the restore's two audio reads, then the late track's read for "on" (the ticks read no audio tracks)
+    assert rig.player.jsonRPC.sent == [AUDIO_READ, AUDIO_READ] + ([TRACKS_READ] if saved else [])
     assert rig.player.infos()[-1] == 'live subtitles: %s restored %s (track appeared)' % (WARNER,
                                                                                        'on' if saved else 'off')
     assert rig.player._liveSubsState == settled(rig, epoch, WARNER, WARNER_REPLAY, has=True, baseline=saved)
@@ -1286,7 +1357,10 @@ def test_onplay_livetv_branch_restores_after_scheduling_the_popup(tmp_path):
     rig.kodi.state.update(WARNER_REPLAY, subs=False, has=True, file=playing_file(WARNER_REPLAY, 9))
     rig.player._play_epoch = 9
     rig.player._onPlay({}, 9)
-    assert rig.player.calls[-3:] == [('toggleReplay', True, 9), ('sendJSON', 'Player.GetProperties'), ON]
+    # the subtitle track read and switch, then the audio track reads (imports.68: at the start and the re-check)
+    assert rig.player.calls[-5:] == [('toggleReplay', True, 9), ('sendJSON', 'Player.GetProperties'), ON,
+                                     ('sendJSON', 'Player.GetProperties'), ('sendJSON', 'Player.GetProperties')]
+    assert rig.player.jsonRPC.sent == [TRACKS_READ, AUDIO_READ, AUDIO_READ]
     assert rig.player._liveSubsState == settled(rig, 9, WARNER, WARNER_REPLAY)
     assert rig.player.lastSubState is False                    # read before the restore, as before imports.67
 
@@ -1400,7 +1474,8 @@ def test_the_track_read_skips_the_rpc_pause(tmp_path):
     would leave a second in which a zap goes unnoticed."""
     rig = Rig(tmp_path, memory={WARNER: True})
     tune(rig, WARNER_REPLAY, subs=False)
-    assert rig.player.switches == [ON] and rig.player.jsonRPC.delays == [False]
+    assert rig.player.switches == [ON] and rig.player.jsonRPC.sent == [TRACKS_READ, AUDIO_READ, AUDIO_READ]
+    assert rig.player.jsonRPC.delays == [False, False, False]      # imports.68: the audio reads too
 
 
 def test_a_zap_during_the_track_read_cancels_the_switch(tmp_path):
