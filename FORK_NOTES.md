@@ -236,6 +236,13 @@ In addition to the per-commit patches against the `plugin.video.pseudotv.live` u
 - Limits: only on/off (the track is Kodi's choice); the first RESTART within ~2-3 s of a channel's very first live tune starts without the carried-over choice; LiveTV already playing when the service starts isn't recorded until the next tune.
 - Tests: `test_imports67_livesubs_helpers.py` (558), `test_imports67_livetv_subtitles.py` (125). 3765 pytest in the Madrid, UTC, New York and Kolkata zones.
 
+**LiveTV audio follows the channel (imports.68):**
+
+- Why: a replay starts in Kodi's preferred audio language (no saved settings for a new video), the same channel live in Kodi's saved per-channel choice, so they differed (Neox live Spanish, replays English). Movistar+ gives the same language codes live and in replays (spa, eng, es-[ADS]); only the flags differ (live English labelled "impaired" -- normal English per the user).
+- Rule (user, 2026-11-11): the language that last played on a channel, whether the user or Kodi picked it, starts it next time. A language the stream doesn't offer never replaces the remembered one; a change forced by the previous language disappearing isn't remembered and is undone when the language reappears (live). Memory `cache/livetv_audio.json`, decisions in `livesubs_helpers.py`, wiring on the imports.67 restore/tick (`_chkLiveAudio`).
+- A channel preview active at playback start is now waited out before any label is read (subtitles and audio).
+- Tests: `test_imports68_audio_helpers.py` (700), `test_imports68_livetv_audio.py` (96). 4561 pytest in four zones.
+
 **Maintenance posture**: the imports addon does NOT rebase against upstream — it's a one-time fork that diverged from `plugin.video.pseudotv.live` after the `madteevee-on-nightly` rebase. Forward-ports from upstream into imports/ happen manually when needed.
 
 **Eventual replacement plan** (operator-stated, not yet executed): replace `plugin.video.pseudotv.live` with the imports addon. The plan is to deprecate the live sibling once imports has full burn-in confidence. Migration concerns: Kodi addon_data path rename, addon ID change throughout the codebase, M3U URL rewrites for already-emitted Custom channels, pvr.iptvsimple instance config. Deferred for a dedicated session.
