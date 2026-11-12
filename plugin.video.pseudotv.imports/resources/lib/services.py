@@ -663,14 +663,17 @@ class Player(xbmc.Player):
             return list(getattr(self.service, 'channels', None) or [])
 
 
-    def _waitChannelPreview(self, epoch, limit=10.0):
+    def _waitChannelPreview(self, epoch, limit=120.0):
         # Kodi's channel preview (Up/Down during live TV with "confirm channel switch" on) shows
-        # the previewed channel's labels while the old one keeps playing. Waits (epoch-checked,
-        # at most `limit` seconds) until it ends, so the labels read next are the playing
-        # channel's. False when a newer playback started, Kodi is closing or it never ends.
+        # the previewed channel's labels while the old one keeps playing. Waits until it ends, so
+        # the labels read next are the playing channel's. A preview lasts as long as you browse
+        # (the channel info stays up 5 s after each key here), so the cap is generous (`limit`
+        # seconds); the playback number is checked on every pass, so a newer playback (you picked
+        # a channel) ends the wait at once. False when a newer playback started, Kodi is closing
+        # or the preview outlasts the cap.
         waited = 0.0
         while xbmc.getCondVisibility('Player.ChannelPreviewActive'):
-            if waited >= limit or self.monitor.waitForAbort(0.25): return False
+            if self._play_epoch != epoch or waited >= limit or self.monitor.waitForAbort(0.25): return False
             waited += 0.25
         return self._play_epoch == epoch
 
@@ -740,6 +743,9 @@ class Player(xbmc.Player):
             key = livesubs_helpers.channel_key(info['number'], info['name'], self._liveSubsChannels())
             if not key: return
             labels = (info['number'], info['name'])
+            # imports.68: the video this restore is for. A RESTART pressed within the re-check
+            # opens a replay of the same channel (same labels): it must not be settled on.
+            file0  = self._liveSubsFile()
             saved  = self._liveSubs.get(key)
             act    = livesubs_helpers.restore_action(saved, info['current'], info['has'])
             if act is not None:
@@ -759,7 +765,9 @@ class Player(xbmc.Player):
             if not self._waitChannelPreview(epoch): return
             info = self._liveSubsInfo()
             if not livesubs_helpers.is_livetv(info['live'], info['epgtag'], False): return
-            if (info['number'], info['name']) != labels: return
+            # The same channel (its name: Kodi's own running number can shift when the playlist
+            # changes) and the same video.
+            if info['name'] != labels[1] or self._liveSubsFile() != file0: return
             again = livesubs_helpers.restore_action(saved, info['current'], info['has'])
             if again is not None: # Kodi changed it after the first restore
                 if not self._showLiveSubtitles(again, epoch): return
@@ -792,7 +800,7 @@ class Player(xbmc.Player):
             self._liveSubsState = {'epoch'        : epoch,
                                    'key'          : key,
                                    'labels'       : labels,
-                                   'file'         : self._liveSubsFile(),
+                                   'file'         : file0,
                                    'has'          : bool(info['has']),
                                    'seed'         : bool(info['live']) and not isinstance(saved, bool),
                                    'baseline'     : bool(info['current']),
@@ -823,7 +831,9 @@ class Player(xbmc.Player):
             # The video and channel it was settled on: Kodi can show the next video (a RESTART
             # replay, its automatic next show) with its default a moment before the add-on hears
             # of it, and that default must not be saved as your choice for this channel.
-            if (info['number'], info['name']) != state.get('labels'): return
+            # The channel's name, not Kodi's own running number (it shifts when the playlist changes
+            # mid-playback); the playing file (checked next) identifies the video.
+            if info['name'] != (state.get('labels') or (None, None))[1]: return
             if self._liveSubsFile() != state.get('file'): return
             key = state.get('key')
             # imports.68: the audio memory, behind the same gates; the subtitle logic below goes on
@@ -909,8 +919,12 @@ class Player(xbmc.Player):
             elif forced:
                 self.log('live audio: %s forced to %s (not remembered)'%(key, playing.strip()), xbmc.LOGINFO)
             if self._liveSubsState is not state: return state
-            state = dict(state, audio=playing,
-                         audio_forced=bool(forced or (state.get('audio_forced') and not save)))
+            # "Forced" carries on only while the remembered language isn't the one playing now
+            # (Kodi may itself land on it when the show's languages change): otherwise nothing
+            # is left to switch back to, and the track list would be read every second for nothing.
+            carry = (state.get('audio_forced') and not save
+                     and code != livesubs_helpers.lang_code(self._liveAudio.get(key)))
+            state = dict(state, audio=playing, audio_forced=bool(forced or carry))
             self._liveSubsState = state
         elif state.get('audio_forced'):
             # imports.68: after a forced change, the remembered language back as soon as the stream

@@ -189,7 +189,7 @@ def test_the_audio_tick_runs_behind_every_gate_and_before_the_subtitle_record():
                  "if xbmc.getCondVisibility('Player.ChannelPreviewActive'):\n    return",
                  "if not livesubs_helpers.is_livetv(info['live'], info['epgtag'], False):\n    return",
                  "if state.get('epoch') != self._play_epoch:\n    return",
-                 "if (info['number'], info['name']) != state.get('labels'):\n    return",
+                 "if info['name'] != (state.get('labels') or (None, None))[1]:\n    return",
                  "if self._liveSubsFile() != state.get('file'):\n    return"):
         assert gate in before, gate
     assert stmts[at - 1] == "key = state.get('key')"
@@ -333,8 +333,8 @@ def test_a_zap_during_the_rechecks_audio_read_cancels_the_reapply(tmp_path):
     assert rig.player.monitor.waits == [lh.RECHECK_S] and rig.player._liveSubsState is None
 
 
-@pytest.mark.parametrize('meanwhile', [WARNER_LIVE, LIBRARY, dict(NEOX_LIVE, number='9')],
-                         ids=['another-channel', 'not-livetv', 'other-number'])
+@pytest.mark.parametrize('meanwhile', [WARNER_LIVE, LIBRARY],
+                         ids=['another-channel', 'not-livetv'])
 def test_what_plays_changed_during_the_wait_ends_the_restore_before_the_audio_recheck(tmp_path, meanwhile):
     rig = Rig(tmp_path, audio={NEOX: 'eng', WARNER: 'eng'})
     rig.player.monitor.during = lambda: rig.kodi.state.update(meanwhile, atrack=0)
@@ -998,3 +998,18 @@ def test_forced_stays_off_with_nothing_to_go_back_to(tmp_path):
     kodi_plays(rig, SPANISH_ONLY, 'spa')                         # English disappears
     tick(rig)
     assert rig.player._liveSubsState['audio_forced'] is False
+
+
+
+def test_forced_ends_when_kodi_itself_lands_on_the_remembered_language(tmp_path):
+    """English remembered; a Spanish-only show forced Spanish; the next show offers English only, so
+    Kodi has to switch and lands on English itself: nothing to switch back to, "forced" ends and the
+    track list isn't read every second any more (review 2026-11-12)."""
+    rig = Rig(tmp_path, audio={NEOX: 'eng'})
+    _forced(rig)
+    kodi_plays(rig, (_track(0, 'eng', True, False),), 'eng')     # Spanish gone, English only
+    tick(rig)
+    assert rig.player._liveSubsState['audio_forced'] is False
+    reads = audio_reads(rig)
+    tick(rig, 3)
+    assert audio_reads(rig) == reads and audio_switches(rig) == []

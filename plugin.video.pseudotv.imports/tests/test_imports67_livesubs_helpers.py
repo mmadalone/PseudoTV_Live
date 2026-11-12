@@ -406,51 +406,28 @@ def test_channel_key_only_unlisted_namesakes_give_the_name_key(fields, number):
     assert ls.channel_key(number, 'MTV', [mtv_only]) == NAME_PREFIX + 'MTV'
 
 
-@pytest.mark.parametrize('number, key', [
-    ('303', CN), ('41', CN_TWIN), (' 41 ', CN_TWIN), ('\t303\n', CN),
-])
-def test_channel_key_listed_twins_told_apart_by_number(number, key):
-    """Two listed imports with one name: Kodi's number label breaks the tie
-    when it is one of their numbers (spaces around the label ignored)."""
-    assert ls.channel_key(number, 'Cartoon Network', TWINS) == key
-
-
-@pytest.mark.parametrize('stored_number', [41, '41'], ids=repr)
-def test_channel_key_tie_number_stored_as_number_or_text(stored_number):
-    """channels.json stores numbers as integers; a text number breaks a tie too."""
-    twins = TWINS[:-1] + [dict(TWINS[-1], number=stored_number)]
-    assert ls.channel_key('41', 'Cartoon Network', twins) == CN_TWIN
-
-
-@pytest.mark.parametrize('number', ['', None, '   ', '99', '304', '8', 41, 303.0, ['41'], b'41'], ids=repr)
-def test_channel_key_listed_twins_without_a_matching_number_are_none(number):
-    """No label, not text, a stale count, the Custom namesake's number or
-    another channel's: they can't be told apart, so None -- nothing is
-    remembered or switched for them, never a guess."""
+@pytest.mark.parametrize('number', ['303', '41', ' 41 ', '\t303\n', '', '7', None], ids=repr)
+def test_channel_key_listed_twins_are_never_told_apart(number):
+    """Two listed imports with one name: Kodi numbers channels itself here, so its number label is a
+    running count that can coincide with either record's own number -- no tie-break on it: nothing
+    is remembered for them (None), whatever the label (review 2026-11-12)."""
     assert ls.channel_key(number, 'Cartoon Network', TWINS) is None
 
 
+@pytest.mark.parametrize('stored_number', [41, '41'], ids=repr)
+def test_channel_key_twins_stay_untold_whatever_the_stored_number(stored_number):
+    twins = TWINS[:-1] + [dict(TWINS[-1], number=stored_number)]
+    assert ls.channel_key('41', 'Cartoon Network', twins) is None
+
+
 @pytest.mark.parametrize('fields', UNLISTED)
-def test_channel_key_ties_are_broken_only_among_listed_channels(fields):
-    """Two listed twins and an unlisted third namesake: the unlisted one's
-    number breaks nothing (None), the listed ones' numbers still do."""
-    channels = TWINS + [_import('CartoonNetwork.uk@epgbest_46477', 7, 'Cartoon Network', 'epgbest_46477', **fields)]
-    assert ls.channel_key('7', 'Cartoon Network', channels) is None
-    assert ls.channel_key('303', 'Cartoon Network', channels) == CN
-    assert ls.channel_key('41', 'Cartoon Network', channels) == CN_TWIN
-
-
-@pytest.mark.parametrize('stored_number', ['', None, _MISSING], ids=['empty', 'none', 'missing'])
-def test_channel_key_a_missing_number_never_breaks_a_tie(stored_number):
-    """No number on the label is no number at all: it doesn't pick the twin
-    whose record has no number either."""
-    twins = TWINS[:-1] + [_import(CN_TWIN, 41, 'Cartoon Network', 'epgbest_46477')]
-    if stored_number is _MISSING:
-        del twins[-1]['number']
-    else:
-        twins[-1]['number'] = stored_number
-    assert ls.channel_key('', 'Cartoon Network', twins) is None
-    assert ls.channel_key('303', 'Cartoon Network', twins) == CN
+def test_channel_key_an_unlisted_namesake_makes_no_tie(fields):
+    """An unlisted namesake doesn't count: with two listed twins it is still a tie (None); with one
+    listed channel that one's id, whatever the label."""
+    third = _import('CartoonNetwork.uk@epgbest_46477', 7, 'Cartoon Network', 'epgbest_46477', **fields)
+    for label in ('7', '303', '41'):
+        assert ls.channel_key(label, 'Cartoon Network', TWINS + [third]) is None
+        assert ls.channel_key(label, 'Cartoon Network', TWINS[:-1] + [third]) == CN
 
 
 def test_channel_key_exact_twins_cannot_be_told_apart():
@@ -1222,30 +1199,19 @@ def test_mtv_and_cnn_int_follow_the_listed_import_whatever_kodi_numbers_them():
     assert MTV_OFF not in tv.memory and CNN_OFF not in tv.memory
 
 
-def test_two_listed_imports_with_one_name_keep_their_own_choice():
-    """Hypothetical second listed Cartoon Network (41): told apart only when
-    Kodi's number label is one of their numbers; otherwise nothing is
-    switched or remembered for them."""
+def test_two_listed_imports_with_one_name_are_never_told_apart():
+    """A hypothetical second listed Cartoon Network: whatever Kodi's number label says, nothing is
+    switched or remembered for either of them (Kodi's label is its own running count here)."""
     kodi = _Kodi()
     tv   = _AddOn(TWINS, {CN: True})
-    kodi.open(_replay(60, '09:00'))
-    assert tv.started(kodi, '303', 'Cartoon Network', **REPLAY) is True
-    kodi.open(_replay(61, '09:00'))
-    assert tv.started(kodi, '41', 'Cartoon Network', **REPLAY) is None     # no choice for the twin
-    assert kodi.subtitles is False
-    kodi.remote(True)
-    assert tv.tick(kodi) is True
-    assert tv.memory == {CN: True, CN_TWIN: True}
-    kodi.remote(False)
-    assert tv.tick(kodi) is False
-    assert tv.memory == {CN: True, CN_TWIN: False}
-    # Kodi's label matches neither (its running count): left as Kodi starts it.
-    kodi.open(_replay(62, '10:00'))
-    assert tv.started(kodi, '7', 'Cartoon Network', **REPLAY) is None
-    assert tv.key is None and kodi.subtitles is False
-    kodi.remote(True)
-    assert tv.tick(kodi) is None
-    assert tv.memory == {CN: True, CN_TWIN: False}
+    for minute, label in enumerate(('303', '41', '7')):
+        kodi.open(_replay(60 + minute, '09:00'))
+        assert tv.started(kodi, label, 'Cartoon Network', **REPLAY) is None
+        assert tv.key is None and kodi.subtitles is False
+        kodi.remote(True)
+        assert tv.tick(kodi) is None
+        kodi.remote(False)
+    assert tv.memory == {CN: True}
 
 
 def test_an_unknown_channel_is_remembered_by_its_name():

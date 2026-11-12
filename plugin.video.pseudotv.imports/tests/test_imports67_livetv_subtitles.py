@@ -783,9 +783,8 @@ def test_abort_during_the_wait_returns(tmp_path):
     assert rig.player._liveSubsState is None
 
 
-@pytest.mark.parametrize('meanwhile', [NEOX_REPLAY, LIBRARY, dict(WARNER_REPLAY, name=''),
-                                       dict(WARNER_REPLAY, number='13')],
-                         ids=['another-channel', 'not-livetv', 'no-name', 'other-number'])
+@pytest.mark.parametrize('meanwhile', [NEOX_REPLAY, LIBRARY, dict(WARNER_REPLAY, name='')],
+                         ids=['another-channel', 'not-livetv', 'no-name'])
 def test_what_plays_changed_during_the_wait_ends_the_restore(tmp_path, meanwhile):
     """Kodi shows something else before the epoch moved (a zap whose events are still queued)."""
     rig = Rig(tmp_path, memory={WARNER: True, NEOX: False})
@@ -853,21 +852,59 @@ def test_a_channel_the_addon_doesnt_import_is_remembered_by_its_name(tmp_path):
 CN_ES = 'CartoonNetwork.es@movistarplus'
 
 
-def test_two_listed_namesakes_are_told_apart_only_by_kodis_number(tmp_path):
-    """Two listed imported "Cartoon Network": the one whose number is Kodi's number label; when
-    neither is, nothing is applied, settled or remembered."""
+def test_two_listed_namesakes_are_never_told_apart(tmp_path):
+    """Two listed imported "Cartoon Network": Kodi's number label (its own running count) can't tell
+    them apart, so nothing is applied, settled or remembered for either (review 2026-11-12)."""
     channels = CHANNELS + [{'id': CN_ES, 'type': 'import', 'number': 310, 'name': 'Cartoon Network',
                             'enabled': True}]
     rig = Rig(tmp_path, memory={CN: True, CN_ES: False}, channels=channels)
-    epoch = tune(rig, CN_LIVE, subs=False)
-    assert rig.player.switches == [ON]
-    assert rig.player._liveSubsState == settled(rig, epoch, CN, CN_LIVE)
-    tune(rig, dict(CN_LIVE, number='57'), subs=True)                        # Kodi's own running count
-    assert rig.player.switches == [ON] and rig.player.monitor.waits == [lh.RECHECK_S]
-    assert rig.player._liveSubsState is None
-    rig.kodi.state['subs'] = False
+    for label in (CN_LIVE['number'], '310', '57'):
+        tune(rig, dict(CN_LIVE, number=label), subs=False)
+        assert rig.player.switches == [] and rig.player._liveSubsState is None
+    rig.kodi.state['subs'] = True
     tick(rig, 2)
     assert rig.files.writes == []
+
+
+def test_a_number_change_alone_is_the_same_channel(tmp_path):
+    """Kodi renumbers channels itself when the playlist changes (a channel enabled or removed before
+    this one): the channel's name and the playing file still identify it, so its restore settles
+    and its toggles are recorded (review 2026-11-12)."""
+    rig = Rig(tmp_path, memory={WARNER: True})
+    rig.player.monitor.during = once(lambda: rig.kodi.state.update(number='13'))
+    epoch = tune(rig, WARNER_LIVE, subs=False)
+    assert rig.player._liveSubsState is not None and rig.player._liveSubsState['epoch'] == epoch
+    rig.kodi.state.update(number='14', subs=False)              # renumbered again while you watch
+    tick(rig)
+    assert rig.saved() == {WARNER: False}
+
+
+def test_a_restart_pressed_during_the_recheck_is_not_settled_on(tmp_path):
+    """RESTART pressed within the 1 s re-check: Kodi already plays the replay (same channel labels,
+    another file) before the epoch moved -- the live restore must not settle on it (review 2026-11-12)."""
+    rig = Rig(tmp_path, memory={WARNER: True})
+    rig.player.monitor.during = once(lambda: rig.kodi.state.update(WARNER_REPLAY, file='pvr://guide/0071/restart.epg',
+                                                                   subs=False))
+    tune(rig, WARNER_LIVE, subs=True)
+    assert rig.player._liveSubsState is None
+    tick(rig, 2)
+    assert rig.files.writes == []
+
+
+def test_the_preview_wait_ends_at_once_when_a_newer_playback_starts(tmp_path):
+    """You browse with Up/Down and pick a channel: the newer playback ends this restore's preview
+    wait on the next pass, not after the cap."""
+    rig = Rig(tmp_path, memory={WARNER: True})
+    steps = []
+
+    def during():
+        steps.append(None)
+        if len(steps) == 1: _preview(rig, True)
+        if len(steps) == 3: rig.player._play_epoch += 1          # the picked channel starts
+    rig.player.monitor.during = during
+    tune(rig, WARNER_REPLAY, subs=False)
+    assert rig.player.monitor.waits == [lh.RECHECK_S, 0.25, 0.25]
+    assert rig.player._liveSubsState is None
 
 
 def test_a_new_playback_cancels_the_old_settled_state_at_once(tmp_path):
@@ -995,8 +1032,8 @@ def test_nothing_is_recorded_when_no_video_plays(tmp_path):
 
 
 @pytest.mark.parametrize('now', [NEOX_LIVE, CUSTOM_CN, LIBRARY, dict(WARNER_LIVE, name=''),
-                                 dict(WARNER_LIVE, number='13'), dict(LIBRARY, number='12', name='Warner TV')],
-                         ids=['zap', 'custom-namesake', 'not-livetv', 'no-name', 'other-number', 'labels-left-over'])
+                                 dict(LIBRARY, number='12', name='Warner TV')],
+                         ids=['zap', 'custom-namesake', 'not-livetv', 'no-name', 'labels-left-over'])
 def test_nothing_is_recorded_when_what_plays_changed(tmp_path, now):
     """Kodi already shows another channel (or no LiveTV, even with the channel's labels left over)
     while the epoch hasn't moved yet: the labels differ from the settled ones (same file here)."""
@@ -1571,7 +1608,7 @@ def test_a_preview_that_never_ends_leaves_the_playback_unsettled(tmp_path):
     rig = Rig(tmp_path, memory={WARNER: True})
     rig.player.monitor.during = once(lambda: _preview(rig, True))
     tune(rig, WARNER_REPLAY, subs=False)
-    assert rig.player.monitor.waits.count(0.25) == 40           # 10 s in 0.25 s steps
+    assert rig.player.monitor.waits.count(0.25) == 480          # the 120 s cap in 0.25 s steps
     assert rig.player._liveSubsState is None
 
 

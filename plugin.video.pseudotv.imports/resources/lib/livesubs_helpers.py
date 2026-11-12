@@ -92,11 +92,11 @@ def channel_key(number_label, name, channels):
     same live and in a replay:
       - the id of the only listed imported channel with that name (case and
         surrounding spaces ignored) -- stable across a rename or renumber;
-      - when several listed channels share the name, the one whose number is
-        Kodi's number label, else None (can't tell them apart; nothing is
-        remembered for it). Kodi numbers channels itself on this box
-        (pvrmanager.usebackendchannelnumbers off), so its number label is a
-        running count, used only to break such a tie;
+      - when several listed channels share the name, None: they can't be
+        told apart, so nothing is remembered for them. (Kodi numbers channels
+        itself on this box -- pvrmanager.usebackendchannelnumbers off -- so
+        its number label is a running count that can coincide with another
+        channel's own number: no tie-break on it. `number_label` is unused.)
       - no listed imported channel: 'name:<name>' (a channel from another
         PVR source).
     None when Kodi gives no channel name (nothing to remember it by)."""
@@ -108,9 +108,7 @@ def channel_key(number_label, name, channels):
     if len(same) == 1:
         return same[0]['id']
     if same:
-        number = _text(number_label)
-        exact = [c for c in same if number and str(c.get('number')) == number]
-        return exact[0]['id'] if len(exact) == 1 else None
+        return None
     return _NAME_PREFIX + name
 
 
