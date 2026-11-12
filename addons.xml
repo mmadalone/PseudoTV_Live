@@ -88,7 +88,7 @@
             </assets>
         </extension>
     </addon>
-    <addon id="plugin.video.pseudotv.imports" version="0.8.0+imports.59" name="PseudoTV Live (imports)" provider-name="Lunatixz, mmadalone">
+    <addon id="plugin.video.pseudotv.imports" version="0.8.0+imports.68" name="PseudoTV Live (imports)" provider-name="Lunatixz, mmadalone">
         <requires>
             <import addon="xbmc.python" version="3.0.1" />
             <import addon="script.module.six" version="1.0.0" />
@@ -116,6 +116,10 @@
         <extension point="xbmc.service" library="resources/lib/service.py" />
         <extension point="kodi.context.item">
             <menu id="kodi.core.main">
+                <item library="resources/lib/context_restart.py">
+                    <label>30909</label>
+                    <visible>[Window.IsVisible(tvguide) | Window.IsVisible(pvrchannelguide)] + ListItem.InProgress + ListItem.IsPlayable</visible>
+                </item>
                 <menu>
                     <label>PseudoTV Live</label>
                     <item library="resources/lib/context_record.py" args="add">
@@ -165,11 +169,15 @@
             <source>https://github.com/PseudoTV/PseudoTV_Live</source>
             <forum>https://forum.kodi.tv/showthread.php?tid=355549</forum>
             <disclaimer lang="en_GB">BETA PROJECT; SUBJECT TO BUGS</disclaimer>
-            <news>v0.8.0+imports.59
-- New!: past Movistar+ shows in the guide replay from their start, with most of the guide's descriptions kept and up to 7 days of past shows.
-- Fixed: several ways the guide or your import settings could be lost or reverted.
-v0.8.0+imports.58
-- Fixed: a logo you set for an imported channel as a web address never showed in Kodi; it now does, and a changed logo shows within minutes.</news>
+            <news>v0.8.0+imports.68
+- New: on LiveTV channels the audio language follows the channel too: the language that last played on a channel (your choice or Kodi's) starts it next time, live or replay. A show that lacks that language never changes it.
+v0.8.0+imports.67
+- Fixed: on LiveTV channels, turning subtitles on or off is remembered per channel. A replay (the RESTART pop-up, the TV guide, or Kodi's automatic next show) and the next live tune start the way you left them on that channel; before, every replay started with subtitles off.
+v0.8.0+imports.66
+- New: a "Pictures" setting for each imported channel in the web dashboard (Auto / Show / Hide). Hide shows the channel logo in the TV guide instead of the guide's show pictures.
+- New: when most of a channel's guide pictures are one same placeholder image (such as an advert), the TV guide shows the channel logo instead. Checked about once a day; one switch per import, on by default.
+v0.8.0+imports.62
+- New: restart a show that is already running from its beginning (RESTART button after you tune in, TV guide menu, remote button), on your own channels and on Movistar+.</news>
             <reuselanguageinvoker>true</reuselanguageinvoker>
             <assets>
                 <icon>resources/images/icon.png</icon>
