@@ -8,6 +8,7 @@ re-tested when implemented in step 3.
 import os
 
 import pytest
+import fake_commit_sync   # imports.69: commitSync for the in-memory channel store
 
 from imports import (
     Imports,
@@ -475,6 +476,7 @@ class _MockChannels:
         self.set_calls_imports.append(data)
         self._imports = data
         return True
+    commitSync = fake_commit_sync.commit_sync   # imports.69: the sync's one commit (shared test helper)
 
 
 class _MockM3U:

@@ -32,6 +32,7 @@ from renderers      import render_m3u, render_xmltv, write_atomic
 from filter_helpers import RENDER_KEYS, _renderStateDrift
 import replay_helpers
 import clock_helpers # madteevee (imports fork, imports.63): the one clock + time conversions
+from kick_helpers   import KICK_LOCK, KICK_LOCK_TIMEOUT, set_kick # madteevee (imports fork, imports.69): the kick's read / check / clear under one lock
 
 from context_create import _auto
 
@@ -141,6 +142,14 @@ class Tasks(object):
                 # import_id, so the daemon just carries the value forward
                 # verbatim without interpretation. None = no kick this cycle
                 # (natural daemon wake).
+                # imports.69: the line numbers above are history. A kick is
+                # 'all', an import id or RENDER_ONLY_KICK (imports.56: a gated
+                # cycle, no forced download). POST /imports.json, Orphans,
+                # ↻ Refresh, the address re-check and _keepImportsKick merge
+                # theirs into the pending kick (kick_helpers.set_kick, under
+                # KICK_LOCK); the four channel endpoints in server.py and
+                # utilities.py's "Refresh imports now" still write theirs
+                # directly. The value taken is still carried forward verbatim.
                 # imports.43: initial value sourced from boot-strategy dispatch
                 # above — `force_sync` sets 'all'; other strategies leave None.
                 kick_scope = eager_kick_scope
@@ -202,6 +211,17 @@ class Tasks(object):
                             self.log('imports thread, _maybeRefreshAddonExports failed: %s'%(e), xbmc.LOGWARNING)
                         if interval_secs > 0 and elapsed >= interval_secs:
                             break  # time-based auto-sync interval expired
+                        # madteevee (imports fork, imports.69): the read, the
+                        # blocker checks and the clear run under KICK_LOCK, which
+                        # every kick setter in the service takes too
+                        # (kick_helpers.set_kick: POST /imports.json, Orphans,
+                        # ↻ Refresh, _chkAddress, _keepImportsKick). Before, a
+                        # kick set between this read and the clear was wiped
+                        # together with the one taken. Lock busy for 2 s: skip
+                        # this poll, the kick stays set. KICK_LOCK is a plain
+                        # Lock: nothing in here may call set_kick.
+                        if not KICK_LOCK.acquire(timeout=KICK_LOCK_TIMEOUT):
+                            continue
                         try:
                             kick = PROPERTIES.getEXTProperty('chkImports.kick', '')
                             if kick:
@@ -249,6 +269,8 @@ class Tasks(object):
                                     last_defer_log = state
                         except Exception:
                             pass
+                        finally:
+                            KICK_LOCK.release()   # also on the `break` above
             except Exception as e:
                 self.log('imports thread, fatal: %s'%(e), xbmc.LOGERROR)
         self._imports_thread = threading.Thread(target=_loop, name='pseudotv-imports', daemon=True)
@@ -882,16 +904,23 @@ class Tasks(object):
     def _keepImportsKick(self, force_scope):
         """imports.59 (S16/A1): chkImports deferred on Builder after the
         imports thread's poll loop had already taken a dashboard kick
-        (force_scope) off 'chkImports.kick'. Put it back, unless a newer kick
-        is pending, so it isn't lost: the poll loop holds kicks while Builder
-        runs and fires this one about 3 s after the build. A pending kick
-        wins even when its scope is narrower -- the same last-writer-wins
-        rule as the web server's own kick setters, which overwrite each
-        other (two kicks within the same few seconds as a build start)."""
-        if not force_scope or PROPERTIES.getEXTProperty('chkImports.kick', ''):
+        (force_scope) off 'chkImports.kick'. Put it back so it isn't lost:
+        the poll loop holds kicks while Builder runs and fires this one about
+        3 s after the build.
+
+        madteevee (imports fork, imports.69): merged into whatever kick is
+        pending now (kick_helpers.set_kick, under KICK_LOCK), with the same
+        rule as every other setter: none < render < import id < all, and two
+        different import ids become 'all'. Before, a pending kick won even
+        when its scope was narrower; with the dashboard's Save now sending a
+        render kick, that would have swallowed a taken 'all' or import kick.
+        The line is logged only when the pending kick changed (it names the
+        kick now pending)."""
+        if not force_scope:
             return
-        PROPERTIES.setEXTProperty('chkImports.kick', force_scope)
-        self.log('chkImports, kick (%s) kept for after Builder.buildChannels'%(force_scope), xbmc.LOGINFO)
+        before, after = set_kick(PROPERTIES, force_scope)
+        if after != before:
+            self.log('chkImports, kick (%s) kept for after Builder.buildChannels'%(after), xbmc.LOGINFO)
 
 
     def chkImports(self, silent=None, force_scope=None):

@@ -27,6 +27,7 @@ import re
 import sys
 
 import pytest
+import fake_commit_sync   # imports.69: commitSync for the in-memory channel store
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -153,6 +154,7 @@ class _MockChannels:
         if channels is not None: self._channels = list(channels)
         return True
     def setImports(self, data): return True
+    commitSync = fake_commit_sync.commit_sync   # imports.69: the sync's one commit (shared test helper)
 
 
 class _MockM3U:

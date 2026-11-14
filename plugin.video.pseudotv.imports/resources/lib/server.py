@@ -21,7 +21,7 @@ import base64, gzip, mimetypes, re, socket, errno
 
 from zeroconf                  import *
 from globals                   import *
-from channels                  import Channels, markOverrides
+from channels                  import Channels, markOverrides, COMMIT_BUSY, COMMIT_NOTHING, COMMIT_UNREADABLE, COMMIT_WRITTEN
 from filter_helpers             import META_ONLY_FIELDS
 from sysinfo_helpers            import resolveKodiOSVersion
 from logo_links                 import public_logo_name
@@ -30,6 +30,8 @@ from resources                 import Resources
 from six.moves.BaseHTTPServer  import BaseHTTPRequestHandler, HTTPServer
 from six.moves.socketserver    import ThreadingMixIn
 import picture_helpers # madteevee (imports fork, imports.66): show pictures in the guide (per-channel Auto / Show / Hide)
+import importcfg_helpers # madteevee (imports fork, imports.69): the import-save rules behind POST /imports.json
+from kick_helpers               import set_kick, RENDER_ONLY_KICK # madteevee (imports fork, imports.69): merged "sync the imports now" kicks
 #todo proper REST API to handle server/client communication incl. sync/update triggers.
 #todo incorporate experimental webserver UI to master branch.
 
@@ -370,35 +372,79 @@ class MyHandler(BaseHTTPRequestHandler):
                     del channels
                     self.send_response(200, "OK")
                 # imports fork (madteevee): live-imports management endpoints
-                # POST /imports.json — save full imports list (form: {uuid, payload: [{...}, ...]})
+                # POST /imports.json — one import request, {uuid, payload: {op, ...}}:
+                # {op:'add', entry}, {op:'edit', id, entry} (only the changed boxes)
+                # or {op:'delete', id}; or a whole import list from a dashboard tab
+                # opened before imports.69.
+                #
+                # madteevee (imports fork, imports.69): the request is applied by
+                # Channels.saveImportRequest in one locked commit onto channels.json
+                # as it is now (importcfg_helpers.apply_dashboard_request): only the
+                # dashboard's own boxes change, so every import keeps its sync info
+                # and its deleted-channel list (tombstones). Before, the page posted
+                # the whole list and setImports stored it as sent: a Save made every
+                # import "never synced", wiped its error/retry state and tombstones,
+                # and a running sync wrote back the list it had read before the Save.
+                # Replies: 200 {ok, changed, op, id}; 400/404/409 for a refused
+                # request; 503 while channels.json is busy; 500 when it can't be read
+                # or written. Every message is ASCII and none echoes a stored import
+                # id (only the Add duplicate names the new one, after it passed the
+                # Identifier check): send_error writes it into the latin-1 status line.
                 elif self.path.split('?', 1)[0].lower() == '/imports.json' and incoming.get('payload') is not None:
+                    summary = None
                     try:
-                        from imports import validate_source_url, ALLOWED_M3U_SCHEMES, ALLOWED_EPG_SCHEMES
-                        # Server-side validation: scheme allowlist (plan H2)
-                        for imp in (incoming.get('payload') or []):
-                            for url in (imp.get('m3u_url'), imp.get('epg_url')):
-                                if url:
-                                    validate_source_url(url, ALLOWED_M3U_SCHEMES)
-                            for path in (imp.get('m3u_path'), imp.get('epg_path')):
-                                if path:
-                                    validate_source_url(path, ALLOWED_M3U_SCHEMES)
+                        from imports import validate_source_url, ALLOWED_M3U_SCHEMES
                         channels = Channels(writable=True)
-                        channels.setImports(incoming.get('payload') or [])
-                        del channels
-                        DIALOG.notificationDialog('Imports saved (%d configured)'%(len(incoming.get('payload') or [])))
-                        # Send proper HTTP response with Content-Length + end_headers,
-                        # otherwise browser fetch hangs waiting for the body delimiter.
-                        body = b'{"ok":true}'
-                        self.send_response(200, "OK")
-                        self.send_header("Content-Type", "application/json")
-                        self.send_header("Content-Length", str(len(body)))
-                        self.end_headers()
-                        self.wfile.write(body)
-                    except ValueError as e:
-                        self.send_error(400, "Invalid import: %s"%(e))
+                        # Server-side validation: scheme allowlist (plan H2), the same
+                        # check as before, for every address the request sets.
+                        summary  = channels.saveImportRequest(incoming.get('payload'),
+                                                              check_address=lambda a: validate_source_url(a, ALLOWED_M3U_SCHEMES))
+                    except importcfg_helpers.ImportRequestError as e:
+                        self.log('do_POST imports.json refused (%d): %s'%(e.status, e.message), xbmc.LOGWARNING)
+                        self.send_error(e.status, e.message)
                     except Exception as e:
                         self.log('do_POST imports.json failed: %s'%(e), xbmc.LOGERROR)
                         self.send_error(500, "Failed to save imports")
+                    if summary is not None:
+                        status = summary.get('status')
+                        if   status == COMMIT_BUSY:       refused = (503, "Busy saving channels; try again")
+                        elif status == COMMIT_UNREADABLE: refused = (500, "channels.json can't be read; nothing was saved")
+                        elif status not in (COMMIT_WRITTEN, COMMIT_NOTHING): refused = (500, "Failed to save imports")
+                        else:                             refused = None
+                        if refused:
+                            self.log('do_POST imports.json refused (%d): %s'%refused, xbmc.LOGWARNING)
+                            self.send_error(*refused)
+                        else:
+                            changed = status == COMMIT_WRITTEN and bool(summary.get('changed'))
+                            if changed:
+                                # A render kick (a normal, gated cycle) is enough: an
+                                # edited import syncs through its config_key, an added
+                                # one through its open gate, and a deleted one's stations
+                                # leave the playlist in that cycle (M3U.cleanSelf).
+                                # set_kick merges, so it never lowers a pending kick.
+                                # Each follow-up has its own try: the save is written,
+                                # so a failure here is logged and the page still gets
+                                # the 200 that matches the file.
+                                try:
+                                    set_kick(PROPERTIES, RENDER_ONLY_KICK)
+                                except Exception as e:
+                                    self.log('do_POST imports.json, saved but the follow-up failed: %s'%(e), xbmc.LOGERROR)
+                                try:
+                                    DIALOG.notificationDialog('Imports saved (%d configured)'%(len(channels.getImports() or [])))
+                                except Exception as e:
+                                    self.log('do_POST imports.json, saved but the follow-up failed: %s'%(e), xbmc.LOGERROR)
+                            self.log('do_POST imports.json, %s [%s] %s (fields %s, reset %s)'%(
+                                summary.get('op'), summary.get('id'), 'saved' if changed else 'no change',
+                                summary.get('fields'), summary.get('reset')), xbmc.LOGINFO)
+                            # Send proper HTTP response with Content-Length + end_headers,
+                            # otherwise browser fetch hangs waiting for the body delimiter.
+                            body = FileAccess.dumpJSON({'ok': True, 'changed': changed,
+                                                        'op': summary.get('op'), 'id': summary.get('id')}).encode('utf-8')
+                            self.send_response(200, "OK")
+                            self.send_header("Content-Type", "application/json")
+                            self.send_header("Content-Length", str(len(body)))
+                            self.end_headers()
+                            self.wfile.write(body)
                 # POST /pvr/reset.json — refresh Kodi PVR's EPG cache.
                 #
                 # Two modes (backwards-compat: `hard` defaults to false):
@@ -1546,55 +1592,43 @@ class MyHandler(BaseHTTPRequestHandler):
                 # import. Adds their ids to the import's `tombstones` list so they
                 # don't get re-created on the next sync, and removes the records
                 # from channels.json. Kicks chkImports to regen M3U/XML.
+                #
+                # imports.69: one commit on the file as it is now
+                # (Channels.removeOrphans), instead of setImports plus a raw _save
+                # from copies read at request start (a sync committing in between
+                # lost one or the other). The kick is a render kick, and only when
+                # something was removed: the stations only need the playlist and
+                # guide files rewritten (cleanSelf drops ids that left
+                # channels.json), not a forced download.
                 elif self.path.split('?', 1)[0].lower() == '/imports/orphans/remove.json':
                     try:
                         target_id = incoming.get('id') or ''
                         if not target_id:
                             self.send_error(400, "id required")
                         else:
-                            channels = Channels(writable=True)
-                            ch_list  = list(channels.getChannels() or [])
-                            imports  = list(channels.getImports() or [])
-                            # Find the target import config
-                            imp_cfg = next((i for i in imports if i.get('id') == target_id), None)
-                            if imp_cfg is None:
-                                self.send_error(404, "import id not found")
-                                del channels
+                            result  = Channels(writable=True).removeOrphans(target_id)
+                            status  = result.get('status')
+                            removed = result.get('removed') or 0
+                            # The commit's outcome first: 'found' is False also when
+                            # the merge never ran (busy, unreadable).
+                            if   status == COMMIT_BUSY:       self.send_error(503, "Busy saving channels; try again")
+                            elif status == COMMIT_UNREADABLE: self.send_error(500, "channels.json can't be read; nothing was saved")
+                            elif status not in (COMMIT_WRITTEN, COMMIT_NOTHING): self.send_error(500, "Failed to remove orphans")
+                            elif not result.get('found'):    self.send_error(404, "import id not found")
                             else:
-                                # Identify orphans for this import.
-                                orphan_ids = [c.get('id') for c in ch_list
-                                              if c.get('import_source') == target_id
-                                              and c.get('type') == 'import'
-                                              and c.get('is_orphan') is True
-                                              and c.get('id')]
-                                removed = 0
-                                if orphan_ids:
-                                    # Tombstone the orphan ids so the next sync's
-                                    # reconcile doesn't re-create them as 'new'.
-                                    tomb = set(imp_cfg.get('tombstones') or [])
-                                    tomb.update(orphan_ids)
-                                    imp_cfg['tombstones'] = sorted(tomb)
-                                    # Drop the orphans from channels.json.
-                                    orphan_set  = set(orphan_ids)
-                                    new_ch_list = [c for c in ch_list if c.get('id') not in orphan_set]
-                                    removed = len(ch_list) - len(new_ch_list)
-                                    # Persist both lists. setImports writes the
-                                    # imports list (which includes the updated
-                                    # tombstones); setChannels writes the channels.
-                                    channels.setImports(imports)
-                                    # Bypass setChannels' defensive merge — without
-                                    # this, the merge re-adds the just-removed
-                                    # orphan records as "disk-only type='import'"
-                                    # in the same call, and the delete silently
-                                    # reverts. Same pattern as cleanup_stranded.
-                                    channels.channelDATA['channels'] = channels.sortChannels(new_ch_list)
-                                    channels._save()
-                                del channels
-                                # Trigger sync so M3U/XML regen (orphan cleanup).
-                                PROPERTIES.setEXTProperty('chkImports.kick', target_id)
-                                DIALOG.notificationDialog(
-                                    'Orphans removed: %d in [%s]' % (removed, target_id)
-                                )
+                                # Follow-ups in their own try: a written removal
+                                # never turns into a 500.
+                                if removed:
+                                    try:
+                                        set_kick(PROPERTIES, RENDER_ONLY_KICK)
+                                    except Exception as e:
+                                        self.log('do_POST imports/orphans/remove.json, removed but the follow-up failed: %s'%(e), xbmc.LOGERROR)
+                                try:
+                                    DIALOG.notificationDialog(
+                                        'Orphans removed: %d in [%s]' % (removed, target_id)
+                                    )
+                                except Exception as e:
+                                    self.log('do_POST imports/orphans/remove.json, removed but the follow-up failed: %s'%(e), xbmc.LOGERROR)
                                 body = ('{"ok":true,"removed":%d}' % removed).encode('utf-8')
                                 self.send_response(200, "OK")
                                 self.send_header("Content-Type", "application/json")
@@ -1659,8 +1693,17 @@ class MyHandler(BaseHTTPRequestHandler):
                             # state and could miss the `changed` flag if disk
                             # already wrote False during the read.
                             channels.channelDATA['channels'] = channels.sortChannels(ch_list)
-                            channels._save()
+                            saved = channels._save()
                             del channels
+                            if not saved:
+                                # imports.69: _save refuses (nothing written) when
+                                # channels.json can't be read, when this copy never
+                                # loaded it, or while the save lock stays busy, and
+                                # a write can fail; the reply said "queued" anyway.
+                                # No Builder kick, no TV notice for a rebuild that
+                                # wasn't saved.
+                                self.send_error(500, "Channels not saved; try again")
+                                return
                             # Kick Builder via the same prop-timer mechanism
                             # /channels/add.json uses. chkChanged scans for
                             # `changed=True` and queues Builder per channel.
@@ -1716,7 +1759,14 @@ class MyHandler(BaseHTTPRequestHandler):
                             # call _save() to skip the merge entirely. Same
                             # pattern setImports uses for its in-place purge.
                             channels.channelDATA['channels'] = channels.sortChannels(kept)
-                            channels._save()
+                            if not channels._save():
+                                # imports.69: the save was refused or failed
+                                # (_save returns False; nothing written). Report it
+                                # instead of "removed": no kick, no TV notice, and
+                                # the guide caches stay with the records they serve.
+                                del channels
+                                self.send_error(500, "Channels not saved; try again")
+                                return
                             # Clean up per-stranded-import EPG cache files
                             # (Step 5 fix #2 normally does this in setImports, but
                             # stranded-source channels don't trigger that path).
@@ -1764,7 +1814,11 @@ class MyHandler(BaseHTTPRequestHandler):
                         target_id = incoming.get('id') or ''
                         # Set the property the chkImports daemon thread polls
                         # (tasks.py:_loop checks every KICK_POLL_SECS for this).
-                        PROPERTIES.setEXTProperty('chkImports.kick', target_id or 'all')
+                        # imports.69: merged with the pending kick (set_kick, under
+                        # the poll loop's KICK_LOCK) instead of overwriting it: a
+                        # row's Refresh no longer cancels a pending 'all', and two
+                        # rows refreshed while a kick waits both sync ('all').
+                        set_kick(PROPERTIES, target_id or 'all')
                         DIALOG.notificationDialog('Refresh queued: %s'%(target_id or 'all imports'))
                         body = b'{"ok":true}'
                         self.send_response(200, "OK")
@@ -2009,16 +2063,21 @@ class MyHandler(BaseHTTPRequestHandler):
                                     except (TypeError, ValueError): fail_count = 0
                                     try:    failed_since = int(imp.get('failed_since') or 0) or None
                                     except (TypeError, ValueError): failed_since = None
-                                    # Derived abandoned status (NOT stored)
+                                    # Derived abandoned status (NOT stored).
+                                    # imports.69: sent as display_status; last_status
+                                    # keeps the stored 'failed', so nothing in the reply
+                                    # looks like a stored status (an older page posted
+                                    # the reply back and 'abandoned' was stored).
                                     if (abandon_hours > 0
                                         and failed_since
                                         and last_status == 'failed'
                                         and (now_epoch - failed_since) >= abandon_hours * 3600):
-                                        imp['last_status'] = 'abandoned'
+                                        imp['display_status'] = 'abandoned'
                                     # Derived next_retry_at (only when failing
                                     # and not abandoned — abandoned means no
-                                    # auto-retry, dashboard shows "hit Refresh")
-                                    if last_status == 'failed' and fail_count > 0 and imp.get('last_status') != 'abandoned':
+                                    # auto-retry, dashboard shows "hit Refresh").
+                                    # Reply-only: a Save never stores it (imports.69).
+                                    if last_status == 'failed' and fail_count > 0 and imp.get('display_status') != 'abandoned':
                                         try:    rim_sec = int(imp.get('refresh_interval_min') or 0) * 60
                                         except (TypeError, ValueError): rim_sec = 0
                                         try:    last_sec = int(imp.get('last_sync_at') or 0)
@@ -2479,9 +2538,10 @@ class HTTP(Thread):
             # the address) rather than at the next natural imports cycle. The
             # render-only kick runs a normal gated cycle — no forced downloads
             # — and never replaces a kick that is already pending.
-            from imports import RENDER_ONLY_KICK
-            if not PROPERTIES.getEXTProperty('chkImports.kick', ''):
-                PROPERTIES.setEXTProperty('chkImports.kick', RENDER_ONLY_KICK)
+            # imports.69: read, merge and write under KICK_LOCK (set_kick):
+            # the unlocked check-then-set could overwrite a Refresh or Save
+            # that set 'all' between its read and its write.
+            set_kick(PROPERTIES, RENDER_ONLY_KICK)
             self.log('_chkAddress, address changed %s -> %s; republished %s'%(old_host, new_host, server), xbmc.LOGINFO)
             return True
         except Exception as e:

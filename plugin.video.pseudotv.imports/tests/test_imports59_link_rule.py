@@ -14,6 +14,7 @@ playlist's values, so replay comes back by itself. The eager start-up render
 import time
 
 import pytest
+import fake_commit_sync   # imports.69: commitSync for the in-memory channel store
 
 import imports as imports_mod
 import renderers
@@ -50,6 +51,7 @@ class _MockChannels:
     def setImports(self, data):
         self._imports = list(data)
         return True
+    commitSync = fake_commit_sync.commit_sync   # imports.69: the sync's one commit (shared test helper)
 
 
 class _MockM3U:

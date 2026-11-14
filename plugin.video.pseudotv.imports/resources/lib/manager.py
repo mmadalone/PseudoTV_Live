@@ -1097,6 +1097,19 @@ class Manager(xbmcgui.WindowXMLDialog):
                             self.log("saveChanges, backup latest = %s"%(self.backup.backupChannels(CHANNELFLE_LATEST,silent=True)))
                             PROPERTIES.setPropTimer('chkChanged')#refresh channel changed
                             self.fillChanList(self.newChannels,True,focus=start)
+                        else:
+                            # madteevee (imports fork, imports.69): setChannels writes
+                            # nothing and returns False when channels.json can't be
+                            # read, when this copy never loaded it while it exists, while
+                            # the save lock stays busy, or when the write fails. Say so;
+                            # before, closing just asked "save changes?" again. When
+                            # closing, the refused changes are dropped (the notice says
+                            # nothing was changed), so closeManager closes instead of
+                            # asking again -- and without a window to ask (start=False:
+                            # autotune, "add to the first free channel") it would have
+                            # retried the save without end.
+                            DIALOG.notificationDialog("Channels not saved: channels.json can't be read or written right now. Nothing was changed.")
+                            if close: self.madeChanges = False
             else: self.madeChanges = False
         if close: self.closeManager()
             

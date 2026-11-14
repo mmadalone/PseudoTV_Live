@@ -19,8 +19,10 @@ proceeds, as before.
 A1: chkImports re-checks 'Builder.buildChannels' after raising its own
 'Imports.syncAll' flag -- both sides "raise own flag, then check the other's",
 so they can never both go ahead. When chkImports defers on Builder with a
-dashboard kick the poll loop already took, the kick is put back (unless a
-newer one is pending), so it fires after the build instead of being lost.
+dashboard kick the poll loop already took, the kick is put back, so it fires
+after the build instead of being lost. imports.69: put back by merging it
+into any newer pending kick (kick_helpers.set_kick), never by "the pending
+one wins".
 
 builder.py imports under the stubs; tasks.py can't (xbmcgui.ControlList), so
 the shipped chkImports body is executed against fakes (test_imports54 style).
@@ -38,6 +40,7 @@ import xbmc
 import globals as globals_mod
 import builder as builder_mod
 from builder import Builder, IMPORTS_SYNC_WAIT_MAX_SECS
+from kick_helpers import set_kick
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -414,7 +417,9 @@ def _run_chkimports(monkeypatch, builder_states, force_scope=None, pending_kick=
     monkeypatch.setattr(m3u_mod, 'M3U', _forbidden('M3U'))
     monkeypatch.setattr(xmltvs_mod, 'XMLTVS', _forbidden('XMLTVS'))
     monkeypatch.setattr(imports_mod, 'Imports', _forbidden('Imports'))
-    namespace = {'PROPERTIES': props, 'Channels': _Chans, 'xbmc': xbmc}
+    # imports.69: _keepImportsKick merges through kick_helpers.set_kick (the
+    # real one; it calls the fake PROPERTIES positionally).
+    namespace = {'PROPERTIES': props, 'Channels': _Chans, 'xbmc': xbmc, 'set_kick': set_kick}
     fn = _shipped_function(src, 'chkImports', namespace)
 
     class _Self(object):
@@ -469,6 +474,30 @@ def test_newer_pending_kick_is_left_alone(monkeypatch, builder_states):
                                                 pending_kick='all')
     assert props.ext.get('chkImports.kick') == 'all'
     assert not [m for m, lvl in lines if 'kept' in m]
+
+
+# imports.69: the taken kick is merged into the pending one (none < render <
+# import id < all; two different ids become 'all'). The two cases above give
+# the same result under the old "a pending kick wins" rule; these two don't.
+@pytest.mark.parametrize('builder_states', [[True], [False, True]], ids=['top-defer', 'A1-defer'])
+def test_a_pending_render_kick_never_swallows_the_taken_one(monkeypatch, builder_states):
+    """A dashboard Save's render kick arrived while the taken 'mp' kick waited
+    for Builder: 'mp' is kept (a render kick never lowers an import kick)."""
+    lines, props, constructed = _run_chkimports(monkeypatch, builder_states, force_scope='mp',
+                                                pending_kick='__render__')
+    assert constructed == []
+    assert props.ext.get('chkImports.kick') == 'mp'
+    assert [lvl for m, lvl in lines if 'kick (mp) kept' in m] == [xbmc.LOGINFO]
+
+
+@pytest.mark.parametrize('builder_states', [[True], [False, True]], ids=['top-defer', 'A1-defer'])
+def test_another_pending_import_kick_becomes_all(monkeypatch, builder_states):
+    """Two different imports were asked to sync: both must, so 'all'."""
+    lines, props, constructed = _run_chkimports(monkeypatch, builder_states, force_scope='mp',
+                                                pending_kick='other')
+    assert constructed == []
+    assert props.ext.get('chkImports.kick') == 'all'
+    assert [lvl for m, lvl in lines if 'kick (all) kept' in m] == [xbmc.LOGINFO]
 
 
 def test_natural_cycle_puts_no_kick_back(monkeypatch):

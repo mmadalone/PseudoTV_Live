@@ -27,6 +27,7 @@ import os
 import time
 
 import pytest
+import fake_commit_sync   # imports.69: commitSync for the in-memory channel store
 
 import imports as imports_mod
 import replay_helpers
@@ -62,6 +63,7 @@ class _Ch:
     def setImports(self, data):
         self._i = list(data)
         return True
+    commitSync = fake_commit_sync.commit_sync   # imports.69: the sync's one commit (shared test helper)
 
 
 class _M3U:

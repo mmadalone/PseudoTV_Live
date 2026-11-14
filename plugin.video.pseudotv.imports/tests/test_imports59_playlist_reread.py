@@ -12,6 +12,7 @@ unset, so the next sync tries again. No gate bypass: the gate tests
 import time
 
 import pytest
+import fake_commit_sync   # imports.69: commitSync for the in-memory channel store
 
 import imports as imports_mod
 from imports import Imports, PLAYLIST_REREAD_REV, _playlistRev
@@ -115,6 +116,7 @@ def test_rev_survives_through_syncall_and_the_next_sync_uses_validators(monkeypa
         def setImports(self, data):
             self._i = list(data)
             return True
+        commitSync = fake_commit_sync.commit_sync   # imports.69: the sync's one commit (shared test helper)
 
     calls = []
     def fetch(self, url, etag=None, last_modified=None, **kw):

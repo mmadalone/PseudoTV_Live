@@ -309,6 +309,8 @@
         .imp-modal h2 { margin: 0 0 12px; font-size: 1rem; color: var(--pstv-focus); }
         .imp-modal label { display: block; margin: 10px 0 4px; font-size: 0.78rem; color: var(--pstv-dim); }
         .imp-modal input[type=text], .imp-modal input[type=number], .imp-modal select { width: 100%; padding: 8px 10px; border-radius: 4px; border: 1px solid var(--pstv-border); background: var(--pstv-input-bg); color: var(--pstv-accent); font-family: inherit; font-size: 0.85rem; }
+        /* imports.69: the Identifier of an existing import is read-only; grey it out so it reads as locked. */
+        .imp-modal input[type=text][readonly] { opacity: 0.55; cursor: not-allowed; }
         .imp-modal .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
         .imp-modal .checkboxes { display: flex; gap: 14px; margin-top: 10px; flex-wrap: wrap; }
         .imp-modal .checkboxes label { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--pstv-accent); }
@@ -485,7 +487,9 @@
             <div class="imp-modal">
                 <h2 id="import-modal-title">Add import</h2>
                 <input type="hidden" id="f-orig-id" />
-                <label>Identifier <span class="help">(unique slug, lowercase a-z/0-9/_-)</span></label>
+                <!-- imports.69: openImportModal makes the Identifier read-only for an
+                     existing import and swaps this help text (#f-id-help). -->
+                <label>Identifier <span class="help" id="f-id-help">(unique slug, lowercase a-z/0-9/_-)</span></label>
                 <input type="text" id="f-id" placeholder="movistarplus" />
                 <label>Display name</label>
                 <input type="text" id="f-name" placeholder="MovistarPlus" />
@@ -508,11 +512,13 @@
                     <div><label>Start channel number</label><input type="number" id="f-start-num" value="800" min="1" max="9999" /></div>
                     <div><label>Refresh interval (minutes)</label><input type="number" id="f-refresh" value="60" min="1" max="1440" /></div>
                 </div>
+                <p class="help">A new start number applies to channels added later. To move existing channels, press ⟳ Renumber.</p>
                 <div class="checkboxes">
                     <label><input type="checkbox" id="f-respect" /> Respect source channel numbers</label>
                     <label><input type="checkbox" id="f-rediscover" /> Re-discover deleted channels</label>
                     <label><input type="checkbox" id="f-enabled" checked /> Enabled</label>
                 </div>
+                <p class="help">Ticked: a channel you deleted with 🗑 Orphans comes back (switched on, as a new channel) when the provider lists it again. Unticked: deleted channels stay deleted. A channel that came back can't be deleted again while the provider lists it; switch it off instead.</p>
                 <!-- imports.66: the import's automatic placeholder-picture check
                      (on unless the import says false). Its own row, so the help
                      line sits right under it. -->
@@ -694,6 +700,10 @@
     // replaces imports.html's `CURRENT` to avoid colliding with future additions.
     let IMPORTS_DATA = { imports: [], channels: [] };
     let IMP_EDITING_INDEX = -1;        // -1 = adding new
+    // imports.69: the Edit-import window's boxes as they were when it opened
+    // (gatherImportForm's view; null when adding). saveImport sends only the
+    // boxes that differ from it.
+    let IMP_OPENED = null;
     let LAST_TOGGLED = null;
     const PENDING_TOGGLES      = {};   // {cid: bool}                 — Imports tab
     const PENDING_NUMBERS      = {};   // {cid: int}                  — Imports tab
@@ -1500,12 +1510,15 @@
     }
 
     function statusBadge(imp) {
-        if (imp.enabled === false) return '<span class="warn">disabled</span>';
-        // imports.28: abandoned state — server.py overrides last_status to
-        // 'abandoned' when failed_since is older than Imports_Failure_Abandon_Hours.
+        // imports.69: a switched-off import's stations leave the TV's channel
+        // list (M3U.cleanSelf); its channels keep their dashboard settings.
+        if (imp.enabled === false) return '<span class="warn">switched off (channels hidden from the TV)</span>';
+        // imports.28: abandoned state — derived by server.py when failed_since
+        // is older than Imports_Failure_Abandon_Hours. imports.69: it comes as
+        // display_status (last_status keeps the stored 'failed').
         // Distinct from a normal 'error: ...' badge because auto-retry has
         // stopped; the operator must click Refresh to wake the import back up.
-        if (imp.last_status === 'abandoned') {
+        if (imp.display_status === 'abandoned') {
             const since = imp.failed_since;
             const sinceStr = since ? ` (failing ${fmtAge(since).replace(' ago', '')})` : '';
             return `<span class="err">abandoned${sinceStr} — hit Refresh to retry</span>`;
@@ -1770,6 +1783,12 @@
         $('import-modal-title').textContent = imp ? 'Edit import' : 'Add import';
         $('f-orig-id').value     = imp ? imp.id : '';
         $('f-id').value          = imp ? imp.id : '';
+        // imports.69: an existing import's Identifier can't be changed (the
+        // add-on refuses it too). Changing it used to delete all of that
+        // import's channels and your settings for them; to use another
+        // Identifier, add a new import and delete the old one.
+        $('f-id').readOnly       = !!imp;
+        $('f-id-help').textContent = imp ? "(can't be changed after the import is created)" : '(unique slug, lowercase a-z/0-9/_-)';
         $('f-name').value        = imp ? (imp.name || '') : '';
         $('f-m3u-path').value    = imp ? (imp.m3u_path || '') : '';
         $('f-m3u-url').value     = imp ? (imp.m3u_url  || '') : '';
@@ -1782,17 +1801,20 @@
         $('f-enabled').checked   = imp ? imp.enabled !== false : true;
         // imports.66: the automatic placeholder-picture check is on unless the
         // import says false (a missing setting counts as on, as in
-        // picture_helpers.detect_enabled). data-original keeps the value the
-        // window opened with, so saveImport can tell when an existing import's
-        // switch was flipped ('' when adding a new import).
+        // picture_helpers.detect_enabled).
         $('f-detect-pictures').checked = imp ? imp.detect_placeholder_pictures !== false : true;
-        $('f-detect-pictures').dataset.original = imp ? String($('f-detect-pictures').checked) : '';
+        // imports.69: the boxes as the window opened, after every box is
+        // filled; saveImport sends only the boxes that differ from this.
+        IMP_OPENED = imp ? gatherImportForm() : null;
         $('import-modal-overlay').classList.add('open');
     }
     function closeImportModal() { $('import-modal-overlay').classList.remove('open'); }
     function gatherImportForm() {
         const id = $('f-id').value.trim();
-        if (!/^[a-z0-9_-]+$/.test(id)) { toast('Identifier must be lowercase a-z/0-9/_-', 'err'); return null; }
+        // imports.69: only a new Identifier is checked. An existing one is
+        // read-only and taken as stored, so an import with an older id outside
+        // the pattern can still be edited (the add-on checks new ones too).
+        if (!$('f-id').readOnly && !/^[a-z0-9_-]+$/.test(id)) { toast('Identifier must be lowercase a-z/0-9/_-', 'err'); return null; }
         const name = $('f-name').value.trim() || id;
         const m3u_path = $('f-m3u-path').value.trim();
         const m3u_url  = $('f-m3u-url').value.trim();
@@ -1806,36 +1828,34 @@
             respect_source_numbers: $('f-respect').checked,
             rediscover_deleted: $('f-rediscover').checked,
             enabled: $('f-enabled').checked,
-            // imports.66: always sent, so a Save keeps it (the form rebuilds
-            // the whole import entry).
+            // imports.66: the picture-check switch (imports.69: an Edit sends
+            // it, like every box, only when it changed).
             detect_placeholder_pictures: $('f-detect-pictures').checked,
         };
     }
     async function saveImport() {
         const item = gatherImportForm();
         if (!item) return;
-        // imports.66: when an existing import's picture check is switched on
-        // or off, refresh that import after a successful save so the guide
-        // follows now: an import Save on its own doesn't sync, and the
-        // import's next sync can be hours away. A new import has no channels
-        // until its first sync, which already goes by the saved switch.
-        const detectOpened = $('f-detect-pictures').dataset.original;
-        const detectChanged = IMP_EDITING_INDEX >= 0 && detectOpened !== ''
-            && detectOpened !== String(item.detect_placeholder_pictures);
-        const list = (IMPORTS_DATA.imports || []).slice();
-        if (IMP_EDITING_INDEX >= 0) list[IMP_EDITING_INDEX] = item;
-        else                        list.push(item);
-        const saved = await postImports(list);
-        if (saved && detectChanged) await refreshOne(item.id);
+        // imports.69: only this import goes to the add-on; for an existing one
+        // only the boxes you changed, so another tab's change to a different
+        // box is kept (the last save wins per box). A changed import syncs
+        // right after the save (the add-on marks its settings as changed and
+        // kicks the imports thread), so the imports.66 extra Refresh after a
+        // picture-switch change is gone.
+        if (IMP_EDITING_INDEX < 0 || !IMP_OPENED) { await postImports({op: 'add', entry: item}); return; }
+        const entry = {id: IMP_OPENED.id};
+        for (const k of Object.keys(item)) if (item[k] !== IMP_OPENED[k]) entry[k] = item[k];
+        await postImports({op: 'edit', id: IMP_OPENED.id, entry: entry});
     }
     // imports.66: returns true when the save went through and false on any
-    // failure (already reported with a toast), so saveImport knows whether to
-    // follow up. Callers that ignore the result (Delete) behave as before.
-    async function postImports(list) {
+    // failure (already reported with a toast). imports.69: `payload` is one
+    // request ({op: 'add' | 'edit' | 'delete', ...}), never the whole list,
+    // so a save can't put back what another tab or a running sync changed.
+    async function postImports(payload) {
         try {
             const res = await fetch(`http://${REMOTE_HOST}/imports.json`, {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({uuid: UUID, payload: list}),
+                body: JSON.stringify({uuid: UUID, payload: payload}),
             });
             if (!res.ok) {
                 const t = await res.text();
@@ -1879,7 +1899,9 @@
         } catch (e) { toast('Network error: ' + e.message, 'err'); }
     }
     async function removeOrphans(id) {
-        if (!confirm(`Delete all orphan channels for import "${id}"?\n\nTombstoned so they won't reappear on next sync.`)) return;
+        // imports.69: tombstoned ids now stay deleted unless the import's
+        // "Re-discover deleted channels" box is ticked (it works since .69).
+        if (!confirm(`Delete all orphan channels for import "${id}"?\n\nThey come back only if "Re-discover deleted channels" is ticked for this import and the provider lists them again.`)) return;
         try {
             const res = await fetch(`http://${REMOTE_HOST}/imports/orphans/remove.json`, {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -2371,10 +2393,12 @@
             const idx = parseInt(delBtn.dataset.idx, 10);
             const imp = IMPORTS_DATA.imports[idx];
             if (!imp) return;
-            if (!confirm(`Delete import "${imp.name || imp.id}"?\n\nChannels stay on disk until you run Cleanup stranded.`)) return;
-            const list = IMPORTS_DATA.imports.slice();
-            list.splice(idx, 1);
-            postImports(list);
+            // imports.69: its own request, never the list minus one. The add-on
+            // removes the import, its channel records and its guide file in one
+            // save and rewrites the playlist files at the next imports cycle;
+            // Kodi drops the channels at its next channel-list reload.
+            if (!confirm(`Delete import "${imp.name || imp.id}"?\n\nIts channels leave Kodi within about 5 minutes (after any sync or channel build that is running).`)) return;
+            postImports({op: 'delete', id: imp.id});
             return;
         }
         const refBtn = e.target.closest('button[data-action="refresh"]');
@@ -2806,10 +2830,13 @@
             if (!stranded.length) { toast('No stranded channels.', 'ok'); return; }
             if (!confirm(`Delete ${stranded.length} stranded channel${stranded.length===1?'':'s'}?`)) return;
             try {
-                await fetch(`http://${REMOTE_HOST}/imports/cleanup_stranded.json`, {
+                // imports.69: check the reply, as the single-channel Rebuild does;
+                // the add-on answers 500 when the save was refused.
+                const res = await fetch(`http://${REMOTE_HOST}/imports/cleanup_stranded.json`, {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({uuid: UUID}),
                 });
+                if (!res.ok) { toast('Cleanup failed: HTTP ' + res.status, 'err'); return; }
                 toast('Cleanup queued', 'ok');
                 setTimeout(loadImports, 400);
             } catch (e) { toast('Network error: ' + e.message, 'err'); }
@@ -2844,10 +2871,12 @@
         $('rebuild-all-pseudo-btn')?.addEventListener('click', async () => {
             if (!confirm('Rebuild ALL PseudoTV channels? Triggers a full Builder pass.')) return;
             try {
-                await fetch(`http://${REMOTE_HOST}/channels/rebuild.json`, {
+                // imports.69: check the reply (500 when the save was refused).
+                const res = await fetch(`http://${REMOTE_HOST}/channels/rebuild.json`, {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({uuid: UUID, all: true}),
                 });
+                if (!res.ok) { toast('Rebuild failed: HTTP ' + res.status, 'err'); return; }
                 toast('Rebuild all queued', 'ok');
             } catch (e) { toast('Network error: ' + e.message, 'err'); }
         });

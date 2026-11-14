@@ -29,6 +29,7 @@ import sys
 import time
 
 import pytest
+import fake_commit_sync   # imports.69: commitSync for the in-memory channel store
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -304,14 +305,20 @@ def test_server_imports_json_derives_next_retry_at():
 
 
 def test_server_imports_json_derives_abandoned_status():
-    """server.py must override imp['last_status']='abandoned' when
-    failed_since older than Imports_Failure_Abandon_Hours. Storage stays
-    'failed'; this is a derived view-only state per the agent-validated
-    design."""
+    """server.py must mark an import 'abandoned' when failed_since is older
+    than Imports_Failure_Abandon_Hours. Storage stays 'failed'; this is a
+    derived view-only state per the agent-validated design.
+
+    imports.69: the mark is display_status; last_status is no longer
+    overwritten, so nothing in the GET reply looks like a stored status
+    (an older page posted the reply back and 'abandoned' was stored)."""
     src = _read(os.path.join(LIB, 'server.py'))
-    assert "imp['last_status'] = 'abandoned'" in src, (
-        "server.py missing the derived abandoned override — dashboard "
+    assert "imp['display_status'] = 'abandoned'" in src, (
+        "server.py missing the derived abandoned mark — dashboard "
         "wouldn't surface abandoned imports."
+    )
+    assert "imp['last_status'] = 'abandoned'" not in src, (
+        "imports.69: the derived state must not overwrite last_status."
     )
 
 
@@ -321,11 +328,15 @@ def test_server_imports_json_derives_abandoned_status():
 
 def test_manager_html_status_badge_handles_abandoned():
     """manager.html statusBadge must render the abandoned state distinctly
-    from a normal error — operator needs to see that auto-retry stopped."""
+    from a normal error — operator needs to see that auto-retry stopped.
+    imports.69: the state comes as display_status (server.py)."""
     src = _read(os.path.join(REMOTES, 'manager.html'))
-    assert "imp.last_status === 'abandoned'" in src, (
+    assert "imp.display_status === 'abandoned'" in src, (
         "manager.html statusBadge missing abandoned branch — abandoned "
         "imports would render as a normal 'error' badge."
+    )
+    assert "imp.last_status === 'abandoned'" not in src, (
+        "imports.69: the badge reads display_status, not last_status."
     )
     assert 'hit Refresh to retry' in src, (
         "manager.html abandoned badge missing operator-facing recovery "
@@ -368,6 +379,7 @@ class _MockChannels:
     def setImports(self, data):
         self._imports = list(data)
         return True
+    commitSync = fake_commit_sync.commit_sync   # imports.69: the sync's one commit (shared test helper)
 
 
 class _MockM3U:

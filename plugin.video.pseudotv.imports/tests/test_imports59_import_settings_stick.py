@@ -8,7 +8,9 @@ loaded when Kodi started -- so a Custom build reverted the tombstones,
 validators, last_sync_at and the replay-link bookkeeping (links_mtime_ns,
 playlist_rev) saved since. Both setChannels merge branches already re-read
 channels.json; they now adopt its import list before saving (only setImports
-writes the import list). A failed read keeps the in-memory list, as before.
+writes the import list). imports.69: every save is one locked commit on a
+strict fresh read, so an unreadable channels.json is refused (nothing
+written) instead of keeping the in-memory list as before.
 
 These tests use the REAL Channels class against a channels.json in tmp_path.
 """
@@ -36,12 +38,18 @@ def _channel(cid, number, **over):
 
 
 @pytest.fixture(autouse=True)
-def _fixed_uuid(monkeypatch):
+def _fixed_uuid(monkeypatch, tmp_path):
     """setChannels stamps SETTINGS.getMYUUID(). Under the Kodi stubs there is
     no device name, so getMYUUID would open the 'name this device' OK dialog
-    whose 300 s auto-close Timer (non-daemon) keeps pytest from exiting."""
+    whose 300 s auto-close Timer (non-daemon) keeps pytest from exiting.
+
+    imports.69: setImports (and the sync's import-list save) now sweeps the
+    guide caches of unlisted imports from channels.CACHE_LOC after the write.
+    Unpatched, that is the working folder's tests/userdata/cache, so point it
+    at this test's tmp_path (isolation only)."""
     import channels as channels_module
     monkeypatch.setattr(channels_module.SETTINGS, 'getMYUUID', lambda: 'test-uuid')
+    monkeypatch.setattr(channels_module, 'CACHE_LOC', str(tmp_path))
 
 
 @pytest.fixture
@@ -90,19 +98,36 @@ def test_no_modified_ids_branch_keeps_disk_import_list(path):
     assert [c['name'] for c in disk['channels'] if c['id'] == CUSTOM] == ['Edited in the manager']
 
 
-def test_failing_disk_read_keeps_in_memory_import_list(path, monkeypatch):
+def test_unreadable_file_refuses_the_save(path):
+    """imports.69 (was: a failed re-read wrote the in-memory list). An
+    unreadable channels.json is never overwritten with this copy's data."""
     long_lived = Channels(file=str(path), writable=True)
     _dashboard_saves_v2(path)
-    monkeypatch.setattr(long_lived, '_load', lambda: {})        # getJSON returns {} on a read error
-    long_lived.setChannels(modified_ids={CUSTOM})
-    assert _disk(path)['imports'] == IMPORTS_V1, "today's behaviour when the re-read fails"
+    path.write_text('{"uuid": "u", "imports": [')                # damaged (half-written / hand edit)
+    before = path.read_bytes()
+    assert long_lived.setChannels(modified_ids={CUSTOM}) is False
+    assert path.read_bytes() == before, 'refused: the file is left byte-identical'
 
 
-@pytest.mark.parametrize('bad', [{'imports': None}, {'imports': 'junk'}, {'channels': []}, []])
-def test_disk_copy_without_an_import_list_keeps_memory(path, bad):
+@pytest.mark.parametrize('bad, imports_written', [
+    ({'imports': None}, None),                    # not a list: unreadable, refused
+    ({'imports': 'junk'}, None),
+    ([], None),                                   # top level not an object: refused
+    ({'channels': []}, []),                       # no import list: an empty one (the file's, never memory's)
+])
+def test_strict_read_of_the_import_list(path, bad, imports_written):
+    """imports.69 (was: _adoptDiskImports kept the in-memory list for each of
+    these). The strict read refuses a file whose import list isn't a list; a
+    file without one has none."""
     long_lived = Channels(file=str(path), writable=True)
-    long_lived._adoptDiskImports(bad)
-    assert long_lived.getImports() == IMPORTS_V1
+    path.write_text(json.dumps(bad))
+    before = path.read_bytes()
+    saved = long_lived.setChannels(modified_ids={CUSTOM})
+    if imports_written is None:
+        assert saved is False and path.read_bytes() == before
+    else:
+        assert saved is True
+        assert _disk(path)['imports'] == imports_written, 'the start-up list (IMPORTS_V1) is not written back'
 
 
 def test_setimports_still_writes_the_import_list(path):

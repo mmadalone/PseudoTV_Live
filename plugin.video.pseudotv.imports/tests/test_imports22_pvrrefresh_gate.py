@@ -24,6 +24,9 @@ Two-part fix:
       no-op against iptvsimple.
   (B) imports.py: gate the chkPVRRefresh signal in syncAll on actual
       disk-state change (status='ok' OR deleted_ids OR orphans).
+      imports.69: the delete signal is applied_deleted_ids -- "a delete was
+      applied" by the sync's commit -- instead of any kept tombstone
+      (deleted_ids signalled every cycle while a tombstone was stored).
 
 Source-scan style mirrors test_http_server_close.py + test_chkcallback_cas.py
 — driving the actual syncAll from pytest is impractical (HTTP fixtures,
@@ -89,9 +92,13 @@ def test_chkPVRRefresh_does_not_set_HTTP_pendingRestart():
 def test_syncAll_chkPVRRefresh_signal_is_conditional():
     """imports.py:syncAll must guard `setPropTimer('chkPVRRefresh')` on a
     `changed` boolean that references the three change-signals:
-    status=='ok', deleted_ids, and orphans. imports.22 added this gate so
-    all-304 cycles (every import returned HTTP 304, no operator deletions,
-    no orphans) don't fire the downstream PVR-refresh cascade."""
+    status=='ok', a delete was applied, and orphans. imports.22 added this
+    gate so all-304 cycles (every import returned HTTP 304, no operator
+    deletions, no orphans) don't fire the downstream PVR-refresh cascade.
+    imports.69: "a delete was applied" is bool(applied_deleted_ids), the
+    deletes the sync's commit actually applied, not bool(deleted_ids): every
+    stored tombstone is in deleted_ids, so a kept tombstone whose record was
+    long gone signalled every cycle."""
     src = _read('imports.py')
 
     # syncAll's tail is the bit after the M3U force-flush try/except. Anchor
@@ -99,7 +106,7 @@ def test_syncAll_chkPVRRefresh_signal_is_conditional():
     body = _slice(src, 'def syncAll', '# Summary log')
 
     # The conditional must exist: a `changed = (...)` binding that references
-    # 'ok', deleted_ids, and 'orphans'.
+    # 'ok', applied_deleted_ids, and 'orphans'.
     changed_binding = re.search(
         r"changed\s*=\s*\(",
         body,
@@ -113,14 +120,22 @@ def test_syncAll_chkPVRRefresh_signal_is_conditional():
     # close. Match the three referenced signals.
     tail = body[changed_binding.start():]
     for needle, why in (
-        ("'ok'",        "status='ok' check (fresh HTTP 200 fetched)"),
-        ("deleted_ids", "tombstone-processed check"),
-        ("'orphans'",   "reconcile-orphan check"),
+        ("'ok'",                      "status='ok' check (fresh HTTP 200 fetched)"),
+        ("bool(applied_deleted_ids)", "a delete was applied (imports.69)"),
+        ("'orphans'",                 "reconcile-orphan check"),
     ):
         assert needle in tail[:1500], (
             "imports.py:syncAll `changed` expression missing %s — %s."
             % (needle, why)
         )
+    # imports.69: pinned exactly -- the old needle 'deleted_ids' is a
+    # substring of the new name, so it can't tell the two apart.
+    expression = tail[:tail.index('if changed:')]
+    assert 'bool(deleted_ids)' not in expression, (
+        "imports.py:syncAll signals on every stored tombstone again (bool(deleted_ids)); "
+        "imports.69 signals only when a delete was applied (bool(applied_deleted_ids)).")
+    assert "no deletes applied" in tail, (
+        "imports.py:syncAll's no-op log line must say `no deletes applied` (imports.69).")
 
     # The setPropTimer call must be reachable only via `if changed:`.
     # Anchor: the call site is now wrapped by an `if changed:` branch with

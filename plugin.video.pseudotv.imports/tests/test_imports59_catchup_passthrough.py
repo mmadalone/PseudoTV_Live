@@ -14,6 +14,7 @@ import re
 import time
 
 import pytest
+import fake_commit_sync   # imports.69: commitSync for the in-memory channel store
 
 import imports as imports_mod
 from imports import Imports
@@ -45,6 +46,7 @@ class _MockChannels:
     def setImports(self, data):
         self._imports = list(data)
         return True
+    commitSync = fake_commit_sync.commit_sync   # imports.69: the sync's one commit (shared test helper)
 
 
 class _MockM3U:

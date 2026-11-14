@@ -1,7 +1,8 @@
 """Tests for per-import EPG cache files (step 5).
 
 Covers Imports._epgCacheWrite / _epgCacheRead and the syncOne 200/304
-behavior that uses them, plus Channels.setImports orphan-cache cleanup.
+behavior that uses them, plus Channels.setImports orphan-cache cleanup
+(imports.69: on the real Channels, after a successful write only).
 
 The cache lives at CACHE_LOC/epg_<import_id>.xml. Each test monkeypatches
 CACHE_LOC to a tmp_path-rooted dir so the real addon_data is untouched.
@@ -212,49 +213,63 @@ def test_cross_import_isolation_200_and_304(tmp_path, monkeypatch):
 # ============================================================ setImports cleanup
 
 
-def _make_fake_channels(initial_imports):
-    """Build a minimal stand-in for Channels that exercises only setImports.
+# imports.69: setImports is one locked commit on the file as it is now, and the
+# guide caches of imports no longer listed go only after a successful write.
+# The fake instance these tests used had no commit, so they run on the REAL
+# Channels against a channels.json in tmp_path, with channels.CACHE_LOC
+# pointed at a tmp folder.
 
-    Avoids real disk I/O (channels.json) and singleton init while letting
-    us call the real Channels.setImports method against the fake instance.
-    """
-    from channels import Channels
 
-    class FakeChannels:
-        def __init__(self, imports):
-            self.channelDATA = {'imports': list(imports)}
-            self.saved = False
-        def log(self, *a, **k): pass
-        def _save(self):
-            self.saved = True
-            return True
-    fc = FakeChannels(initial_imports)
-    return fc, Channels.setImports
+def _real_channels(tmp_path, monkeypatch, initial_imports):
+    import json
+    import channels as channels_module
+    cache = tmp_path / 'cache'
+    cache.mkdir()
+    monkeypatch.setattr(channels_module, 'CACHE_LOC', str(cache))
+    path = tmp_path / 'channels.json'
+    path.write_text(json.dumps({'uuid': 'u', 'channels': [], 'imports': list(initial_imports)}))
+    return channels_module.Channels(file=str(path), writable=True), path, cache
 
 
 def test_setImports_deletes_orphan_caches(tmp_path, monkeypatch):
-    monkeypatch.setattr('channels.CACHE_LOC', str(tmp_path))
-    # Three pre-existing cache files
-    for iid in ('keep1', 'remove_me', 'keep2'):
-        (tmp_path / ('epg_%s.xml' % iid)).write_bytes(b'<tv/>')
     initial = [{'id': 'keep1', 'enabled': True},
                {'id': 'remove_me', 'enabled': True},
                {'id': 'keep2', 'enabled': True}]
+    ch, _path, cache = _real_channels(tmp_path, monkeypatch, initial)
+    # Three pre-existing cache files
+    for iid in ('keep1', 'remove_me', 'keep2'):
+        (cache / ('epg_%s.xml' % iid)).write_bytes(b'<tv/>')
     new = [{'id': 'keep1', 'enabled': True},
            {'id': 'keep2', 'enabled': True}]
-    fc, setImports = _make_fake_channels(initial)
-    assert setImports(fc, new) is True
-    assert not (tmp_path / 'epg_remove_me.xml').exists()
-    assert (tmp_path / 'epg_keep1.xml').exists()
-    assert (tmp_path / 'epg_keep2.xml').exists()
+    assert ch.setImports(new) is True
+    assert not (cache / 'epg_remove_me.xml').exists()
+    assert (cache / 'epg_keep1.xml').exists()
+    assert (cache / 'epg_keep2.xml').exists()
 
 
 def test_setImports_keeps_disabled_caches(tmp_path, monkeypatch):
     """Disabling an import keeps its cache (operator may re-enable)."""
-    monkeypatch.setattr('channels.CACHE_LOC', str(tmp_path))
-    (tmp_path / 'epg_toggle.xml').write_bytes(b'<tv/>')
-    initial = [{'id': 'toggle', 'enabled': True}]
-    new     = [{'id': 'toggle', 'enabled': False}]
-    fc, setImports = _make_fake_channels(initial)
-    assert setImports(fc, new) is True
-    assert (tmp_path / 'epg_toggle.xml').exists()
+    ch, _path, cache = _real_channels(tmp_path, monkeypatch, [{'id': 'toggle', 'enabled': True}])
+    (cache / 'epg_toggle.xml').write_bytes(b'<tv/>')
+    assert ch.setImports([{'id': 'toggle', 'enabled': False}]) is True
+    assert (cache / 'epg_toggle.xml').exists()
+
+
+@pytest.mark.parametrize('how', ['returns False', 'raises'])
+def test_setImports_write_failed_keeps_the_cache(tmp_path, monkeypatch, how):
+    """imports.69: before, the removed import's cache was unlinked even when
+    the save failed, so the import stayed listed without its guide."""
+    import channels as channels_module
+    ch, path, cache = _real_channels(tmp_path, monkeypatch, [{'id': 'keep', 'enabled': True},
+                                                             {'id': 'remove_me', 'enabled': True}])
+    (cache / 'epg_remove_me.xml').write_bytes(b'<tv/>')
+    before = path.read_bytes()
+
+    def failing(file, data):
+        if how == 'raises':
+            raise Exception('FileLock: Timeout occurred.')
+        return False
+    monkeypatch.setattr(channels_module.FileAccess, 'setJSON', failing)
+    assert ch.setImports([{'id': 'keep', 'enabled': True}]) is False
+    assert (cache / 'epg_remove_me.xml').exists(), 'nothing written, so the cache stays'
+    assert path.read_bytes() == before

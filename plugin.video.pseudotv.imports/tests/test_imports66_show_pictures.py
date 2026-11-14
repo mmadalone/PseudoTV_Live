@@ -51,6 +51,8 @@ import time
 import pytest
 import requests
 
+import fake_commit_sync   # imports.69: commitSync for the in-memory channel store
+
 HERE       = os.path.dirname(os.path.abspath(__file__))
 ADDON_ROOT = os.path.dirname(HERE)
 LIB        = os.path.join(ADDON_ROOT, 'resources', 'lib')
@@ -224,6 +226,7 @@ class _Store(object):
     def setImports(self, data):
         self.imports = list(data)
         return True
+    commitSync = fake_commit_sync.commit_sync   # imports.69: the sync's one commit (shared test helper)
 
 
 class _M3U(object):
@@ -1849,54 +1852,25 @@ def test_html_edit_import_window_has_the_tick_box():
 def test_html_open_ticks_the_box_unless_the_import_says_false():
     opened = _js_function('openImportModal')
     assert "$('f-detect-pictures').checked = imp ? imp.detect_placeholder_pictures !== false : true;" in opened
-    assert "$('f-detect-pictures').dataset.original = imp ? String($('f-detect-pictures').checked) : '';" in opened
+    # imports.69: the switch's data-original line is gone; the window keeps
+    # every box as it opened (IMP_OPENED, test_imports69_manager_html.py).
 
 
 def test_html_form_sends_the_switch():
     assert "detect_placeholder_pictures: $('f-detect-pictures').checked," in _js_function('gatherImportForm')
 
 
-def test_html_save_refreshes_the_import_when_the_switch_changed():
-    save = _js_function('saveImport')
-    assert re.search(r"const detectChanged = IMP_EDITING_INDEX >= 0 && detectOpened !== ''\s*"
-                     r"&& detectOpened !== String\(item\.detect_placeholder_pictures\);", save)
-    assert 'const saved = await postImports(list);' in save
-    assert 'if (saved && detectChanged) await refreshOne(item.id);' in save
+# imports.69: the imports.66 follow-up Refresh after a picture-switch change
+# (two tests here) is gone. A Save that changes an import now makes the
+# add-on sync it (config_key 'pending' plus a render kick), so saveImport
+# sends only {op: 'edit', ...} with the changed boxes, or {op: 'add', ...};
+# test_imports69_manager_html.py pins that, and that no refreshOne( is left.
 
 
 def _js_code(src):
     """`src` without its whole-line // comments, so a scan never matches the
     comments' wording."""
     return re.sub(r'(?m)^[ \t]*//.*$', '', src)
-
-
-def test_html_save_import_decides_from_the_opened_value_then_saves_then_refreshes():
-    """imports.66: saveImport's order. Whether the switch changed is worked
-    out from the value captured when the window opened (data-original, set
-    once, in openImportModal, after the box is ticked) -- before the save,
-    which closes the window and reloads the list. Then the save; and
-    refreshOne(item.id) only after it, only when it went through (postImports
-    answers true), and only for an existing import whose switch changed."""
-    save = _js_code(_js_function('saveImport'))
-    steps = ['const item = gatherImportForm();',
-             "const detectOpened = $('f-detect-pictures').dataset.original;",
-             'const detectChanged = ',
-             'const saved = await postImports(list);',
-             'if (saved && detectChanged) await refreshOne(item.id);']
-    at = [save.index(step) for step in steps]
-    assert at == sorted(at), 'saveImport steps out of order'
-    assert save.count('postImports(') == 1 and save.count('refreshOne(') == 1
-    changed = save[at[2]:save.index(';', at[2]) + 1]
-    assert re.fullmatch(r"const detectChanged = IMP_EDITING_INDEX >= 0 && detectOpened !== ''\s*"
-                        r"&& detectOpened !== String\(item\.detect_placeholder_pictures\);", changed)
-    # the box itself is read once, by gatherImportForm (item) -- never compared live
-    assert "$('f-detect-pictures').checked" not in save
-    # the captured value: written once in the page, in openImportModal, after the tick
-    src = _js_code(_html())
-    assert src.count("$('f-detect-pictures').dataset.original =") == 1
-    opened = _js_code(_js_function('openImportModal'))
-    assert (opened.index("$('f-detect-pictures').checked = ")
-            < opened.index("$('f-detect-pictures').dataset.original = "))
 
 
 def test_html_post_imports_answers_true_or_false():

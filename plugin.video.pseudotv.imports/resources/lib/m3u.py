@@ -519,9 +519,18 @@ class M3U(object):
         # Stations vs recordings is split by the `media` flag (M3U convention);
         # ID format (32-char channel hash vs 16-char recording hash) doesn't
         # enter the picture here.
+        # madteevee (imports fork, imports.69): only imports that are switched
+        # on (the same truthiness syncOne uses). Unticking "Enabled" now takes
+        # an import's channels off the TV at the next playlist load and write
+        # (chkImports, Builder, renderCleanedFiles); nothing re-adds them, as
+        # syncOne returns 'disabled' for it. Its records stay in channels.json
+        # and its guide slice stays in pseudotv.xml on purpose (XMLTVS.cleanSelf
+        # is unchanged), so switching it back on restores the channels with
+        # the dashboard's settings and the kept replay history.
         try:
             from channels import Channels as _C
-            import_slugs = {'@%s' % (i.get('id'),) for i in (_C().getImports() or []) if i.get('id')}
+            import_slugs = {'@%s' % (i.get('id'),) for i in (_C().getImports() or [])
+                            if isinstance(i, dict) and i.get('id') and i.get('enabled', True)}
         except Exception:
             import_slugs = set()
         def _id_ok(s):

@@ -25,6 +25,7 @@ import sys
 import time
 
 import pytest
+import fake_commit_sync   # imports.69: commitSync for the in-memory channel store
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIB  = os.path.join(os.path.dirname(HERE), 'resources', 'lib')
@@ -283,6 +284,7 @@ class _Store:
     def setImports(self, data):
         self.imports = list(data)
         return True
+    commitSync = fake_commit_sync.commit_sync   # imports.69: the sync's one commit (shared test helper)
 
 
 class _M3U:

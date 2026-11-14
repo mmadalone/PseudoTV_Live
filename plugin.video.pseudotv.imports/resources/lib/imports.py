@@ -33,6 +33,7 @@ state (cache validators, tombstones) is persisted in `channels.json` not on
 the instance.
 """
 
+import copy               # madteevee (imports fork, imports.69): syncAll's start snapshot (deep copies)
 import hashlib
 import json
 import os
@@ -46,6 +47,8 @@ from logo_links  import own_logo_basename, port_set
 from xmltv       import parseExternalSource as _parse_xmltv_stream
 import replay_helpers
 import picture_helpers
+import importcfg_helpers  # madteevee (imports fork, imports.69): import-entry fingerprints and the sync commit's merge
+from kick_helpers import RENDER_ONLY_KICK  # imports.69: defined there; re-exported here (server.py, tests)
 
 
 # madteevee (imports fork, imports.66): the User-Agent this add-on sends to
@@ -237,12 +240,12 @@ def _isDiskMissing(import_id, scope):
     return False
 
 
-# madteevee (imports fork, imports.56): kick value that runs a normal, gated
-# chkImports cycle right away — no gate bypass, so no forced downloads. Used
-# when only the rendered files need refreshing (server.py:_chkAddress after
-# the box's address changes). syncAll treats it exactly like
-# force_scope=None.
-RENDER_ONLY_KICK = '__render__'
+# madteevee (imports fork, imports.56): RENDER_ONLY_KICK ('__render__') is the
+# kick value that runs a normal, gated chkImports cycle right away -- no gate
+# bypass, so no forced downloads. syncAll treats it exactly like
+# force_scope=None. imports.69 moved it to kick_helpers (with the kick merge
+# rules every setter now shares); the import at the top of this module keeps
+# `from imports import RENDER_ONLY_KICK` working.
 
 # imports.56: guide self-heal. An enabled import that has had a guide before
 # (its per-import EPG cache exists) but has NO programmes in the guide data
@@ -508,7 +511,19 @@ class Imports(object):
             self.log('renderFromPersistedState, channels.getChannels() failed: %s' % (e,),
                      level=xbmc.LOGWARNING)
             return 0
-        import_channels = [c for c in all_channels
+        # imports.69 (switching an import off): its records stay in
+        # channels.json with their settings, but its channels leave the TV --
+        # M3U.cleanSelf drops a switched-off import's stations at every load,
+        # so this boot render must not publish them either. Records of an
+        # import that is not listed at all are kept, as before.
+        try:
+            switched_off = {i.get('id') for i in (self.channels.getImports() or [])
+                            if isinstance(i, dict) and i.get('id') and not i.get('enabled', True)}
+        except Exception as e:
+            self.log('renderFromPersistedState, channels.getImports() failed: %s' % (e,),
+                     level=xbmc.LOGWARNING)
+            switched_off = set()
+        import_channels = [c for c in importcfg_helpers.without_import_records(all_channels, switched_off)
                            if c.get('type') == 'import' and c.get('enabled', True)]
         if not import_channels:
             return 0
@@ -633,13 +648,19 @@ class Imports(object):
     # Sync orchestration — stubs; implementation lands in step 3
     # ------------------------------------------------------------------
 
-    def syncOne(self, import_cfg, existing_channels):
+    def syncOne(self, import_cfg, existing_channels, full_read=False):
         """
         Sync a single import: fetch (conditional) + parse + reconcile.
 
         Does NOT write to channels.json or M3U/XMLTV — returns a delta
         for the caller (syncAll) to merge after running cascadeAllocate
         across all imports.
+
+        imports.69: `full_read=True` (syncAll: the import's settings changed
+        since its last sync) reads the playlist in full once, without its
+        download markers, so the new settings go through reconcile even
+        when the source is unchanged. Download markers are only ever sent
+        to the address they came from (m3u_source_key / epg_source_key).
 
         Returns dict:
         {
@@ -654,6 +675,9 @@ class Imports(object):
                                             # — caller rewrites channel ids before pushing
             'epg_id_map'  : dict,           # {source_tvg_id: namespaced_id} for EPG rewrite
             'error'       : str or None,
+            # imports.69, present only when set (readers use .get()):
+            'rediscovered'      : list,     # tombstoned ids re-created (Re-discover ticked)
+            'epg_cache_written' : True,     # this sync replaced cache/epg_<id>.xml
         }
         """
         result = {
@@ -689,10 +713,34 @@ class Imports(object):
             if reread:
                 self.log('[%s] syncOne, reading the playlist in full once (playlist_rev %d < %d)'
                          % (import_id, _playlistRev(import_cfg), PLAYLIST_REREAD_REV), level=xbmc.LOGINFO)
+            # imports.69: download markers (etag / last_modified) are sent only
+            # to the address they came from -- the logo cache's rule
+            # (_cacheLogo). m3u_source_key fingerprints that address; it is
+            # stored where the markers are confirmed (a 304, or a 200 that
+            # parsed into channels). Markers of another address are dropped
+            # and the playlist is read in full. An entry from before
+            # imports.69 has no key: its markers can only be the current
+            # address's (every address change went through a Save that wiped
+            # them), so they are still sent.
+            m3u_key = importcfg_helpers.source_key(m3u_source)
+            if importcfg_helpers.source_changed(import_cfg.get('m3u_source_key'), m3u_key):
+                result['updated_cfg'].pop('etag', None)
+                result['updated_cfg'].pop('last_modified', None)
+                reread = True
+                self.log('[%s] syncOne, playlist address changed since its saved validators -- reading it in full'
+                         % (import_id,), level=xbmc.LOGINFO)
+            elif full_read and not reread:
+                # imports.69: the import's settings changed since its last sync
+                # (syncAll's config_key gate). A "304 unchanged" would hand only
+                # the stored records to reconcile, so a ticked Re-discover could
+                # not bring a deleted channel back: read in full once.
+                reread = True
+                self.log('[%s] syncOne, settings changed -- reading the playlist in full once' % (import_id,),
+                         level=xbmc.LOGINFO)
             fetched = self.fetchSource(
                 m3u_source,
-                etag=None if reread else import_cfg.get('etag'),
-                last_modified=None if reread else import_cfg.get('last_modified'),
+                etag=None if reread else result['updated_cfg'].get('etag'),
+                last_modified=None if reread else result['updated_cfg'].get('last_modified'),
             )
             if fetched['status'] == 304:
                 # Source unchanged — but we still need to know what's there
@@ -738,6 +786,8 @@ class Imports(object):
                 # DO refresh etag/last_modified in case server rotated them
                 if fetched.get('etag'):          result['updated_cfg']['etag']          = fetched['etag']
                 if fetched.get('last_modified'): result['updated_cfg']['last_modified'] = fetched['last_modified']
+                # imports.69: the markers are confirmed for this address.
+                result['updated_cfg']['m3u_source_key'] = m3u_key
                 # Skip to EPG fetch (still try; might have its own cadence)
             elif fetched['status'] != 200:
                 result['error'] = fetched.get('error') or ('M3U fetch status %s' % fetched['status'])
@@ -785,6 +835,8 @@ class Imports(object):
                 # imports.59 (S8): a full read parsed into channels -- the records
                 # now carry every field derived at this rev.
                 result['updated_cfg']['playlist_rev'] = PLAYLIST_REREAD_REV
+                # imports.69: the markers stored above came from this address.
+                result['updated_cfg']['m3u_source_key'] = m3u_key
 
         # If neither m3u_url nor m3u_path: this is an EPG-only import
         # (plan G7). Caller's existing channels with epg_id set are the
@@ -805,6 +857,17 @@ class Imports(object):
         result['refreshed'] = refreshed_pairs
         result['orphans']   = orphans
 
+        # imports.69: Re-discover. With the box ticked, reconcile hands every
+        # tombstoned id the source lists again back as a NEW channel, so these
+        # are exactly the deleted channels this sync re-creates. The sync's
+        # commit keeps them only while the box is still ticked on disk, and
+        # removes them from the tombstones in the same write
+        # (importcfg_helpers.apply_sync_results).
+        tombstones = import_cfg.get('tombstones') or []
+        if import_cfg.get('rediscover_deleted') and tombstones:
+            result['rediscovered'] = sorted(set(tombstones).intersection(
+                c.get('id') for c in new_channels if c.get('id')))
+
         # Apply field merging to refreshed channels in place
         for existing, parsed in refreshed_pairs:
             self.applyRefresh(existing, parsed)
@@ -823,10 +886,25 @@ class Imports(object):
             # this import's EPG. If the cache is missing/corrupt on a 304,
             # we clear the validators in updated_cfg so the next cycle
             # force-fetches (one-cycle self-heal).
+            #
+            # imports.69: as for the playlist, the guide's markers go only to
+            # the address they came from. epg_source_key names the address
+            # whose download is in cache/epg_<id>.xml and whose markers are
+            # stored; it is set where this sync replaces that file (the
+            # cached_ok branch below, with result['epg_cache_written']), so a
+            # 304 can never load another address's guide as this one's. The
+            # sync's commit keeps file and key together when two syncs overlap
+            # or the address changes while this one runs (apply_sync_results).
+            epg_key = importcfg_helpers.source_key(epg_source)
+            if importcfg_helpers.source_changed(import_cfg.get('epg_source_key'), epg_key):
+                result['updated_cfg'].pop('epg_etag', None)
+                result['updated_cfg'].pop('epg_last_modified', None)
+                self.log('[%s] syncOne, guide address changed since its saved validators -- full download'
+                         % (import_id,), level=xbmc.LOGINFO)
             epg_fetched = self.fetchSource(
                 epg_source,
-                etag=import_cfg.get('epg_etag'),
-                last_modified=import_cfg.get('epg_last_modified'),
+                etag=result['updated_cfg'].get('epg_etag'),
+                last_modified=result['updated_cfg'].get('epg_last_modified'),
             )
             # imports.56: `epg_error` records why this cycle produced no usable
             # guide (download failed, unparseable or empty body, or a 304 with
@@ -866,6 +944,10 @@ class Imports(object):
                     if cached_ok:
                         if epg_fetched.get('etag'):          result['updated_cfg']['epg_etag']          = epg_fetched['etag']
                         if epg_fetched.get('last_modified'): result['updated_cfg']['epg_last_modified'] = epg_fetched['last_modified']
+                        # imports.69: the cache file now holds this address's
+                        # download. The flag is a result key, never stored.
+                        result['updated_cfg']['epg_source_key'] = epg_key
+                        result['epg_cache_written'] = True
                 elif epg_error is None:
                     epg_error = 'guide download contained no guide data'
             elif epg_fetched['status'] == 304:
@@ -875,6 +957,15 @@ class Imports(object):
                     self.log('[%s] syncOne, EPG 304 hydrated from cache (%d items)'
                              % (import_id, len(cached_pairs)),
                              level=xbmc.LOGINFO)
+                    # imports.69 (step 2's request R4): an entry from before
+                    # imports.69 has no epg_source_key. Its markers can only be
+                    # this address's (every address change went through a Save
+                    # that dropped them) and this 304 just loaded the cached
+                    # guide they describe, so the key is recorded here; a guide
+                    # that always answers "unchanged" would otherwise never get
+                    # one. A key already stored is never touched on a 304.
+                    if not import_cfg.get('epg_source_key'):
+                        result['updated_cfg']['epg_source_key'] = epg_key
                 else:
                     # Cache missing or corrupt — clear validators so next cycle
                     # force-fetches a fresh copy and rebuilds the cache file.
@@ -1073,6 +1164,13 @@ class Imports(object):
         force-refresh the unrelated others. See plan at
         /home/madalone/.claude/plans/dig-into-c-do-typed-kettle.md.
 
+        imports.69: the results are saved by ONE commit,
+        self.channels.commitSync (the import entries' sync fields as a change
+        list onto channels.json as it is then, plus the channel records), so
+        a Save, Add, Delete or Orphans made while the sync runs is kept. An
+        import whose settings changed since its last sync (config_key) is
+        synced in this cycle whatever its gates say.
+
         Returns dict {import_id: per-import-result}.
         """
         if self.channels is None:
@@ -1082,6 +1180,13 @@ class Imports(object):
         if not imports:
             self.log('syncAll, no imports configured; skipping')
             return {}
+
+        # imports.69: what this sync read, per import (deep copies, as the
+        # entries are the store's own dicts). The commit applies exactly the
+        # change between this copy and each result (importcfg_helpers.
+        # sync_delta) onto the entry as it is on disk then, never the whole
+        # result, which carries the settings and tombstones as they were here.
+        start_by_id = {ic['id']: copy.deepcopy(ic) for ic in imports if isinstance(ic, dict) and ic.get('id')}
 
         # imports.27: surface typos in force_scope (debug-only). If the
         # operator's kick value doesn't match 'all' OR any known import
@@ -1137,6 +1242,23 @@ class Imports(object):
             force_active = (force_scope == 'all'
                             or (force_scope is not None
                                 and force_scope == import_cfg.get('id')))
+
+            # imports.69: the settings gate (Kubernetes generation /
+            # observedGeneration). A dashboard change stores
+            # config_key='pending', and every sync attempt records the
+            # fingerprint of the settings it acted on, so an import whose
+            # settings changed since its last attempt -- a Save, also one made
+            # while a sync ran, or a hand edit -- syncs now, with one full read
+            # of its playlist. It goes through the force path, so the abandon
+            # check and the interval and retry gates don't hold it (like a
+            # Refresh). A missing config_key (entries from before imports.69)
+            # counts as unchanged; a switched-off import is not forced
+            # (syncOne returns 'disabled' for it anyway).
+            cfg_changed = bool(import_cfg.get('enabled', True)) and importcfg_helpers.config_changed(import_cfg)
+            if cfg_changed and not force_active:
+                force_active = True
+                self.log('[%s] syncAll, settings changed since its last sync -- syncing it now' % (iid,),
+                         level=xbmc.LOGINFO)
 
             # imports.43: disk-presence check. When the configured scope
             # detects missing/stub on-disk M3U or per-import EPG cache,
@@ -1313,7 +1435,15 @@ class Imports(object):
                         }
                         continue
 
-            res = self.syncOne(import_cfg, existing_channels)
+            res = self.syncOne(import_cfg, existing_channels, full_read=cfg_changed)
+            # imports.69: record which settings this attempt acted on, for
+            # every outcome that reached syncOne (ok, unchanged, failed,
+            # warning, disabled): a failing source then keeps its normal
+            # backoff, and a switch back on is seen. A Save made while this
+            # sync runs leaves a mismatch, so the next cycle syncs again. A
+            # gate-skipped or abandoned result never gets here, so the commit
+            # keeps a 'pending' a Save stored meanwhile.
+            res['updated_cfg']['config_key'] = importcfg_helpers.config_fingerprint(import_cfg)
 
             # imports.28: maintain fail_count + failed_since on the resulting
             # updated_cfg. Centralized here (not in syncOne) so all status
@@ -1497,9 +1627,10 @@ class Imports(object):
         # live channels -- as just merged, every catch-up setting applied --
         # use link-based replay reads that add-on's guide export: in full on
         # every sync of the import, through the same safe local read as the
-        # playlist. The XML branch below merges the links. Read before
-        # setImports, so links_mtime_ns and any dashboard message are saved
-        # with this sync's results. Without guide data (self.xmltv) there is
+        # playlist. The XML branch below merges the links. Read before the
+        # commit (imports.69: commitSync; setImports before), so
+        # links_mtime_ns and any dashboard message are saved with this sync's
+        # results. Without guide data (self.xmltv) there is
         # nothing to merge into, so the file isn't read (or recorded) at
         # all. A stored links_mtime_ns means the file was read for a merge;
         # if that merge fails, its links wait for the import's next sync or
@@ -1538,8 +1669,9 @@ class Imports(object):
         # madteevee (imports fork): union of all tombstones across all imports.
         # These are channel ids the operator explicitly tombstoned (via the
         # "🗑 Orphans" endpoint). Without passing them as `deleted_ids` to
-        # setChannels, the merge-on-write preserve loop resurrects them from
-        # disk on every syncAll cycle — operator's delete looks like a no-op.
+        # setChannels (imports.69: commitSync, which also adds every tombstone
+        # on disk at commit time), the merge-on-write preserve loop resurrects
+        # them from disk on every syncAll cycle — operator's delete looks like a no-op.
         deleted_ids = set()
         for ic in imports:
             for cid in (ic.get('tombstones') or []):
@@ -1547,26 +1679,67 @@ class Imports(object):
 
         # Persist channels.json (merge-on-write protects operator edits)
         modified_ids = set(all_imported_now.keys())
+        # imports.69: ONE commit for the whole sync (before: setChannels, then
+        # setImports with the whole import list as this sync read it -- which
+        # undid a Save made meanwhile and wiped its last-sync time). Under the
+        # channels.json lock, on the file as it is now, commitSync applies
+        # each import's own change list of sync fields (gate-skipped and
+        # abandoned results apply nothing), drops the results of an import
+        # deleted, moved or re-synced by a newer sync meanwhile, takes every
+        # tombstone on disk as a delete (an Orphans made meanwhile stays) and
+        # merges the channel records. It is the only persistence path; the
+        # tests' in-memory stores get the same planner from a shared helper.
+        # A failed commit never stops this cycle's guide and playlist
+        # rendering (as a failed setImports didn't).
         try:
-            self.channels.setChannels(channels=merged_channels, modified_ids=modified_ids, deleted_ids=deleted_ids)
-        except TypeError:
-            # Backward-compat: older signature without deleted_ids
-            try:
-                self.channels.setChannels(channels=merged_channels, modified_ids=modified_ids)
-            except TypeError:
-                self.channels.setChannels(channels=merged_channels)
-
-        # Persist updated import configs (etag/last_modified/last_status etc.)
-        try:
-            updated_imports = [
-                per_import_results[ic.get('id')]['updated_cfg']
-                if ic.get('id') in per_import_results
-                else ic
-                for ic in imports
-            ]
-            self.channels.setImports(updated_imports)
+            saved = self.channels.commitSync(start_by_id, per_import_results, merged_channels,
+                                             modified_ids, deleted_ids)
         except Exception as e:
-            self.log('syncAll, setImports failed: %s' % e, level=xbmc.LOGWARNING)
+            saved = {'status': 'failed'}
+            self.log("syncAll, saving this sync's results raised: %s" % (e,), level=xbmc.LOGERROR)
+        if not isinstance(saved, dict):
+            saved = {'status': 'failed'}
+        written = saved.get('status') == 'written'
+        if not written:
+            self.log("syncAll, this sync's results were not saved (%s); the next sync redoes them"
+                     % (saved.get('status'),), level=xbmc.LOGERROR)
+        # imports.69: the PVR-refresh signal below counts only deletes that
+        # removed a record in this write (before: any tombstone at all, so a
+        # kept tombstone signalled every cycle).
+        applied_deleted_ids = set(saved.get('applied_deletes') or ()) if written else set()
+        for iid in sorted(saved.get('gone') or (), key=str):
+            self.log('syncAll, [%s] was deleted during this sync -- its results are dropped' % (iid,),
+                     level=xbmc.LOGINFO)
+        for iid in sorted(saved.get('playlist_moved') or (), key=str):
+            self.log('syncAll, [%s] playlist address changed during this sync -- its channel changes are dropped; '
+                     'the next sync reads the new address' % (iid,), level=xbmc.LOGINFO)
+        for iid in sorted(saved.get('superseded') or (), key=str):
+            self.log('syncAll, [%s] a newer sync saved this import while this one ran -- its older results '
+                     'are dropped' % (iid,), level=xbmc.LOGINFO)
+        for iid in sorted(saved.get('guide_moved') or (), key=str):
+            self.log('syncAll, [%s] guide address changed during this sync -- its guide results are dropped; '
+                     'the next sync downloads the new address' % (iid,), level=xbmc.LOGINFO)
+        if written:
+            for iid, ids in sorted((saved.get('kept') or {}).items(), key=lambda kv: str(kv[0])):
+                self.log('syncAll, [%s] re-discovered %d deleted channel(s): %s' % (iid, len(ids), sorted(ids)),
+                         level=xbmc.LOGINFO)
+        # imports.69: never publish what the commit dropped. Records of an
+        # import deleted, moved or superseded during the sync, and dropped
+        # re-discoveries, are not pushed to the playlist or the guide; an
+        # empty epg_id_map makes the XML branch keep that import's previous
+        # guide (`if not id_map: continue`), also when only its guide address
+        # moved (its download describes the old address).
+        drop_imports = set(saved.get('drop_imports') or ())
+        dropped_ids = set(saved.get('dropped_ids') or ())
+        if drop_imports or dropped_ids:
+            for cid in [cid for cid, ch in all_imported_now.items()
+                        if cid in dropped_ids or ch.get('import_source') in drop_imports]:
+                del all_imported_now[cid]
+        for iid in drop_imports.union(saved.get('guide_moved') or ()):
+            dropped_res = per_import_results.get(iid)
+            if dropped_res is not None:
+                dropped_res['epg_id_map'] = {}
+                dropped_res['epg_pairs'] = []
 
         # Per-channel logo cache (Imports_Cache_Logos toggle).
         # Publishes the cached copy of each channel's remote logo
@@ -2103,15 +2276,16 @@ class Imports(object):
         #       parsed. Content MAY still be byte-identical to the prior cycle (server
         #       didn't honour ETag/If-Modified-Since) but cheap to over-signal vs.
         #       byte-comparing multi-MB M3U/XMLTV bodies.
-        #   (b) any tombstone was processed — `deleted_ids` (computed at line 651) is
-        #       the union of `import_cfg['tombstones']` across all imports;
-        #       bool(deleted_ids) means setChannels' merge-on-write either stripped
-        #       records or carried deletion markers forward — either way,
-        #       channels.json changed.
+        #   (b) a delete was applied — imports.69: `applied_deleted_ids` (from
+        #       commitSync) are the deletes (tombstones and explicit deletes) that
+        #       removed a record that was on disk or in this sync's list, in a
+        #       commit that was written. Before imports.69 this was
+        #       bool(deleted_ids), the union of every import's tombstones, so a
+        #       kept tombstone whose record was long gone signalled every cycle.
         #   (c) any reconcile observed orphans — `res['orphans']` is the diff between
         #       parsed-now and existing channels for an import; non-empty means
         #       is_orphan=True got written to channels.json.
-        # All-'unchanged'/'disabled' AND no tombstones AND no orphans is the genuine
+        # All-'unchanged'/'disabled' AND no deletes applied AND no orphans is the genuine
         # no-op cycle: every import returned HTTP 304, no operator deletion, nothing
         # fell out of source. Skipping setPropTimer here is correctness-safe because:
         #   - chkImports already runs every 5 min on its own daemon;
@@ -2128,7 +2302,7 @@ class Imports(object):
         # always mutate state, so their unconditional signal is correct.
         changed = (
             any(r.get('status') == 'ok' for r in per_import_results.values())
-            or bool(deleted_ids)
+            or bool(applied_deleted_ids)   # imports.69: a delete was applied
             or any(r.get('orphans') for r in per_import_results.values())
         )
         if changed:
@@ -2136,7 +2310,7 @@ class Imports(object):
             except Exception: pass
         else:
             self.log('syncAll, no disk change this cycle — skipping chkPVRRefresh signal '
-                     '(all imports status=unchanged/disabled, no tombstones, no orphans)',
+                     '(all imports status=unchanged/disabled, no deletes applied, no orphans)',
                      level=xbmc.LOGINFO)
 
         # Summary log
@@ -3584,7 +3758,12 @@ class Imports(object):
 
         Returns (new_channels, refreshed_channels, orphan_channels):
         - new_channels       — parsed channels NOT in existing (filtered
-                               against `import_cfg['tombstones']`)
+                               against `import_cfg['tombstones']`). imports.69:
+                               a tombstoned id comes back only with
+                               "Re-discover deleted channels" ticked
+                               (`rediscover_deleted`), and then always as a
+                               new channel; a dashboard Save never edits
+                               tombstones
         - refreshed_channels — list of (existing_channel, parsed_channel)
                                pairs; caller merges parsed source-side fields
                                into existing, preserving operator-edited
@@ -3601,6 +3780,9 @@ class Imports(object):
             parsed_channels = list(parsed_channels)
 
         tombstones = set(import_cfg.get('tombstones') or [])
+        # imports.69: "Re-discover deleted channels". Before, the box was stored
+        # but never read.
+        rediscover = bool(import_cfg.get('rediscover_deleted'))
         existing_by_id = {
             c.get('id'): c for c in (existing_imported_channels or [])
             if c.get('id')
@@ -3615,7 +3797,17 @@ class Imports(object):
             if not cid:
                 continue
             if cid in tombstones:
-                self.log('reconcile, [%s] skipped (tombstoned)' % cid)
+                if rediscover:
+                    # imports.69: always a NEW channel (switched on when the
+                    # cascade gives it a number, provider name and logo, no
+                    # overrides), even when a stale copy of its record is
+                    # still on disk: the new record replaces that copy in the
+                    # sync's commit (it is in modified_ids), and the commit
+                    # takes the id out of the tombstones in the same write.
+                    self.log('reconcile, [%s] re-discovered (tombstoned, Re-discover ticked)' % cid)
+                    new_channels.append(src)
+                else:
+                    self.log('reconcile, [%s] skipped (tombstoned)' % cid)
                 continue
             if cid in existing_by_id:
                 refreshed_channels.append((existing_by_id[cid], src))
@@ -3633,8 +3825,12 @@ class Imports(object):
         # 546) and setChannels' merge-on-write keeps it alive forever.
         # Treating tombstones as the persistent delete marker means once the
         # operator hits "🗑 Orphans" and the tombstone is recorded, the channel
-        # is permanently gone — unless the operator explicitly removes the id
-        # from tombstones (already supported via import-config edit).
+        # is permanently gone. imports.69: it comes back only when "Re-discover
+        # deleted channels" is ticked and the source lists it again (the loop
+        # above); a dashboard Save never edits tombstones (before imports.69
+        # every Save wiped them by accident). This filter keeps the FULL
+        # tombstone set either way, so a tombstoned channel the source no
+        # longer lists is still never re-emitted as an orphan.
         orphan_channels = [
             c for c in (existing_imported_channels or [])
             if c.get('id') and c.get('id') not in parsed_ids
