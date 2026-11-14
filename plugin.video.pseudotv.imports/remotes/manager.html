@@ -1834,18 +1834,28 @@
         };
     }
     async function saveImport() {
-        const item = gatherImportForm();
-        if (!item) return;
-        // imports.69: only this import goes to the add-on; for an existing one
-        // only the boxes you changed, so another tab's change to a different
-        // box is kept (the last save wins per box). A changed import syncs
-        // right after the save (the add-on marks its settings as changed and
-        // kicks the imports thread), so the imports.66 extra Refresh after a
-        // picture-switch change is gone.
-        if (IMP_EDITING_INDEX < 0 || !IMP_OPENED) { await postImports({op: 'add', entry: item}); return; }
-        const entry = {id: IMP_OPENED.id};
-        for (const k of Object.keys(item)) if (item[k] !== IMP_OPENED[k]) entry[k] = item[k];
-        await postImports({op: 'edit', id: IMP_OPENED.id, entry: entry});
+        // imports.69: one Save at a time. A second click while the first is on
+        // its way sent the request again: an Add then answered "Save failed:
+        // Identifier ... is already used" right after "Imports saved".
+        const btn = $('import-save-btn');
+        if (btn.disabled) return;
+        btn.disabled = true;
+        try {
+            const item = gatherImportForm();
+            if (!item) return;
+            // imports.69: only this import goes to the add-on; for an existing one
+            // only the boxes you changed, so another tab's change to a different
+            // box is kept (the last save wins per box). A changed import syncs
+            // right after the save (the add-on marks its settings as changed and
+            // kicks the imports thread), so the imports.66 extra Refresh after a
+            // picture-switch change is gone.
+            if (IMP_EDITING_INDEX < 0 || !IMP_OPENED) { await postImports({op: 'add', entry: item}); return; }
+            const entry = {id: IMP_OPENED.id};
+            for (const k of Object.keys(item)) if (item[k] !== IMP_OPENED[k]) entry[k] = item[k];
+            await postImports({op: 'edit', id: IMP_OPENED.id, entry: entry});
+        } finally {
+            btn.disabled = false;
+        }
     }
     // imports.66: returns true when the save went through and false on any
     // failure (already reported with a toast). imports.69: `payload` is one
@@ -2396,8 +2406,12 @@
             // imports.69: its own request, never the list minus one. The add-on
             // removes the import, its channel records and its guide file in one
             // save and rewrites the playlist files at the next imports cycle;
-            // Kodi drops the channels at its next channel-list reload.
-            if (!confirm(`Delete import "${imp.name || imp.id}"?\n\nIts channels leave Kodi within about 5 minutes (after any sync or channel build that is running).`)) return;
+            // Kodi drops the channels at its next channel-list reload. Two
+            // imports with one Identifier (older versions or hand edits only)
+            // are deleted together: the add-on removes every entry with the id.
+            const twins = IMPORTS_DATA.imports.filter(i => i && i.id === imp.id).length > 1
+                ? '\n\nTwo imports use this Identifier: both are deleted, with their channels.' : '';
+            if (!confirm(`Delete import "${imp.name || imp.id}"?\n\nIts channels leave Kodi within about 5 minutes (after any sync or channel build that is running).${twins}`)) return;
             postImports({op: 'delete', id: imp.id});
             return;
         }

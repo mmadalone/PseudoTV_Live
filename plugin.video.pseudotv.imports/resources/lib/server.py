@@ -1756,8 +1756,9 @@ class MyHandler(BaseHTTPRequestHandler):
                             # explicit cleanup, that's exactly what we DON'T want:
                             # the merge would re-add the stranded records we're
                             # trying to delete. Mutate channelDATA directly and
-                            # call _save() to skip the merge entirely. Same
-                            # pattern setImports uses for its in-place purge.
+                            # call _save() to skip the merge entirely (imports.69:
+                            # _save takes the import list from the file; step 3
+                            # turns this into explicit deletes).
                             channels.channelDATA['channels'] = channels.sortChannels(kept)
                             if not channels._save():
                                 # imports.69: the save was refused or failed
@@ -1767,9 +1768,10 @@ class MyHandler(BaseHTTPRequestHandler):
                                 del channels
                                 self.send_error(500, "Channels not saved; try again")
                                 return
-                            # Clean up per-stranded-import EPG cache files
-                            # (Step 5 fix #2 normally does this in setImports, but
-                            # stranded-source channels don't trigger that path).
+                            # Clean up per-stranded-import EPG cache files.
+                            # imports.69: Channels._sweepGuideCaches removes them
+                            # anyway at the next import-list commit (a Save or a
+                            # sync's commit); this loop only makes it immediate.
                             for src in stranded_ids:
                                 if src == '<none>': continue
                                 cache_file = os.path.join(CACHE_LOC, 'epg_%s.xml' % src)
@@ -2088,6 +2090,20 @@ class MyHandler(BaseHTTPRequestHandler):
                             except Exception as _e:
                                 self.log('do_GET /imports.json: retry-state enrichment failed: %s' % (_e), xbmc.LOGWARNING)
                                 imports_list = channels.getImports() or []
+                            # madteevee (imports fork, imports.69): an import added
+                            # but not synced yet holds only the form's boxes. A tab
+                            # opened before imports.69 posts its GET copies back on
+                            # every Save, and its copy of such an import would look
+                            # like the form it builds (only form keys), so a
+                            # no-change Save could apply it as an Edit (undoing a
+                            # change made elsewhere) or re-add it after a Delete
+                            # elsewhere. display_status (reply-only, never stored)
+                            # makes it a copy that is checked against the file
+                            # (importcfg_helpers._apply_list). After the fallback
+                            # above too; this copy is this request's own.
+                            for imp in imports_list:
+                                if importcfg_helpers.form_only(imp):
+                                    imp['display_status'] = importcfg_helpers.DISPLAY_NEVER_SYNCED
                             payload = {
                                 'uuid'     : SETTINGS.getMYUUID(),
                                 'imports'  : imports_list,

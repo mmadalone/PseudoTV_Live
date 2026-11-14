@@ -18,16 +18,24 @@ Now:
     500 when their save is refused);
   - the status badge reads display_status for 'abandoned';
   - the imports.66 extra refreshOne after a picture-switch change is gone:
-    the add-on syncs a changed import itself (config_key + render kick).
+    the add-on syncs a changed import itself (config_key + render kick);
+  - review fixes: one Save at a time (the Save button is off while its
+    request is on its way), and Delete says when two imports share the
+    Identifier (both are deleted).
 Source scans, with the helpers of test_imports66_show_pictures.py; the
-page's script is also syntax-checked with node when it is installed.
+page's script is also syntax-checked with node when it is installed, and
+saveImport / postImports run in node against a fake fetch.
 """
+import html
+import http.server
+import json
 import re
 import shutil
 import subprocess  # noqa: S404 -- runs `node --check` on the page's own script
 
 import pytest
 
+import importcfg_helpers
 from test_imports66_show_pictures import _html, _js_code, _js_function
 
 
@@ -101,14 +109,24 @@ def test_the_window_keeps_the_boxes_as_they_opened():
 
 
 def test_save_import_sends_one_request_with_only_the_changed_boxes():
+    """One request per Save, and one Save at a time: the Save button is off
+    while a request is on its way (a double click on Add sent the Add twice,
+    and the second answered "already used" right after "Imports saved")."""
     assert _squash(_js_function('saveImport')) == [
         'async function saveImport() {',
+        "const btn = $('import-save-btn');",
+        'if (btn.disabled) return;',
+        'btn.disabled = true;',
+        'try {',
         'const item = gatherImportForm();',
         'if (!item) return;',
         "if (IMP_EDITING_INDEX < 0 || !IMP_OPENED) { await postImports({op: 'add', entry: item}); return; }",
         'const entry = {id: IMP_OPENED.id};',
         'for (const k of Object.keys(item)) if (item[k] !== IMP_OPENED[k]) entry[k] = item[k];',
         "await postImports({op: 'edit', id: IMP_OPENED.id, entry: entry});",
+        '} finally {',
+        'btn.disabled = false;',
+        '}',
         '}',
     ]
 
@@ -127,6 +145,13 @@ def test_post_imports_posts_the_request_as_given():
     # the error text both pages show ("Save failed: <message>")
     assert "const msg = (t.match(/<p>Message: ([^<]+)/) || [, 'HTTP ' + res.status])[1];" in post
     assert "toast('Save failed: ' + msg, 'err');" in post
+    # every refusal (400/404/409/500/503) takes the error branch, never "Imports saved"
+    code = _squash(post)
+    at = code.index('if (!res.ok) {')
+    assert code[at + 1:at + 5] == ['const t = await res.text();',
+                                   "const msg = (t.match(/<p>Message: ([^<]+)/) || [, 'HTTP ' + res.status])[1];",
+                                   "toast('Save failed: ' + msg, 'err');", 'return false;']
+    assert code.index("toast('Imports saved', 'ok');") > at + 5
 
 
 def test_no_whole_list_is_posted_any_more():
@@ -141,10 +166,17 @@ def test_no_whole_list_is_posted_any_more():
 
 
 def test_delete_is_its_own_request_with_the_new_confirm_text():
+    """The confirm text says what happens, and, when two imports share the
+    Identifier (older versions or hand edits only), that both are deleted:
+    the add-on removes every entry with the id, with its channels."""
     click = _js_code(_js_function('_onImportsClick'))
     branch = click[click.index("const delBtn = "):click.index("const refBtn = ")]
+    flat = ' '.join(_squash(branch))
+    assert ("const twins = IMPORTS_DATA.imports.filter(i => i && i.id === imp.id).length > 1 ? "
+            "'\\n\\nTwo imports use this Identifier: both are deleted, with their channels.' : '';") in flat
     assert ('if (!confirm(`Delete import "${imp.name || imp.id}"?\\n\\nIts channels leave Kodi within about '
-            '5 minutes (after any sync or channel build that is running).`)) return;') in branch
+            '5 minutes (after any sync or channel build that is running).${twins}`)) return;') in flat
+    assert flat.index('const twins = ') < flat.index('if (!confirm(')
     assert "postImports({op: 'delete', id: imp.id});" in branch
     assert 'splice' not in branch and 'IMPORTS_DATA.imports.slice()' not in branch
     assert 'Channels stay on disk until you run Cleanup stranded' not in _html()
@@ -219,3 +251,93 @@ def test_the_page_script_parses(tmp_path):
     page.write_text('\n;\n'.join(s for s in scripts if s.strip()), encoding='utf-8')
     done = subprocess.run([node, '--check', str(page)], capture_output=True, text=True, timeout=60)  # noqa: S603
     assert done.returncode == 0, done.stderr
+
+
+# The page's own gatherImportForm, saveImport and postImports, run in node
+# with stand-ins for the DOM, toast, the modal and fetch. fetch answers only
+# when the script says so, so a second click lands while the first request is
+# still on its way.
+_NODE_HARNESS = r"""
+const calls = [], toasts = [], answers = [];
+let closed = 0;
+const elements = {
+    'import-save-btn': {disabled: false},
+    'f-id': {value: 'zz-test', readOnly: false}, 'f-name': {value: 'ZZ'},
+    'f-m3u-path': {value: ''}, 'f-m3u-url': {value: 'https://playlist.example/zz.m3u'},
+    'f-epg-path': {value: ''}, 'f-epg-url': {value: ''},
+    'f-start-num': {value: '800'}, 'f-refresh': {value: '60'},
+    'f-respect': {checked: false}, 'f-rediscover': {checked: false},
+    'f-enabled': {checked: true}, 'f-detect-pictures': {checked: true},
+};
+function $(id) { return elements[id]; }
+function toast(msg, kind) { toasts.push([msg, kind]); }
+function closeImportModal() { closed += 1; }
+function loadImports() {}
+function setTimeout(fn, ms) { fn(); }
+const REMOTE_HOST = 'dashboard.invalid', UUID = 'uuid-test';
+let IMP_EDITING_INDEX = -1, IMP_OPENED = null;
+function fetch(url, opts) {
+    calls.push(JSON.parse(opts.body).payload);
+    return new Promise(resolve => answers.push(resolve));
+}
+function reply(status, body) {
+    return {ok: status >= 200 && status < 300, status: status, text: async () => body};
+}
+__FUNCTIONS__
+const flush = () => new Promise(resolve => setImmediate(resolve));
+(async () => {
+    const out = {};
+    const first = saveImport(), second = saveImport();          // a double click on Save (Add)
+    await flush();
+    out.requests_while_busy = calls.length;
+    out.button_while_busy = elements['import-save-btn'].disabled;
+    while (answers.length) answers.shift()(reply(200, '{"ok": true}'));
+    await first; await second;
+    out.requests = calls.length;
+    out.button_after = elements['import-save-btn'].disabled;
+    out.saved_toasts = toasts.splice(0);
+    closed = 0;
+    const refused = postImports({op: 'add', entry: {}});       // a refusal
+    await flush();
+    answers.shift()(reply(__CODE__, __PAGE__));
+    out.refused_result = await refused;
+    out.refused_toasts = toasts.splice(0);
+    out.refused_closed = closed;
+    console.log(JSON.stringify(out));
+})().catch(e => console.log(JSON.stringify({error: String((e && e.stack) || e)})));
+"""
+
+
+@pytest.mark.parametrize('code, message', [
+    (409, importcfg_helpers.MSG_OUT_OF_DATE),
+    (404, importcfg_helpers.MSG_GONE),
+    (400, importcfg_helpers.MSG_START_NUM),
+    (503, 'Busy saving channels; try again'),
+])
+def test_save_and_refusals_in_node(tmp_path, code, message):
+    """A double click on Save sends one request (the button is off while it
+    is on its way, and on again after); a refused request shows "Save failed:
+    <message>." with one full stop (http.server's error page adds it) and
+    leaves the window open -- never "Imports saved". The reply body is the
+    real http.server error page. Skipped when node is not installed."""
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('node is not installed')
+    explain = http.server.BaseHTTPRequestHandler.responses[code][1]
+    page = http.server.DEFAULT_ERROR_MESSAGE % {'code': code, 'message': html.escape(message, quote=False),
+                                                'explain': html.escape(explain, quote=False)}
+    functions = '\n'.join(_js_function(name) for name in ('gatherImportForm', 'saveImport', 'postImports'))
+    script = (_NODE_HARNESS.replace('__FUNCTIONS__', functions).replace('__CODE__', str(code))
+              .replace('__PAGE__', json.dumps(page)))
+    path = tmp_path / 'save.js'
+    path.write_text(script, encoding='utf-8')
+    done = subprocess.run([node, str(path)], capture_output=True, text=True, timeout=60)  # noqa: S603
+    assert done.returncode == 0, done.stderr
+    out = json.loads(done.stdout.strip().splitlines()[-1])
+    assert 'error' not in out, out.get('error')
+    assert (out['requests_while_busy'], out['button_while_busy']) == (1, True)
+    assert (out['requests'], out['button_after']) == (1, False)
+    assert out['saved_toasts'] == [['Imports saved', 'ok']]
+    assert out['refused_result'] is False and out['refused_closed'] == 0
+    assert out['refused_toasts'] == [['Save failed: %s.' % (message,), 'err']]
+    assert not out['refused_toasts'][0][0].endswith('..')

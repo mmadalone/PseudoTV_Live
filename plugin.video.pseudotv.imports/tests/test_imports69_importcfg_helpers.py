@@ -25,8 +25,13 @@ Sections:
   - small helpers (addresses, fingerprints, ids, cache names, cleanup);
   - normalise_form_entry and merge_dashboard_entry;
   - apply_dashboard_request: the new page's add / edit / delete;
-  - apply_dashboard_request: a whole list from a tab opened before imports.69;
-  - sync_delta, apply_sync_results and plan_sync_commit (the sync's commit);
+  - apply_dashboard_request: a whole list from a tab opened before imports.69
+    (lists from an imports.68 GET, and lists whose never-synced imports GET
+    marks since imports.69);
+  - the refusal messages (no final full stop; what Delete does to a
+    duplicated Identifier);
+  - sync_delta, apply_sync_results and plan_sync_commit (the sync's commit;
+    its deletes are the tombstones on disk at commit time);
   - inputs are never modified.
 All data is synthetic (example.* addresses, made-up ids).
 """
@@ -724,6 +729,14 @@ def test_merge_a_box_missing_on_disk_counts_as_changed():
     assert changed == ['detect_placeholder_pictures'] and merged['detect_placeholder_pictures'] is True
 
 
+def test_merge_an_explicit_null_for_a_key_missing_on_disk_counts_as_changed():
+    """A key missing on disk differs from any value, null included (MISSING
+    is not None): the null is stored and the import marked 'pending'."""
+    disk = synced('alpha')                                              # no catchup_* keys
+    merged, changed, _ = h.merge_dashboard_entry(disk, {'catchup_mode': None})
+    assert changed == ['catchup_mode'] and merged['catchup_mode'] is None and merged['config_key'] == 'pending'
+
+
 def test_merge_cleans_the_stored_entry():
     disk = synced('alpha', last_status='abandoned', next_retry_at=T0, display_status='abandoned')
     merged, _, _ = h.merge_dashboard_entry(disk, {'refresh_interval_min': 590})
@@ -856,6 +869,44 @@ def test_error_message_guard():
     assert err.message == 'bad  value ?' and str(err) == err.message and isinstance(err, ValueError)
 
 
+def _all_messages():
+    """Every refusal text: the MSG_* constants (with a sample value where
+    they take one) and the ones normalise_form_entry builds."""
+    texts = []
+    for name in sorted(n for n in dir(h) if n.startswith('MSG_')):
+        text = getattr(h, name)
+        texts.append(text % ('x',) if '%s' in text else text)
+    for key, value in (('m3u_url', 5), ('enabled', 'yes'), ('catchup_mode', 5), ('catchup_days', -1),
+                       ('start_num', 0), ('refresh_interval_min', -1), ('name', 5)):
+        with pytest.raises(ImportRequestError) as err:
+            h.normalise_form_entry({'id': 'alpha', key: value})
+        texts.append(err.value.message)
+    return texts
+
+
+def test_no_message_ends_with_a_full_stop():
+    """http.server's error page adds one ('<p>Message: %(message)s.</p>') and
+    both pages show the text with it: a message ending in '.' was shown as
+    "... Reload the page.." (review fix)."""
+    texts = _all_messages()
+    assert len(texts) == 24
+    assert [t for t in texts if t.rstrip().endswith('.')] == []
+    for text in texts:
+        text.encode('ascii')
+
+
+def test_the_duplicate_identifier_message_says_what_delete_does():
+    """Delete removes every entry with that id, with all its channels and its
+    guide file (_op_delete, Channels.saveImportRequest), so the refusal must
+    not suggest deleting "one of them" (review fix)."""
+    assert h.MSG_DUPLICATE_ID == ('Two imports use this Identifier. Delete removes both, with their channels; '
+                                  'then add the import again')
+    fresh = _disk3() + [synced('beta', name='Second beta')]
+    refused(fresh, {'op': 'edit', 'id': 'beta', 'entry': {'name': 'B'}}, 409)
+    new, summary = h.apply_dashboard_request(fresh, {'op': 'delete', 'id': 'beta'})
+    assert [e['id'] for e in new] == ['alpha', 'gamma'] and summary['removed_ids'] == ['beta']
+
+
 # ================================================================ a tab opened before imports.69
 
 
@@ -888,9 +939,13 @@ def test_old_tab_delete_is_accepted():
 
 
 def test_old_tab_no_change_save_writes_nothing():
+    """beta stores hand-set catch-up keys the form doesn't have: its
+    form-built item is compared on its own keys, so this is no change at all
+    (op 'none'), not an Edit that happens to change nothing."""
     disk = _old_disk()
     new, summary = h.apply_dashboard_request(disk, old_edit(get_copy(disk), 'beta'))
     assert summary['changed'] is False and new == disk
+    assert summary['op'] == 'none'
 
 
 def test_old_tab_first_save_stores_the_pictures_box():
@@ -948,6 +1003,72 @@ def test_old_tab_two_edits_are_refused():
     now = copy.deepcopy(loaded)
     now[2]['refresh_interval_min'] = 30
     refused(now, old_edit(get_copy(loaded), 'alpha', refresh_interval_min=590), 409)
+
+
+def test_old_tab_an_add_next_to_a_second_change_is_refused():
+    """S1-M12b: one change at a time on the Add path too. The tab's list (from
+    an imports.68 add-on: no marker) holds a never-synced import that was
+    deleted elsewhere, so its copy looks like a second Add. Accepting the
+    first Add would re-add the deleted import and silently drop the new one
+    (or the edit), and still say "Imports saved"."""
+    loaded = _old_disk() + [never_synced('gamma')]
+    refused(_old_disk(), old_add(get_copy(loaded), new_form_item('delta')), 409)
+    refused(_old_disk(), old_edit(get_copy(loaded), 'beta', name='Beta TV'), 409)
+
+
+# ---------------------------------------------------------------- lists from GET since imports.69 (marked)
+
+
+def get_copy_69(entries):
+    """What GET /imports.json gives a page since imports.69: as get_copy,
+    and a never-synced import (only form keys) carries display_status
+    'never_synced' (server.py). End to end in test_imports69_dashboard_save."""
+    page = get_copy(entries)
+    for item in page:
+        if h.form_only(item):
+            item['display_status'] = h.DISPLAY_NEVER_SYNCED
+    return page
+
+
+def test_form_only():
+    assert h.form_only(never_synced('gamma')) and h.form_only({}) and h.form_only(form_item(synced('alpha')))
+    assert not h.form_only(synced('alpha')) and not h.form_only(dict(never_synced('gamma'), catchup_days=7))
+    assert not h.form_only(dict(never_synced('gamma'), display_status=h.DISPLAY_NEVER_SYNCED))
+    assert not h.form_only('gamma') and not h.form_only(None) and not h.form_only(['id'])
+    assert h.DISPLAY_NEVER_SYNCED == 'never_synced' and 'display_status' in h.DERIVED_FIELDS
+
+
+@pytest.mark.parametrize('elsewhere', ['switched off', 'deleted'])
+def test_old_tab_marked_never_synced_copy_is_checked_against_disk(elsewhere):
+    """Review fix: with the marker the never-synced import's copy is a GET
+    copy, not a form, so an old tab's no-change Save is refused instead of
+    switching that import back on (or re-adding it) and saying "saved"."""
+    loaded = _old_disk() + [never_synced('gamma')]
+    page = old_edit(get_copy_69(loaded), 'alpha')
+    now = copy.deepcopy(loaded)
+    if elsewhere == 'switched off':
+        now[2]['enabled'] = False
+    else:
+        del now[2]
+    err = refused(now, page, 409)
+    assert err.message == h.MSG_OUT_OF_DATE
+
+
+def test_old_tab_marked_never_synced_copy_allows_delete_edit_and_add():
+    """The third documented leftover goes for lists loaded since imports.69: a
+    Delete next to a never-synced import is accepted. Editing that import
+    itself still works (the form replaces its copy), and the marker is never
+    stored."""
+    loaded = _old_disk() + [never_synced('gamma')]
+    new, summary = h.apply_dashboard_request(loaded, old_delete(get_copy_69(loaded), 'alpha'))
+    assert (summary['op'], summary['removed_ids']) == ('delete', ['alpha']) and new == loaded[1:]
+    new, summary = h.apply_dashboard_request(loaded, old_edit(get_copy_69(loaded), 'gamma', name='Gamma TV'))
+    assert (summary['op'], summary['id'], summary['fields']) == ('edit', 'gamma', ['name'])
+    assert new[2] == dict(loaded[2], name='Gamma TV', config_key='pending')
+    new, summary = h.apply_dashboard_request(loaded, old_add(get_copy_69(loaded), new_form_item('delta')))
+    assert summary['op'] == 'add' and new[:3] == loaded and new[3]['id'] == 'delta'
+    new, summary = h.apply_dashboard_request(loaded, old_edit(get_copy_69(loaded), 'alpha'))
+    assert summary == {'op': 'none', 'id': None, 'changed': False, 'fields': [], 'reset': [], 'removed_ids': []}
 
 
 def test_old_tab_identifier_change_is_refused():
@@ -1301,7 +1422,7 @@ def test_every_entry_is_cleaned_at_a_sync_commit():
     assert 'display_status' not in new[1]
 
 
-def test_deletes_are_the_given_ids_plus_every_tombstone_on_disk():
+def test_deletes_are_every_tombstone_on_disk():
     """S1-M5: an Orphans made during the sync (a tombstone the sync didn't
     read) stays deleted; applied_deletes counts only ids that exist."""
     a = synced('alpha', tombstones=['a1@alpha'])
@@ -1314,6 +1435,38 @@ def test_deletes_are_the_given_ids_plus_every_tombstone_on_disk():
     assert info['applied_deletes'] == {'a2@alpha'}                           # a1 has no record anywhere
     assert mods == {'a2@alpha', 'a3@alpha'}                                  # limited to the writer list
     assert info['tombstones'] == {'a1@alpha', 'a2@alpha'}
+
+
+def test_an_older_overlapping_sync_never_deletes_a_newer_syncs_re_discovery():
+    """Review fix: two overlapping syncs both re-create a9 (Re-discover
+    ticked). The newer one commits first: a9's record is written and a9
+    leaves the tombstones. The older one is superseded and its re-discovery
+    dropped; its start-of-sync tombstones (deleted_ids) must not delete the
+    record the newer sync wrote (before: deleted, with no tombstone left, so
+    the channel was missing until the next sync re-created it)."""
+    start = synced('alpha', rediscover_deleted=True, tombstones=['a9@alpha'])
+    fresh = [synced('alpha', rediscover_deleted=True, last_sync_at=T0 + 90)]       # the newer sync's commit
+    res = result(start, rediscovered=['a9@alpha'], last_sync_at=T0 + 60)
+    writer = [rec('a9@alpha', 'alpha'), rec('own@PseudoTV_Live')]
+    new, w, mods, dels, info = plan(fresh, starts(start), {'alpha': res}, writer, mods={'a9@alpha'},
+                                    dels={'a9@alpha'}, channel_ids={'a9@alpha', 'own@PseudoTV_Live'})
+    assert info['superseded'] == {'alpha'} and info['dropped'] == {'alpha': {'a9@alpha'}}
+    assert [c['id'] for c in w] == ['own@PseudoTV_Live'] and mods == set()
+    assert dels == set() and info['deleted_ids'] == set() and info['applied_deletes'] == set()
+    assert 'tombstones' not in new[0]
+
+
+def test_gone_counts_only_results_that_reached_syncone():
+    """An import the sync held back (gate-skipped) and that was deleted
+    meanwhile has no results to drop: it is not 'gone' (no "was deleted
+    during this sync" line for it)."""
+    a, b = synced('alpha'), synced('beta')
+    _, _, _, _, info = plan([copy.deepcopy(a)], starts(a, b), {'alpha': result(a, last_sync_at=T0 + 60),
+                                                               'beta': result(b, status='skipped')})
+    assert info['gone'] == set()
+    _, _, _, _, info = plan([copy.deepcopy(a)], starts(a, b), {'alpha': result(a, last_sync_at=T0 + 60),
+                                                               'beta': result(b, last_sync_at=T0 + 60)})
+    assert info['gone'] == {'beta'}
 
 
 def test_kept_tombstones_without_records_apply_no_delete():

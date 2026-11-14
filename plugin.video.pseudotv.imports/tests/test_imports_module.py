@@ -297,6 +297,18 @@ def test_reconcile_filters_tombstoned_new_channels():
     assert {c['id'] for c in new} == {'A@s'}
 
 
+@pytest.mark.parametrize('rediscover', [False, True])
+def test_reconcile_never_reports_a_tombstoned_record_as_an_orphan(rediscover):
+    """imports.69 review (ADD4b): a tombstoned record still on disk that the
+    source no longer lists is not an orphan (the 2026-05-11 rule), with
+    Re-discover ticked or not; the sync commit deletes it through the
+    tombstone."""
+    imp = Imports()
+    new, refreshed, orphans = imp.reconcile([_ch('A@s')], [_ch('A@s'), _ch('T@s')],
+                                            {'tombstones': ['T@s'], 'rediscover_deleted': rediscover})
+    assert orphans == [] and new == [] and [p[0]['id'] for p in refreshed] == ['A@s']
+
+
 def test_reconcile_empty_inputs_yield_empty_outputs():
     imp = Imports()
     new, refreshed, orphans = imp.reconcile([], [], {})

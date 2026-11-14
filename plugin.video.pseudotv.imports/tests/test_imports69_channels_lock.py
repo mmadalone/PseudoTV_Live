@@ -10,11 +10,13 @@ dashboard Save). These are the lock's own contracts, after test_writer_lock.py:
   3. a timeout raises ChannelsLockTimeout and logs one ERROR line naming the
      caller; the wait is CHANNELS_TIMEOUT as it is when held() is called;
   4. an exception inside the block releases the lock;
-  5. the one-file kill switch (_NoLock) keeps held() working.
+  5. the one-file kill switch (_NoLock) keeps held() working, and the edit
+     the header documents, applied to the file as written, still imports.
 The commit-level checks (busy -> nothing written, the getMYUUID call outside
 the lock, ...) are in test_imports69_channels_commit.py with Channels.commit.
 """
 import ast
+import importlib.util
 import os
 import threading
 import time
@@ -172,6 +174,53 @@ def test_kill_switch_object(monkeypatch):
     for t in threads:
         t.join(timeout=5)
     assert inside == [1, 1]
+
+
+def _documented_kill_switch():
+    """(old line, new line) as the header's "Kill switch" paragraph quotes
+    them: its first two indented code lines."""
+    lines = _src().splitlines()
+    at = [i for i, line in enumerate(lines) if line.startswith('# Kill switch')][0]
+    quoted = [line[1:].strip() for line in lines[at + 1:at + 8] if line.startswith('#     ')]
+    return quoted[0], quoted[1]
+
+
+def test_the_documented_kill_switch_edit_imports_and_stops_serialising(tmp_path):
+    """The header's one-line swap, applied to the file exactly as written.
+    Before the fix the quoted line didn't match the code line (aligned
+    spaces), so a literal replace changed only the comment; and done by hand
+    it raised NameError at import (_NoLock was defined below the line), which
+    stops channels.py, the service and the plugin from loading."""
+    old, new = _documented_kill_switch()
+    assert (old, new) == ('CHANNELS_LOCK = threading.RLock()', 'CHANNELS_LOCK = _NoLock()')
+    lines = _src().splitlines()
+    hits = [i for i, line in enumerate(lines) if line == old]
+    assert len(hits) == 1, 'the quoted text is exactly one whole code line, never the comment'
+    lines[hits[0]] = new
+    edited = tmp_path / 'channels_lock_kill_switch.py'
+    edited.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    spec = importlib.util.spec_from_file_location('channels_lock_kill_switch', str(edited))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)                      # a NameError here = the add-on can't start
+    assert isinstance(mod.CHANNELS_LOCK, mod._NoLock)
+    inside, errors = [], []
+    barrier = threading.Barrier(2)
+
+    def enter():
+        try:
+            with mod.held('test.kill_switch_edit', timeout=0.5):
+                inside.append(1)
+                barrier.wait(timeout=2)               # both inside together: no serialisation
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=enter) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+    assert not any(t.is_alive() for t in threads)
+    assert errors == [] and inside == [1, 1]
 
 
 def test_exit_releases_the_lock_it_took(monkeypatch):

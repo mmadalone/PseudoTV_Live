@@ -1669,9 +1669,11 @@ class Imports(object):
         # madteevee (imports fork): union of all tombstones across all imports.
         # These are channel ids the operator explicitly tombstoned (via the
         # "🗑 Orphans" endpoint). Without passing them as `deleted_ids` to
-        # setChannels (imports.69: commitSync, which also adds every tombstone
-        # on disk at commit time), the merge-on-write preserve loop resurrects
-        # them from disk on every syncAll cycle — operator's delete looks like a no-op.
+        # setChannels, the merge-on-write preserve loop resurrected them from
+        # disk on every syncAll cycle — operator's delete looked like a no-op.
+        # imports.69: commitSync deletes every tombstone on disk at commit
+        # time, and only those, so an id a newer overlapping sync re-discovered
+        # meanwhile is not deleted (importcfg_helpers.plan_sync_commit).
         deleted_ids = set()
         for ic in imports:
             for cid in (ic.get('tombstones') or []):
@@ -1691,16 +1693,20 @@ class Imports(object):
         # tests' in-memory stores get the same planner from a shared helper.
         # A failed commit never stops this cycle's guide and playlist
         # rendering (as a failed setImports didn't).
+        # One ERROR line per failed commit: an exception is logged inside its
+        # except (so the line carries its traceback), any other outcome below.
+        raised = False
         try:
             saved = self.channels.commitSync(start_by_id, per_import_results, merged_channels,
                                              modified_ids, deleted_ids)
         except Exception as e:
-            saved = {'status': 'failed'}
-            self.log("syncAll, saving this sync's results raised: %s" % (e,), level=xbmc.LOGERROR)
+            raised, saved = True, {'status': 'failed'}
+            self.log("syncAll, saving this sync's results raised: %s -- nothing was saved; the next sync redoes them"
+                     % (e,), level=xbmc.LOGERROR)
         if not isinstance(saved, dict):
             saved = {'status': 'failed'}
         written = saved.get('status') == 'written'
-        if not written:
+        if not written and not raised:
             self.log("syncAll, this sync's results were not saved (%s); the next sync redoes them"
                      % (saved.get('status'),), level=xbmc.LOGERROR)
         # imports.69: the PVR-refresh signal below counts only deletes that

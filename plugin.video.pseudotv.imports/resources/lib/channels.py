@@ -499,6 +499,11 @@ class Channels(object):
         imports.69 the dashboard, Orphans and the sync use saveImportRequest,
         removeOrphans and commitSync).
 
+        Not for production code (tests and tooling only; a test pins that no
+        module in resources/lib calls it): it stores `data` exactly as given,
+        so a list read earlier would wipe the sync info, tombstones and Saves
+        written since -- the "never synced" bug imports.69 fixed.
+
         The channel records of every import the list no longer holds are
         purged in the same write: without that, a deleted import's channels
         kept claiming channel numbers and polluted pseudotv.m3u/xml until

@@ -48,12 +48,13 @@
 # it is called (a default argument would freeze the value at import), so
 # tests can shorten the wait with monkeypatch.
 #
-# Kill switch (this file only): replace
+# Kill switch (this file only): replace the line
 #     CHANNELS_LOCK = threading.RLock()
-# with
+# below with
 #     CHANNELS_LOCK = _NoLock()
+# (_NoLock is defined above that line, so the edited file still imports).
 # Every merge still runs on fresh data; only the serialisation between
-# threads goes away.
+# threads goes away. Like any .py change, it needs a Kodi restart.
 import threading
 
 try:
@@ -76,7 +77,20 @@ except Exception:
         except Exception: pass  # noqa: S110 -- logging must never raise
 
 
-CHANNELS_LOCK    = threading.RLock()
+class _NoLock(object):
+    """The kill switch's stand-in for CHANNELS_LOCK (see the header): the
+    same acquire/release calls, no serialisation. It must stay above the
+    CHANNELS_LOCK line: the header's one-line swap names it there."""
+
+    def acquire(self, blocking=True, timeout=None):
+        return True
+
+    def release(self):
+        return None
+
+
+# The header's kill switch replaces this exact line.
+CHANNELS_LOCK = threading.RLock()
 CHANNELS_TIMEOUT = 15.0   # seconds; read by held() at call time
 
 
@@ -85,17 +99,6 @@ class ChannelsLockTimeout(Exception):
     written; the caller reports "busy" (the dashboard answers 503, a sync
     logs an ERROR and its next cycle redoes the work). The argument is the
     caller's ctx."""
-
-
-class _NoLock(object):
-    """The kill switch's stand-in for CHANNELS_LOCK (see the header): the
-    same acquire/release calls, no serialisation."""
-
-    def acquire(self, blocking=True, timeout=None):
-        return True
-
-    def release(self):
-        return None
 
 
 class _Held(object):

@@ -213,13 +213,16 @@ class Tasks(object):
                             break  # time-based auto-sync interval expired
                         # madteevee (imports fork, imports.69): the read, the
                         # blocker checks and the clear run under KICK_LOCK, which
-                        # every kick setter in the service takes too
-                        # (kick_helpers.set_kick: POST /imports.json, Orphans,
-                        # ↻ Refresh, _chkAddress, _keepImportsKick). Before, a
-                        # kick set between this read and the clear was wiped
-                        # together with the one taken. Lock busy for 2 s: skip
-                        # this poll, the kick stays set. KICK_LOCK is a plain
-                        # Lock: nothing in here may call set_kick.
+                        # the kick_helpers.set_kick callers take too (POST
+                        # /imports.json, Orphans, ↻ Refresh, _chkAddress,
+                        # _keepImportsKick). Before, a kick they set between this
+                        # read and the clear was wiped together with the one
+                        # taken. The four channel endpoints in server.py still
+                        # write the kick directly, without the lock, until
+                        # imports.71: such a kick can still be wiped here, and
+                        # theirs can replace a pending one. Lock busy for 2 s:
+                        # skip this poll, the kick stays set. KICK_LOCK is a
+                        # plain Lock: nothing in here may call set_kick.
                         if not KICK_LOCK.acquire(timeout=KICK_LOCK_TIMEOUT):
                             continue
                         try:

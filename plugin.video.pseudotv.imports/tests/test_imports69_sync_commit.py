@@ -29,8 +29,14 @@ Sections:
     epg_source_key, R4) and a Save never touching the keys;
   - the PVR-refresh signal; the one-time cleanup of display-only keys;
   - switching an import off and on (playlist, guide slice, boot render);
+    an entry without 'enabled' counts as switched on; a damaged import entry
+    never takes the other imports off the TV;
   - one persistence path: the shared test helper (fake_commit_sync) and
-    Channels.commitSync call the planner alike;
+    Channels.commitSync call the planner alike; no production setImports
+    caller; the start copy is the sync's own;
+  - review fixes: results dropped at the commit (playlist moved, superseded)
+    never touch the guide; an older overlapping sync never deletes a newer
+    sync's re-discovery; one ERROR line per failed commit;
   - Python 3.8 hygiene of imports.py and m3u.py.
 All data is synthetic (example.invalid addresses, made-up ids).
 """
@@ -476,6 +482,77 @@ def test_a_guide_address_changed_while_the_sync_runs(env, download):
                   xbmc.LOGINFO)
 
 
+def _make_newer_sync_commit(env):
+    """Another sync saved this import while this one ran (the overlap case:
+    Builder's sync after chkImports' 300 s wait): a newer last_sync_at."""
+    other = elsewhere(env)
+    assert other.setImports([dict(i, last_sync_at=NOW + 3600) for i in other.getImports()]) is True
+
+
+@pytest.mark.parametrize('case, guide_answer', [
+    ('playlist address changed', 'downloaded'),
+    ('superseded by a newer sync', 'downloaded'),
+    ('superseded by a newer sync', 'failed'),
+])
+def test_dropped_results_never_touch_the_guide(env, case, guide_answer):
+    """X-DI1: when the commit drops an import's results because its playlist
+    address moved or a newer sync saved it meanwhile, its guide data is
+    emptied too (imports.py, the drop loop), so the XML branch keeps that
+    import's previous guide (`if not id_map: continue`). Without that, the
+    guide step removed its whole section from pseudotv.xml -- for Movistar+
+    the only copy of the past days' replays -- on the fresh-guide path and on
+    the keep-the-previous-guide path alike. Steps 2 and 3 change the code
+    around this; this pins the rule for the playlist and superseded cases as
+    test_a_guide_address_changed_while_the_sync_runs does for a moved guide."""
+    write(env, [cfg('one', epg_url=G1)], [custom(), rec('A1', 'one', 11)])
+    (env.cache / 'epg_one.xml').write_bytes(guide('A1'))
+    env.source.answer(P1, ok(playlist(('A1', 'Alpha', 11))))
+    env.source.answer(P1B, ok(playlist(('A1', 'Alpha', 11))))
+    env.source.answer(G1, ok(guide('A1')) if guide_answer == 'downloaded' else DOWN)
+    if case == 'playlist address changed':
+        env.source.during[P1] = lambda: edit(env, 'one', m3u_url=P1B)
+    else:
+        env.source.during[P1] = lambda: _make_newer_sync_commit(env)
+    old_show = {'channel': 'A1@one', 'start': _ts(NOW - 7200), 'stop': _ts(NOW - 3600), 'title': [('Old', '')]}
+    run = sync(env, xmltv=_XMLTV([old_show]))
+    assert run.xmltv.XMLTVDATA['programmes'] == [old_show], 'the guide step kept this import as it was'
+    assert record(env, 'A1@one') is not None
+    assert not logged(env, 'guide address changed during this sync')
+    if case == 'playlist address changed':
+        assert entry(env, 'one')['m3u_url'] == P1B
+        assert logged(env, 'syncAll, [one] playlist address changed during this sync', xbmc.LOGINFO)
+    else:
+        assert entry(env, 'one')['last_sync_at'] == NOW + 3600, 'the newer sync wins'
+        assert logged(env, 'syncAll, [one] a newer sync saved this import while this one ran', xbmc.LOGINFO)
+
+
+def test_an_older_overlapping_sync_never_deletes_a_newer_syncs_re_discovery(env):
+    """Review fix, end to end: Re-discover is ticked and the provider lists
+    the deleted B1 again. While this (older) sync runs, a newer sync commits
+    first: B1's record is written and B1 leaves the tombstones. This sync's
+    results are superseded and its own re-discovery dropped; its
+    start-of-sync tombstones must not delete the record the newer sync wrote
+    (before: deleted, with no tombstone left, so B1 was missing until the
+    next sync re-created it as a new channel)."""
+    write(env, [cfg('one', rediscover_deleted=True, tombstones=['B1@one'])], [custom(), rec('A1', 'one', 11)])
+    env.source.answer(P1, ok(playlist(('A1', 'Alpha', 11), ('B1', 'Beta', 12))))
+
+    def newer_sync_commits():
+        other = elsewhere(env)
+        imports = [dict(i, last_sync_at=NOW + 3600) for i in other.getImports()]
+        for i in imports:
+            i.pop('tombstones', None)
+        assert other.setImports(imports) is True
+        assert other.setChannels(other.getChannels() + [rec('B1', 'one', 12)], modified_ids={'B1@one'}) is True
+    env.source.during[P1] = newer_sync_commits
+    run = sync(env)
+    assert run.res['one']['rediscovered'] == ['B1@one'], 'this sync re-created it too'
+    assert logged(env, 'syncAll, [one] a newer sync saved this import while this one ran', xbmc.LOGINFO)
+    assert record(env, 'B1@one') is not None, "the newer sync's re-discovery stays"
+    assert 'tombstones' not in entry(env, 'one') and entry(env, 'one')['last_sync_at'] == NOW + 3600
+    assert not logged(env, 'commitSync, applied'), 'no delete was applied'
+
+
 def test_one_of_your_own_channels_deleted_while_the_sync_runs_stays_deleted(env):
     """The sync's list carries the Custom records it read at its start; the
     commit (a background writer) never re-creates a record gone from the file
@@ -599,8 +676,12 @@ def test_a_merge_error_in_the_sync_commit_writes_nothing_and_the_cycle_still_ren
     monkeypatch.setattr(channels_module.Channels, '_mergeRecords', staticmethod(boom))
     run = sync(env)
     assert env.path.read_bytes() == before
-    assert logged(env, "syncAll, saving this sync's results raised: simulated merge failure", xbmc.LOGERROR)
-    assert logged(env, "syncAll, this sync's results were not saved (failed)", xbmc.LOGERROR)
+    # One ERROR line per failure, logged inside the except so it carries the
+    # traceback (review fix: a second line outside it added "NoneType: None").
+    assert [m for m, lvl in env.lines if lvl == xbmc.LOGERROR and "this sync's results" in m] == \
+        logged(env, "syncAll, saving this sync's results raised: simulated merge failure -- nothing was saved; "
+                    "the next sync redoes them", xbmc.LOGERROR)
+    assert len(logged(env, "this sync's results", xbmc.LOGERROR)) == 1
     assert 'A1@one' in run.m3u.added, 'the playlist is still rendered'
     assert [p['channel'] for p in run.xmltv.XMLTVDATA['programmes']] == ['A1@one'], 'and the guide'
 
@@ -852,6 +933,62 @@ def test_switching_it_back_on_syncs_it_and_republishes_its_channels(env, bound):
     assert record(env, 'B1@off')['number'] == 77, 'back with its dashboard number'
 
 
+def _no_enabled_key(iid, **over):
+    """An import entry stored without 'enabled' (hand-made, an API client, an
+    older version): the add-on reads it as switched on everywhere."""
+    entry = cfg(iid, **over)
+    del entry['enabled']
+    return entry
+
+
+def test_an_entry_without_enabled_keeps_its_stations_on_the_tv(env, bound):
+    """X-EN1: M3U.cleanSelf reads a missing 'enabled' as switched on."""
+    write(env, [_no_enabled_key('on')], [custom(), rec('A1', 'on', 11)])
+    stations = [{'id': CUSTOM, 'number': 1}, {'id': 'A1@on', 'number': 11}]
+    kept, _recordings = M3U.__new__(M3U).cleanSelf(stations)
+    assert [s['id'] for s in kept] == [CUSTOM, 'A1@on']
+
+
+def test_a_damaged_import_entry_never_takes_the_other_imports_off_the_tv(env, bound):
+    """E35: a non-dict item in a hand-edited import list is skipped; before
+    the guard it made cleanSelf's try fail, so every imported channel left
+    the playlist at the next load (as at imports.68)."""
+    write(env, [cfg('on'), 'junk'], [custom(), rec('A1', 'on', 11)])
+    stations = [{'id': CUSTOM, 'number': 1}, {'id': 'A1@on', 'number': 11}]
+    kept, _recordings = M3U.__new__(M3U).cleanSelf(stations)
+    assert [s['id'] for s in kept] == [CUSTOM, 'A1@on']
+
+
+def test_the_boot_render_publishes_an_entry_without_enabled(env, monkeypatch):
+    """X-EN2: the boot render reads a missing 'enabled' as switched on."""
+    write(env, [_no_enabled_key('on')], [custom(), rec('A1', 'on', 11)])
+    monkeypatch.setattr(imports_mod, '_isDiskMissing', lambda import_id, scope: True)
+
+    class _Playlist(object):
+        def __init__(self):
+            self.M3UDATA = {'stations': [], 'recordings': []}
+
+        def _save(self):
+            return True
+    playlist_store = _Playlist()
+    importer = Imports(channels=Channels(file=str(env.path)), m3u=playlist_store)
+    assert importer.renderFromPersistedState() == 1
+    assert [s['id'] for s in playlist_store.M3UDATA['stations']] == ['A1@on']
+
+
+def test_a_pending_entry_without_enabled_is_forced(env):
+    """X-EN3: the settings gate reads a missing 'enabled' as switched on, so
+    a Save ('pending') on such an entry syncs it in the next cycle, with one
+    full read, although its refresh gate would hold it."""
+    write(env, [_no_enabled_key('one', last_sync_at=NOW - 60, etag='v1', config_key='pending')],
+          [custom(), rec('A1', 'one', 11)])
+    env.source.answer(P1, ok(playlist(('A1', 'Alpha', 11)), etag='"v2"'))
+    run = sync(env)
+    assert run.res['one']['status'] == 'ok'
+    assert env.source.sent(P1) == [(None, None)], 'its markers are not sent'
+    assert logged(env, '[one] syncAll, settings changed since its last sync -- syncing it now', xbmc.LOGINFO)
+
+
 # ================================================================ one persistence path
 
 
@@ -963,6 +1100,44 @@ def test_syncall_saves_through_commitsync_only():
                 and any(isinstance(a, ast.Constant) and a.value == 'commitSync' for a in n.args)]
 
 
+def test_no_production_code_calls_setimports():
+    """Channels.setImports stores a whole import list exactly as given: a
+    list read earlier would wipe the sync info, tombstones and Saves written
+    since (the "never synced" bug). After imports.69 only tests and tooling
+    call it; production writes go through saveImportRequest, removeOrphans
+    and commitSync (review fix: pinned, so a new caller is a decision)."""
+    callers = []
+    for name in sorted(os.listdir(LIB)):
+        if not name.endswith('.py'):
+            continue
+        for node in ast.walk(ast.parse(_src(name))):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == 'setImports'):
+                callers.append('%s:%d' % (name, node.lineno))
+    assert callers == []
+
+
+def test_the_start_copy_is_the_sync_s_own(env, monkeypatch):
+    """X-ST1: syncAll's start copy of each entry (what the commit diffs each
+    result against) is a deep copy, never the store's own dicts, which other
+    code holding this Channels copy may replace or change while the sync
+    runs (tombstones are a nested list)."""
+    write(env, [cfg('one', tombstones=['T@one'])], [custom(), rec('A1', 'one', 11)])
+    env.source.answer(P1, ok(playlist(('A1', 'Alpha', 11))))
+    store = Channels(file=str(env.path), writable=True)
+    own = store.getImports()[0]
+    seen = {}
+    real = store.commitSync
+
+    def recording(start_by_id, *args, **kwargs):
+        seen.update(start_by_id)
+        return real(start_by_id, *args, **kwargs)
+    monkeypatch.setattr(store, 'commitSync', recording)
+    sync(env, store=store)
+    assert seen['one'] == own
+    assert seen['one'] is not own and seen['one']['tombstones'] is not own['tombstones']
+
+
 def test_a_store_without_commitsync_saves_nothing_and_the_cycle_still_renders(env):
     class _NoCommit(object):
         def __init__(self):
@@ -985,7 +1160,8 @@ def test_a_store_without_commitsync_saves_nothing_and_the_cycle_still_renders(en
     env.source.answer(P1, ok(playlist(('A1', 'Alpha', 11))))
     run = sync(env, store=store)
     assert store.calls == [], 'no second persistence path'
-    assert logged(env, "syncAll, this sync's results were not saved (failed)", xbmc.LOGERROR)
+    assert logged(env, "syncAll, saving this sync's results raised:", xbmc.LOGERROR)
+    assert len(logged(env, "this sync's results", xbmc.LOGERROR)) == 1, 'one ERROR line per failure'
     assert 'A1@one' in run.m3u.added
 
 

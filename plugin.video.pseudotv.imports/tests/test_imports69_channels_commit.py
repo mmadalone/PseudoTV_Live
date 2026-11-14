@@ -28,6 +28,7 @@ channels.CACHE_LOC and imports.CACHE_LOC pointed at a tmp folder:
     writes back a record deleted from the file unless it touched it itself.
 """
 import ast
+import contextlib
 import copy
 import json
 import os
@@ -252,6 +253,44 @@ def test_getmyuuid_is_called_outside_the_lock(env, monkeypatch):
     assert ch.commitSync({}, {}, ch.getChannels(), set(), set())['status'] == COMMIT_WRITTEN
     assert owned == [False, False, False]
     assert _disk(env.path)['uuid'] == 'test-uuid'
+
+
+def test_the_write_runs_inside_interrupt_activity_and_the_lock(env, monkeypatch):
+    """X-IA1: the contract's order, outermost first: interruptActivity (the
+    Channel Manager preview is waited out, and Builder sees the interrupt
+    flag, as with every save before imports.69) -> CHANNELS_LOCK -> the
+    write."""
+    events = []
+
+    @contextlib.contextmanager
+    def interrupt_activity():
+        events.append('enter')
+        try:
+            yield
+        finally:
+            events.append('exit')
+    monkeypatch.setattr(channels_module.PROPERTIES, 'interruptActivity', interrupt_activity)
+    real = channels_module.FileAccess.setJSON
+
+    def set_json(fle, data, *args, **kwargs):
+        events.append('write (lock owned=%s)' % (channels_lock.CHANNELS_LOCK._is_owned(),))
+        return real(fle, data, *args, **kwargs)
+    monkeypatch.setattr(channels_module.FileAccess, 'setJSON', set_json)
+    _write(env.path, channels=[_rec(CUSTOM_A, 1)], imports=[SYNCED])
+    assert _open(env.path).setChannels([_rec(CUSTOM_A, 1, name='x')]) is True
+    assert events == ['enter', 'write (lock owned=True)', 'exit']
+
+
+def test_the_open_manager_setting_is_written_after_the_lock(env, monkeypatch):
+    """X-SS1: _setSetting is a Kodi setting write, so it runs after
+    CHANNELS_LOCK is released (nothing slow while held; a settings write also
+    makes Kodi reload the add-on's settings)."""
+    _write(env.path, channels=[_rec(CUSTOM_A, 1)], imports=[SYNCED])
+    ch = _open(env.path)
+    owned = []
+    monkeypatch.setattr(ch, '_setSetting', lambda: owned.append(channels_lock.CHANNELS_LOCK._is_owned()))
+    assert ch.setChannels([_rec(CUSTOM_A, 1), _rec(CUSTOM_B, 2)]) is True
+    assert owned == [False]
 
 
 # ================================================================ the strict read
@@ -646,6 +685,18 @@ def test_cache_sweep_runs_only_after_a_written_import_list(env):
     env.path.write_bytes(good)
     assert ch.saveImportRequest({'op': 'edit', 'id': 'one', 'entry': {'refresh_interval_min': 590}})['changed']
     assert not (env.cache / 'epg_gone.xml').exists()
+
+
+def test_an_orphans_write_never_sweeps_the_guide_caches(env):
+    """E46: the sweep follows the writers of the import list itself (Save,
+    Add, Delete, setImports and the sync's commit); 🗑 Orphans changes only
+    an import's tombstones, so a written Orphans removal deletes no cache."""
+    one = dict(SYNCED, tombstones=['OLD@one'])
+    _write(env.path, channels=[_rec(CUSTOM_A, 1), _imp('O1', 'one', 2, is_orphan=True)], imports=[one])
+    (env.cache / 'epg_gone.xml').write_bytes(b'x')
+    out = _open(env.path).removeOrphans('one')
+    assert out['status'] == COMMIT_WRITTEN and out['removed'] == 1
+    assert (env.cache / 'epg_gone.xml').exists()
 
 
 def test_cache_sweep_errors_are_logged_never_raised(env, monkeypatch):

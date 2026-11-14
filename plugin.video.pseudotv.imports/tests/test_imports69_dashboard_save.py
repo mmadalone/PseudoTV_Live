@@ -20,7 +20,10 @@ Save back over it. imports.69:
   - 🔨 Rebuild and 🧹 Cleanup stranded answer 500 "Channels not saved; try
     again" when their save is refused (before: always "ok").
   - GET /imports.json reports 'abandoned' as display_status; last_status
-    keeps the stored 'failed', and next_retry_at is reply-only.
+    keeps the stored 'failed', and next_retry_at is reply-only. An import
+    that has never synced (only the form's keys) comes as display_status
+    'never_synced', so a tab opened before the update posts its copy back as
+    a GET copy (checked against the file), never as a form (review fix).
   - The TV's Channel Manager (manager.py) says "Channels not saved..." when
     its save is refused, and closing no longer asks again without end.
 
@@ -366,7 +369,7 @@ REFUSALS = [
     ('edit of a deleted import', {'op': 'edit', 'id': 'gone', 'entry': {'name': 'x'}}, 404, h.MSG_GONE),
     ('bad start number', {'op': 'edit', 'id': 'alpha', 'entry': {'start_num': 0}}, 400, h.MSG_START_NUM),
     ('bad tick box', {'op': 'edit', 'id': 'alpha', 'entry': {'enabled': 'yes'}}, 400,
-     '"Enabled" must be ticked or unticked (true or false).'),
+     '"Enabled" must be ticked or unticked (true or false)'),
     ('unknown op', {'op': 'rename', 'id': 'alpha'}, 400, h.MSG_BAD_REQUEST),
     ('payload is text', 'alpha', 400, h.MSG_BAD_REQUEST),
     ('old page, duplicate ids', [form_item(synced('alpha')), form_item(synced('alpha'))], 400, h.MSG_LIST_DUPLICATE),
@@ -501,13 +504,16 @@ def _real_error_reply(env, payload):
     ([form_item(synced('alpha'), id='alpha2')], 400, h.MSG_LIST_ID_CHANGE),
 ], ids=['add duplicate', 'non-latin-1 duplicate', 'deleted elsewhere', 'old page id change'])
 def test_the_page_reads_the_real_error_reply(dashboard_env, payload, code, message):
-    """Old and new pages extract `<p>Message: ...` from send_error's page."""
+    """Old and new pages extract `<p>Message: ...` from send_error's page,
+    with exactly one full stop (http.server's page adds it; review fix: the
+    messages no longer end with their own)."""
     env = dashboard_env
     odd = 'canal-日本'
     env.write([_rec(CUSTOM, 1)], [synced('alpha'), synced(odd), synced(odd, name='Second')])
     status, shown = _real_error_reply(env, payload)
     assert status.startswith('HTTP/1.1 %d %s' % (code, message))
     assert shown == message + '.'                     # http.server's page ends the message with a full stop
+    assert not shown.endswith('..')
 
 
 def test_the_page_reads_a_real_busy_reply(dashboard_env, monkeypatch):
@@ -637,6 +643,62 @@ def test_old_tab_out_of_date_is_refused(dashboard_env, monkeypatch, elsewhere, b
     assert env.raw() == before and env.writes == [] and env.props.writes == []
 
 
+def _morning_with_a_new_import(env, monkeypatch):
+    """_morning plus gamma, added but not synced yet (only the form's keys),
+    as an old tab got the list from this add-on's GET."""
+    _abandon_after(monkeypatch, env.server, 0)
+    env.write([_rec(CUSTOM, 1), _imp('A1', 'alpha', 100), _imp('B1', 'beta', 200)],
+              [synced('alpha'), synced('beta', start_num=200), never_synced('gamma')])
+    return env.reply(env.get('/imports.json'))['imports']
+
+
+@pytest.mark.parametrize('elsewhere, op', [
+    ({'op': 'edit', 'id': 'gamma', 'entry': {'id': 'gamma', 'enabled': False}}, 'edit'),
+    ({'op': 'delete', 'id': 'gamma'}, 'delete'),
+], ids=['switched off elsewhere', 'deleted elsewhere'])
+def test_old_tab_never_synced_copy_is_never_re_applied(dashboard_env, monkeypatch, elsewhere, op):
+    """Review fix, end to end: an old tab holds alpha, beta and gamma (never
+    synced, so its copy has only the form's keys). Another tab switches gamma
+    off, or deletes it, with the new page. The old tab's no-change Save of
+    alpha used to answer "Imports saved" and switch gamma back on (op edit)
+    or add it back (op add). GET now marks gamma (display_status
+    'never_synced'), so its copy is checked against the file: 409, nothing
+    written."""
+    env = dashboard_env
+    page = _morning_with_a_new_import(env, monkeypatch)
+    other = env.save(elsewhere)
+    assert other.statuses == [200] and env.reply(other)['op'] == op
+    before, writes, kicks = env.raw(), len(env.writes), list(env.props.writes)
+    handler = env.save(old_edit(page, 'alpha'))
+    assert handler.errors == [(409, h.MSG_OUT_OF_DATE)] and handler.statuses == []
+    assert env.raw() == before and len(env.writes) == writes and env.props.writes == kicks
+    assert [i.get('display_status') for i in page] == [None, None, h.DISPLAY_NEVER_SYNCED]
+
+
+def test_old_tab_delete_and_edit_next_to_a_never_synced_import(dashboard_env, monkeypatch):
+    """With the marker an old tab's Delete is accepted while an import has
+    never synced (before: refused, the third documented leftover), an Edit of
+    that import itself still works, and the marker is never stored."""
+    env = dashboard_env
+    page = _morning_with_a_new_import(env, monkeypatch)
+    handler = env.save(old_edit(page, 'gamma', name='Gamma TV'))
+    assert handler.statuses == [200]
+    assert env.reply(handler) == {'ok': True, 'changed': True, 'op': 'edit', 'id': 'gamma'}
+    stored = _imports(env)['gamma']
+    assert stored == dict(never_synced('gamma'), name='Gamma TV', config_key='pending')
+    page = env.reply(env.get('/imports.json'))['imports']          # the old page reloads after a save
+    assert 'display_status' not in page[2], "gamma now has config_key: its copy is a GET copy anyway"
+    env.write([_rec(CUSTOM, 1), _imp('A1', 'alpha', 100), _imp('B1', 'beta', 200)],
+              [synced('alpha'), synced('beta', start_num=200), never_synced('gamma')])
+    page = env.reply(env.get('/imports.json'))['imports']
+    handler = env.save([e for e in page if e['id'] != 'alpha'])
+    assert handler.statuses == [200]
+    assert env.reply(handler) == {'ok': True, 'changed': True, 'op': 'delete', 'id': 'alpha'}
+    assert [i['id'] for i in env.disk()['imports']] == ['beta', 'gamma']
+    for entry in env.disk()['imports']:
+        assert not set(h.DERIVED_FIELDS).intersection(entry)
+
+
 # ================================================================ GET /imports.json
 
 
@@ -677,6 +739,29 @@ def test_get_shows_abandoned_as_display_status(dashboard_env, monkeypatch):
     assert 'display_status' not in shown['beta'] and shown['beta']['last_status'] == 'failed'
     assert isinstance(shown['beta']['next_retry_at'], int) and shown['beta']['next_retry_at'] > shown['beta']['last_sync_at']
     assert not set(h.DERIVED_FIELDS).intersection(shown['alpha'])
+    assert env.raw() == before and env.writes == []
+
+
+def test_get_marks_a_never_synced_import_also_when_the_enrichment_fails(dashboard_env, monkeypatch):
+    """The never-synced marker is set after the retry-state enrichment, so
+    its fallback list (the enrichment raised) gets it too; the file is never
+    touched by a GET."""
+    import imports as imports_mod
+    env = dashboard_env
+    _abandon_after(monkeypatch, env.server, 0)
+
+    def broken(*args, **kwargs):
+        raise RuntimeError('broken curve')
+    monkeypatch.setattr(imports_mod, 'computeRetryDelay', broken)
+    failing = synced('beta', last_status='failed', last_error='HTTP 503', fail_count=2, failed_since=T0 - 100)
+    env.write([_rec(CUSTOM, 1)], [failing, never_synced('gamma')])
+    before = env.raw()
+    handler = env.get('/imports.json')
+    assert handler.statuses == [200]
+    assert _logged(handler, 'do_GET /imports.json: retry-state enrichment failed: broken curve', xbmc.LOGWARNING)
+    shown = env.reply(handler)['imports']
+    assert [i.get('display_status') for i in shown] == [None, h.DISPLAY_NEVER_SYNCED]
+    assert 'next_retry_at' not in shown[0]
     assert env.raw() == before and env.writes == []
 
 

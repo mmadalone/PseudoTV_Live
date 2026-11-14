@@ -90,6 +90,10 @@ SYNC_FIELDS = frozenset(('last_sync_at', 'last_status', 'last_error', 'etag', 'l
                          'epg_fail_count', 'm3u_source_key', 'epg_source_key', 'config_key'))
 ACTION_FIELDS = frozenset(('tombstones',))
 DERIVED_FIELDS = frozenset(('next_retry_at', 'display_status'))
+# GET /imports.json's display_status for an entry that holds only form keys
+# (added, not synced yet; see form_only). Reply-only, like every
+# DERIVED_FIELDS key.
+DISPLAY_NEVER_SYNCED = 'never_synced'
 
 BOOL_FIELDS = ('respect_source_numbers', 'rediscover_deleted', 'enabled', 'detect_placeholder_pictures')
 ADDRESS_FIELDS = ('m3u_url', 'm3u_path', 'epg_url', 'epg_path')
@@ -130,24 +134,28 @@ _LABELS = {
     'detect_placeholder_pictures': '"Hide placeholder show pictures automatically"',
 }
 
-# Error messages (ASCII; see ImportRequestError).
-MSG_BAD_REQUEST     = "This import request isn't understood. Reload the page and try again."
-MSG_ENTRY           = 'The import settings are missing from the request.'
-MSG_NO_ID           = 'The request names no import Identifier.'
+# Error messages (ASCII; see ImportRequestError). None ends with a full stop:
+# http.server's error page adds one ('<p>Message: %(message)s.</p>'), and
+# both the page and the pages opened before imports.69 show the text with it.
+MSG_BAD_REQUEST     = "This import request isn't understood. Reload the page and try again"
+MSG_ENTRY           = 'The import settings are missing from the request'
+MSG_NO_ID           = 'The request names no import Identifier'
 MSG_BAD_ID          = 'Identifier must be lowercase a-z, 0-9, _ or -'
 MSG_ID_TAKEN        = 'Identifier "%s" is already used by another import'
 MSG_ID_LOCKED       = "The Identifier of an existing import can't be changed"
-MSG_GONE            = 'This import no longer exists (deleted elsewhere). Reload the page.'
-MSG_DUPLICATE_ID    = 'Two imports use this Identifier; delete one of them first'
-MSG_LIST_ITEM       = 'Every import in the list needs an Identifier.'
-MSG_LIST_DUPLICATE  = 'The same Identifier is used twice in the list.'
-MSG_LIST_ID_CHANGE  = "The Identifier of an import can't be changed (or this page is out of date). Reload the page."
-MSG_OUT_OF_DATE     = 'This page is out of date (imports were changed elsewhere). Reload the page and try again.'
-MSG_NAME            = 'The display name must be text.'
-MSG_START_NUM       = 'Start channel number must be a whole number from 1 to 9999.'
-MSG_REFRESH         = 'Refresh interval must be a whole number of minutes from 0 to 1440.'
-MSG_CATCHUP_TEXT    = '%s must be text or empty.'
-MSG_CATCHUP_DAYS    = 'catchup_days must be a whole number from 0 to 365, or empty.'
+MSG_GONE            = 'This import no longer exists (deleted elsewhere). Reload the page'
+# Delete removes every entry with the id, with all of that id's channel
+# records and its guide file (_op_delete, Channels.saveImportRequest).
+MSG_DUPLICATE_ID    = 'Two imports use this Identifier. Delete removes both, with their channels; then add the import again'
+MSG_LIST_ITEM       = 'Every import in the list needs an Identifier'
+MSG_LIST_DUPLICATE  = 'The same Identifier is used twice in the list'
+MSG_LIST_ID_CHANGE  = "The Identifier of an import can't be changed (or this page is out of date). Reload the page"
+MSG_OUT_OF_DATE     = 'This page is out of date (imports were changed elsewhere). Reload the page and try again'
+MSG_NAME            = 'The display name must be text'
+MSG_START_NUM       = 'Start channel number must be a whole number from 1 to 9999'
+MSG_REFRESH         = 'Refresh interval must be a whole number of minutes from 0 to 1440'
+MSG_CATCHUP_TEXT    = '%s must be text or empty'
+MSG_CATCHUP_DAYS    = 'catchup_days must be a whole number from 0 to 365, or empty'
 
 
 class ImportRequestError(ValueError):
@@ -356,7 +364,7 @@ def normalise_form_entry(raw, check_address=None, new_id=True):
             out[key] = None
             continue
         if not isinstance(value, str):
-            raise ImportRequestError(400, 'The %s must be text.' % (_LABELS[key],))
+            raise ImportRequestError(400, 'The %s must be text' % (_LABELS[key],))
         value = value.strip()
         if value and check_address is not None:
             try:
@@ -371,7 +379,7 @@ def normalise_form_entry(raw, check_address=None, new_id=True):
     for key in BOOL_FIELDS:
         if key in raw:
             if not isinstance(raw[key], bool):
-                raise ImportRequestError(400, '%s must be ticked or unticked (true or false).' % (_LABELS[key],))
+                raise ImportRequestError(400, '%s must be ticked or unticked (true or false)' % (_LABELS[key],))
             out[key] = raw[key]
     for key in ('catchup_mode', 'catchup_query_format'):
         if key in raw:
@@ -462,11 +470,21 @@ def _op_delete(fresh, iid):
     return kept, _summary('delete', iid, True, removed_ids=[iid])
 
 
+def form_only(entry):
+    """True for a dict that holds only form keys (FORM_FIELDS): what the old
+    page's gatherImportForm builds, and a stored import that was added but
+    never synced (an Add stores only the form). GET /imports.json marks the
+    latter with display_status DISPLAY_NEVER_SYNCED, so a page opened before
+    imports.69 posts such an import back as a verbatim copy, not as a form."""
+    return isinstance(entry, dict) and set(entry).issubset(_FORM_SET)
+
+
 def _form_built(item):
     """An item the old page's gatherImportForm built (only form keys), as
     opposed to a verbatim copy of the GET reply: a synced import's copy always
-    carries last_sync_at and other sync keys."""
-    return set(item).issubset(_FORM_SET)
+    carries last_sync_at and other sync keys, and a never-synced import's copy
+    carries GET's display_status (since imports.69)."""
+    return form_only(item)
 
 
 def _differs(item, disk_entry, keys):
@@ -485,8 +503,13 @@ def _apply_list(fresh, items, check_address):
     longer matches disk, or more than one change, means the page is out of
     date: 409. Leftovers (only such tabs; the page carries no version): an
     Edit re-sends every box of that import, and an Edit of an import deleted
-    elsewhere looks like an Add and re-adds it; a never-synced import's copy
-    looks form-built, so a Delete is refused while one exists."""
+    elsewhere looks like an Add and re-adds it. A list loaded from an
+    imports.68 add-on carries no display_status, so there a never-synced
+    import's copy looks form-built: a Delete is refused while one exists, and
+    a no-change Save can apply that copy as an Edit (or an Add, when it was
+    deleted elsewhere). Since imports.69 GET marks such an import
+    (DISPLAY_NEVER_SYNCED), and the old page reloads its list after every
+    successful action."""
     ids = []
     for item in items:
         iid = item.get('id') if isinstance(item, dict) else None
@@ -713,8 +736,12 @@ def plan_sync_commit(fresh_imports, fresh_channel_ids, start_by_id, results, wri
         deleted, moved (playlist) or superseded during the sync, and without
         the dropped re-discovered ids;
       - mods: modified_ids limited to the writer list;
-      - dels: deleted_ids plus every tombstone on disk now (so an Orphans made
-        during the sync stays), minus the kept re-discoveries.
+      - dels: every tombstone on disk now (so an Orphans made during the sync
+        stays), minus the kept re-discoveries. deleted_ids, the tombstones as
+        the sync read them, add nothing on their own: an id that is no longer
+        a tombstone on disk was re-created by a newer, overlapping sync's
+        Re-discover (or its import was deleted, records and all), and
+        deleting it would remove the record that sync just wrote.
     info gains 'drop_imports', 'dropped_ids', 'deleted_ids' (= dels) and
     'applied_deletes' (the deletes that remove a record that exists on disk
     or in the writer list: the PVR refresh signal)."""
@@ -746,7 +773,7 @@ def plan_sync_commit(fresh_imports, fresh_channel_ids, start_by_id, results, wri
         if cid is not None:
             writer_ids.add(cid)
     mods = set(modified_ids or ()).intersection(writer_ids)
-    dels = set(deleted_ids or ()).union(info['tombstones']).difference(kept)
+    dels = set(info['tombstones']).difference(kept)        # never deleted_ids alone (see the docstring)
     info['drop_imports'] = drop_imports
     info['dropped_ids'] = drop_ids
     info['deleted_ids'] = set(dels)

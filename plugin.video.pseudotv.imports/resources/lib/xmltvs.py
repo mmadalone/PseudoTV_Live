@@ -403,8 +403,9 @@ class XMLTVS(object):
                     return False
                 return True
             # Import-suffixed entries: ALSO cross-reference channels.json.
-            # setImports purges channelDATA when an import is removed; this
-            # check ensures the XML side honors the same purge.
+            # Deleting an import purges its records from channels.json
+            # (imports.69: Channels.saveImportRequest, in the same write);
+            # this check ensures the XML side honors the same purge.
             if live_channel_ids is not None and s not in live_channel_ids:
                 return False
             return True  # import suffix already validated by isOwnedID
