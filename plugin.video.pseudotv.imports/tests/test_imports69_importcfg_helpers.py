@@ -222,6 +222,11 @@ BITOR_REVIEWED = {
         "pic_present |= {c.get('id') for c in all_imported_now.values() if c.get('id')}",
         "present_ids |= {ch.get('id') for ch in all_imported_now.values() if ch.get('id')}",
     ],
+    # imports.70 (step 2): replay_helpers.py's one '|' since imports.59, a set
+    # union in merge_replay_guide, reviewed. Everything imports.70 adds or
+    # changes there (the episode reader, the re-describe, the stale-export
+    # guard and its gap fill) stays free of '|'.
+    'replay_helpers.py': ['merge_ids = set(link_slots) | set(prev_slots)'],
 }
 
 

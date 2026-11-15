@@ -225,15 +225,22 @@ def test_all_links_ended(folder, monkeypatch):
     _assert_counters_untouched(cfg)
 
 
-@pytest.mark.parametrize('days,expected', [(3, None), (4, 4), (5, 5)])
-def test_file_age(folder, monkeypatch, days, expected):
-    old = time.time() - days * 86400 - 600
+# imports.70 (c): the message comes from 36 h (before: 4 days), in hours below
+# two days, and says what the stale-export guard does meanwhile.
+STALE = ('Movistar+ guide file is %s old. Upcoming shows follow your guide where it lists them, '
+         'and keep replay only where both list them the same. ' + TAIL)
+
+
+@pytest.mark.parametrize('hours,expected', [(35, None), (37, '37 hours'), (72, '3 days'), (96, '4 days'),
+                                            (120, '5 days')])
+def test_file_age(folder, monkeypatch, hours, expected):
+    old = time.time() - hours * 3600 - 600
     os.utime(str(folder / 'epg.xml'), (old, old))
     cfg = _sync(monkeypatch, _cfg(folder))
     if expected is None:
         assert cfg['last_error'] is None
     else:
-        assert cfg['last_error'] == 'Movistar+ guide file is %d days old. %s' % (expected, TAIL)
+        assert cfg['last_error'] == STALE % expected
     _assert_counters_untouched(cfg)
 
 
@@ -272,7 +279,7 @@ def test_every_file_message_tells_what_to_do():
     login check: a logged-out Movistar+ ignores its own Export button."""
     hint = ('Restart Kodi or press Export channels and EPG now in %(name)s settings, '
             'and check %(name)s is still logged in.')
-    for msg in (imports_mod.LINKS_MSG_UNREADABLE, imports_mod.LINKS_MSG_OUTDATED, imports_mod.LINKS_MSG_OLD):
+    for msg in (imports_mod.LINKS_MSG_UNREADABLE, imports_mod.LINKS_MSG_OUTDATED, imports_mod.LINKS_MSG_STALE):
         assert msg.endswith(hint)
 
 

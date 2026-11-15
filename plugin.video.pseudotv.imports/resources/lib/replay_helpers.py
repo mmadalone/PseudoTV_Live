@@ -40,6 +40,12 @@
 # non-link catch-up row turns the links read, the merge, the kept history, the
 # per-channel replay offer, the dashboard messages, the daily export and the
 # new-file trigger off together.
+#
+# imports.70 adds three things here, still pure: the plain guide's episode tags
+# (_plain_episode, the last fallback of _episode), the re-describe after a guide
+# address change (merge_replay_guide's redescribe) and the guard against a stale
+# export (stale_after, stale_export_filter, fill_gaps). not_started is the one
+# "not started yet" rule they share: the show on air counts as aired.
 
 import re
 import unicodedata
@@ -84,6 +90,12 @@ EXPORT_MIN_UPTIME_S     = 15 * 60     # the service has run for 15 minutes
 EXPORT_MIN_FILE_AGE_S   = 20 * 3600   # the exporter's guide file is 20 h old
 EXPORT_MIN_REFIRE_S     = 20 * 3600   # not fired for that import in 20 h
 
+# imports.70 (c): a guide export is too old to trust for the shows that start
+# more than this long after it was written (stale_after, stale_export_filter).
+# Longer than EXPORT_MIN_FILE_AGE_S, so the daily refresh (S13) asks the add-on
+# for a new file well before.
+LINKS_STALE_AFTER_S     = 36 * 3600
+
 _ADDON_DATA_RE = re.compile(r'(?:^|/)addon_data/([^/]+)/([^/]+)$')
 
 # Keys that belong to the time slot and its replay link, not to the show.
@@ -106,6 +118,21 @@ _NON_ALNUM = re.compile(r'[^a-z0-9]+')
 # with long space runs (three adjacent optional '\s*' backtracked cubically).
 _EPISODE_LABEL = re.compile(r'\[COLOR [^\]]*\]\s*(?:T(\d+)(?:/\d+)?\s*)?(?:E(\d+)\s*)?\[/COLOR\]')
 _EPISODE_SUB = re.compile(r'\s*(?:T(\d+)(?:/\d+)?\s*)?(?:E(\d+)\b|"Episodio (\d+)")')
+
+# imports.70: davidmuma's plain guide (since 2026-11-07: no colour labels, no
+# sub-titles) ends the show's part of the title with the tag, before an
+# optional ' · <episode name>': 'Alerta Cobra T23 E12 · Sangre y agua',
+# 'Valle Salvaje T4 E103', 'Horizonte Diarios E40', 'D Corazón T4'. Only the
+# text before the first SPACED middle dot is read (Catalan 'Col·lapse' has an
+# unspaced one; episode names can hold T/E-like text), a show name must come
+# before the tag, and each number has at most 6 digits. One way to match:
+# linear time.
+_EPISODE_TAIL = re.compile(r'\S\s+(?:T(\d{1,6})(?:/\d{1,6})?(?:\s+E(\d{1,6}))?|E(\d{1,6}))$')
+_NAME_SEP = ' \u00b7 '     # a spaced middle dot (U+00B7), written as an escape
+# imports.70: what comes before the tag must be a show name, not a season tag:
+# in 'T4 E103' or 'T10 E224' on its own, _EPISODE_TAIL's \S is the season's
+# last digit, and the episode number alone would be read.
+_SEASON_TAG = re.compile(r'^T\d{1,6}(?:/\d{1,6})?$')
 
 _BY_START = itemgetter(0)
 _BY_SPAN  = itemgetter(0, 1)
@@ -319,21 +346,44 @@ def _same_title(a, b):
 
 
 def _number(digits):
-    return int(digits) if digits else None
+    # imports.70: at most 9 digits. int() refuses more than 4,300 (Python
+    # 3.11+), so one broken guide title stopped the whole replay merge.
+    return int(digits) if digits and len(digits) <= 9 else None
+
+
+def _plain_episode(programme):
+    """imports.70: (season, episode) of davidmuma's plain tag at the end of the
+    show's part of the title (_EPISODE_TAIL), each an int or None; None when
+    there is none, and when the text before the tag is empty or is itself a
+    season tag (_SEASON_TAG: 'T4 E103' alone has no show name). Reads its own
+    label-free copy of the title: the shared title helpers (_LABELS,
+    strip_labels, _norm_title, title_text, _same_title) are unchanged."""
+    text = _LABELS.sub(' ', _title_text(programme)).split(_NAME_SEP, 1)[0].rstrip()
+    m = _EPISODE_TAIL.search(text)
+    if not m:
+        return None
+    # The match starts at the last character of the show name (\S), so the
+    # name is everything up to and including it. It is never empty with this
+    # pattern; 'not name' keeps the rule explicit should the pattern change.
+    name = text[:m.start() + 1].strip()
+    if not name or _SEASON_TAG.match(name):
+        return None
+    return _number(m.group(1)), _number(m.group(2) or m.group(3))
 
 
 def _episode(programme):
     """(season, episode) of the programme's season/episode tag, each an int
     or None; None when it has neither. The title's first colour label that
     is only such a tag comes first (davidmuma), else the start of the
-    sub-title (the export)."""
+    sub-title (the export), else a plain tag at the end of the title's show
+    part (imports.70, _plain_episode)."""
     for m in _EPISODE_LABEL.finditer(_title_text(programme)):
         if m.group(1) or m.group(2):
             return _number(m.group(1)), _number(m.group(2))
     m = _EPISODE_SUB.match(_first_text(programme, 'sub-title'))
     if m:
         return _number(m.group(1)), _number(m.group(2) or m.group(3))
-    return None
+    return _plain_episode(programme)
 
 
 def _episodes_agree(a, b):
@@ -480,7 +530,211 @@ def _with_slot(details, slot_programme, channel):
     return out
 
 
-def merge_replay_guide(fresh, links, previous, days_by_channel, now):
+def not_started(start, cut):
+    """imports.70: the one 'not started yet' rule of the guide re-describe
+    (merge_replay_guide's redescribe; cut = now), the stale-export guard
+    (stale_export_filter) and its gap fill (fill_gaps; cut = the moment the
+    file became too old). True when the show's start (epoch seconds) is after
+    `cut`: the show on air at `cut` (start <= cut < stop) counts as started,
+    i.e. aired."""
+    return start > cut
+
+
+def stale_after(links_mtime_ns, now):
+    """imports.70 (c): the moment (epoch seconds) from which the exporter's
+    guide file is too old to trust -- its modification time (st_mtime_ns as
+    Imports._readLinks stores it: a decimal string, or an int) plus
+    LINKS_STALE_AFTER_S -- once `now` has reached it. None while the file is
+    younger, and when its time is unknown (missing, not a whole number, not
+    positive, or too large to be a time)."""
+    if isinstance(links_mtime_ns, bool):
+        return None
+    try:
+        mtime_ns = int(str(links_mtime_ns).strip())
+        cut = mtime_ns / 1e9 + LINKS_STALE_AFTER_S
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError: a number of hundreds of digits (a damaged stored
+        # value) can't become a float; it is no time either.
+        return None
+    if mtime_ns <= 0:
+        return None
+    return cut if now >= cut else None
+
+
+def _covered(spans):
+    """imports.70: the time a channel's guide programmes cover, as sorted,
+    separate (start, stop) stretches: overlapping or touching spans joined.
+    Returns (stretches, their starts)."""
+    out = []
+    for start, stop in sorted(spans):
+        if out and start <= out[-1][1]:
+            if stop > out[-1][1]:
+                out[-1] = (out[-1][0], stop)
+        else:
+            out.append((start, stop))
+    return out, [s[0] for s in out]
+
+
+def _inside(covered, span):
+    """imports.70: True when [start, stop) lies within one stretch of
+    _covered() (None or no stretches: False)."""
+    if not covered:
+        return False
+    stretches, starts = covered
+    i = bisect_right(starts, span[0]) - 1
+    return i >= 0 and stretches[i][1] >= span[1]
+
+
+def stale_export_filter(fresh, links, previous, days_by_channel, cut):
+    """imports.70 (c): merge_replay_guide's inputs with the schedule of a stale
+    exporter file taken out where the guide source covers it. Returns
+    (links, previous, stats); none of the inputs is modified.
+
+    cut -- stale_after(): the moment the file became too old to trust.
+
+    Only linked programmes of channels in days_by_channel are judged, and
+    only those that had not started at `cut` (not_started) and whose whole
+    time the guide source's programmes of that channel cover (one stretch of
+    back-to-back or overlapping programmes, _covered/_inside). Everything
+    else passes through as the same object: programmes that started by
+    `cut`, those the guide source doesn't cover (a channel only the export
+    has, a gap, the edges of the guide source's days), other channels, and
+    entries without a link or a usable time.
+
+    An export programme (`links`) stays when a guide-source programme agrees
+    with it: the same channel, start and stop, the same title (_same_title)
+    and an episode tag that doesn't contradict (_episodes_agree is not
+    False). Otherwise it is left out.
+
+    An already-published programme (`previous`) is judged by THIS export's
+    listing of its link, never by its own title or tag: rule 1 gave it the
+    guide source's details when it was published, so comparing it with the
+    guide source would always agree. It keeps its link only when the export
+    lists that link (same channel) and that listing stayed. Otherwise --
+    the listing gave way, or the export no longer lists the link -- it stays
+    in `previous` as a copy without its replay link: still a details source
+    for rule 2, no longer a time slot. The guide source's programmes then
+    fill that time, without links.
+
+    `cut` is fixed for a given file, so a show's outcome doesn't change when
+    it airs.
+
+    stats: export_yielded / export_agreeing, history_yielded /
+    history_listed, uncovered (not-started programmes kept because the
+    guide source doesn't cover them)."""
+    stats = {'export_yielded': 0, 'export_agreeing': 0, 'history_yielded': 0,
+             'history_listed': 0, 'uncovered': 0}
+    twins, spans = {}, {}
+    for p in fresh or ():
+        ch = p.get('channel')
+        if ch in days_by_channel:
+            span = _span(p)
+            if span is not None:
+                twins.setdefault((ch, span[0], span[1]), []).append(p)
+                spans.setdefault(ch, []).append(span)
+    cover = {ch: _covered(s) for ch, s in spans.items()}
+
+    def _judged(p):
+        # (span, None) when the guard leaves p alone (no usable time, or
+        # started by the cut); else 'uncovered' or 'covered'.
+        span = _span(p)
+        if span is None or not not_started(span[0], cut):
+            return span, None
+        if not _inside(cover.get(p.get('channel')), span):
+            return span, 'uncovered'
+        return span, 'covered'
+
+    out_links, kept, gave_way = [], set(), set()
+    for p in links or ():
+        if p.get('channel') in days_by_channel and _has_link(p):
+            span, verdict = _judged(p)
+            key = (p.get('channel'), p['catchup-id'])
+            if verdict == 'covered':
+                tags = _episode(p)
+                verdict = 'yielded'
+                for twin in twins.get((p.get('channel'), span[0], span[1]), ()):
+                    if _same_title(twin, p) and _episodes_agree(tags, _episode(twin)) is not False:
+                        verdict = 'agreeing'
+                        break
+            if verdict == 'yielded':
+                gave_way.add(key)
+                stats['export_yielded'] += 1
+                continue
+            kept.add(key)
+            if verdict == 'agreeing':
+                stats['export_agreeing'] += 1
+            elif verdict == 'uncovered':
+                stats['uncovered'] += 1
+        out_links.append(p)
+    out_previous = []
+    for p in previous or ():
+        if p.get('channel') in days_by_channel and _has_link(p):
+            verdict = _judged(p)[1]
+            if verdict == 'uncovered':
+                stats['uncovered'] += 1
+            elif verdict == 'covered':
+                key = (p.get('channel'), p['catchup-id'])
+                if key in kept and key not in gave_way:
+                    stats['history_listed'] += 1
+                else:
+                    stats['history_yielded'] += 1
+                    p = {k: v for k, v in p.items() if k != 'catchup-id'}
+        out_previous.append(p)
+    return out_links, out_previous, stats
+
+
+def fill_gaps(programmes, fresh, channel_ids, cut):
+    """imports.70 (c), after a guarded merge only: the time a guide-source
+    programme of a link channel covers that no published programme covers
+    any more -- the merge dropped it because it overlaps a slot the guard
+    kept (the show on air at `cut`, a slot the guide source doesn't fully
+    cover) while the slots next to that one gave way -- is published as a
+    copy of that programme without a link, for that time only. Each copy's
+    start and stop are existing time texts (its neighbour's stop or start,
+    or its own), so no time is computed. Only time after `cut` is filled
+    (not_started): before it the guard changed nothing. Returns (programmes
+    plus the copies, number of copies); the inputs are not modified."""
+    out = list(programmes or ())
+    published = set(id(p) for p in out)
+    spans = {}
+    for p in out:
+        ch = p.get('channel')
+        span = _span(p) if ch in channel_ids else None
+        if span is not None:
+            spans.setdefault(ch, []).append((span[0], span[1], p['start'], p['stop']))
+    index = {ch: _interval_index(items) for ch, items in spans.items()}
+    added = {}
+    dropped = []
+    for p in fresh or ():
+        if id(p) in published or p.get('channel') not in channel_ids:
+            continue
+        span = _span(p)
+        if span is not None and not_started(span[1], cut):
+            dropped.append((span[0], span[1], p))
+    dropped.sort(key=_BY_SPAN)
+    for start, stop, p in dropped:
+        ch = p.get('channel')
+        near = _overlapping(index[ch], start, stop) if ch in index else []
+        near += [a for a in added.get(ch, ()) if a[0] < stop and a[1] > start]
+        at, at_text = start, p['start']
+        pieces = []
+        for s, e, s_text, e_text in sorted(near, key=_BY_SPAN):
+            if s > at:
+                pieces.append((at, s, at_text, s_text))
+            if e > at:
+                at, at_text = e, e_text
+        if at < stop:
+            pieces.append((at, stop, at_text, p['stop']))
+        for piece in pieces:
+            if not_started(piece[0], cut):
+                part = {k: v for k, v in p.items() if k != 'catchup-id'}
+                part['start'], part['stop'] = piece[2], piece[3]
+                out.append(part)
+                added.setdefault(ch, []).append(piece)
+    return out, sum(len(a) for a in added.values())
+
+
+def merge_replay_guide(fresh, links, previous, days_by_channel, now, redescribe=False):
     """Publishable programme list for one import. Returns (programmes, stats).
 
     fresh    -- the guide source's matched programmes (descriptions,
@@ -490,6 +744,14 @@ def merge_replay_guide(fresh, links, previous, days_by_channel, now):
     days_by_channel -- {channel id: replay days} for live link-based channels
                 (link_replay_days).
     now      -- epoch seconds.
+    redescribe -- imports.70 (a): True on the first sync that uses a new
+                guide address (syncOne's epg_source_changed). A slot that
+                hasn't started (not_started(start, now): the show on air
+                counts as started) and whose whole time the new guide's
+                programmes of that channel cover (_covered/_inside) is
+                re-described: it takes only the new guide's details (rules 1
+                and 3). Rule 1 is unchanged for every slot; every other slot
+                follows today's rules. Slots, times and links never change.
 
     Per channel in days_by_channel that has links (fresh or kept):
       L = this sync's export programmes for the channel; duplicates and
@@ -501,9 +763,12 @@ def merge_replay_guide(fresh, links, previous, days_by_channel, now):
             1. the fresh programme of that channel starting at the same second;
             2. for an L programme only: the already-published show with
                details that matches it on at least two of link, start and
-               title (_kept_details);
+               title (_kept_details) -- except a not-started slot inside the
+               new guide's coverage during a re-describe;
             3. for a programme without details of its own (every L
-               programme; an H programme published titles-only): the fresh
+               programme; an H programme published titles-only) -- and,
+               during a re-describe, for a not-started slot inside the new
+               guide's coverage even with details: the fresh
                programme of that channel that overlaps it with the same
                title -- the guide source has the show a few minutes off --
                when its episode number singles it out, or, with no episode
@@ -525,10 +790,15 @@ def merge_replay_guide(fresh, links, previous, days_by_channel, now):
 
     stats: kept_details / overlap_details count the slots that got their
     details from rule 2 / rule 3; both are included in with_content.
+    redescribe_slots (imports.70) counts the slots handled in re-describe
+    mode (not started, inside the new guide's coverage). It is not the
+    number of shows whose description changed: rule 1 gives most of them
+    the same details either way.
     """
     stats = {'links_in': 0, 'history_in': 0, 'history_kept': 0, 'linked': 0,
              'with_content': 0, 'plain': 0, 'fresh_kept': 0, 'fresh_dropped': 0,
-             'channels': 0, 'kept_details': 0, 'overlap_details': 0}
+             'channels': 0, 'kept_details': 0, 'overlap_details': 0,
+             'redescribe_slots': 0}
     link_slots = {}
     for p in links or ():
         ch = p.get('channel')
@@ -599,15 +869,24 @@ def merge_replay_guide(fresh, links, previous, days_by_channel, now):
         # Rule 3 lookups: the channel's dated fresh programmes and its slots.
         fresh_index = _interval_index(dated)
         slot_index = _interval_index(timeline)
+        # imports.70 (a): the time the new guide covers on this channel.
+        covered = _covered([(s[0], s[1]) for s in dated]) if redescribe else None
 
         rows = []
         for start, stop, p, from_export in timeline:
+            # imports.70 (a): after a guide address change, a show that hasn't
+            # started and whose time the new guide covers takes only the new
+            # guide's details (rules 1 and 3). Elsewhere today's rules apply.
+            fresh_only = (redescribe and not_started(start, now)
+                          and _inside(covered, (start, stop)))
+            if fresh_only:
+                stats['redescribe_slots'] += 1
             source = content.get(start)
-            if source is None and from_export:
+            if source is None and from_export and not fresh_only:       # rule 2: not when fresh_only
                 source = _kept_details(p, start, kept_by_link, kept_by_start)
                 if source is not None:
                     stats['kept_details'] += 1
-            if source is None and not _has_details(p):
+            if source is None and (fresh_only or not _has_details(p)):  # rule 3: fresh_only even with details
                 source = _overlap_details(p, start, stop, fresh_index, slot_index)
                 if source is not None:
                     stats['overlap_details'] += 1

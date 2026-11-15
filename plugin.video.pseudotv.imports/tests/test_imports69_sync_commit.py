@@ -701,7 +701,7 @@ def test_a_legacy_entry_is_not_forced(env):
     (ok(playlist(('A1', 'Alpha', 11))), {}, 'ok', 'ok'),
     (UNCHANGED, {'etag': 'v1'}, 'unchanged', 'unchanged'),
     (DOWN, {}, 'failed', 'failed'),
-    (ok(b'#EXTM3U\n'), {}, 'failed', 'warning'),        # an empty playlist: channels kept
+    (ok(b'#EXTM3U\n'), {}, 'warning', 'warning'),       # an empty playlist: channels kept (imports.70: 'warning')
     (None, {'enabled': False}, 'disabled', 'ok'),
 ])
 def test_config_key_is_recorded_after_every_attempted_outcome(env, answer, over, status, last_status):

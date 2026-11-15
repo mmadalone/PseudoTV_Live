@@ -273,9 +273,11 @@ def test_stats_count_rule_3_inside_with_content():
     fresh = [_prog(X, X + H, 'Uno', desc='a'),
              _prog(X + H + 2 * M, X + 2 * H + 2 * M, 'Dos', desc='b')]
     _, stats = _merge(fresh, links)
+    # imports.70: 'redescribe_slots' (the guide re-describe; 0 without it)
     assert stats == {'links_in': 3, 'history_in': 0, 'history_kept': 0, 'linked': 3,
                      'with_content': 2, 'plain': 1, 'fresh_kept': 0, 'fresh_dropped': 2,
-                     'channels': 1, 'kept_details': 0, 'overlap_details': 1}
+                     'channels': 1, 'kept_details': 0, 'overlap_details': 1,
+                     'redescribe_slots': 0}
 
 
 def test_inputs_are_not_modified():

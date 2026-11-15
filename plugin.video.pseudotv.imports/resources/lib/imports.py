@@ -260,31 +260,48 @@ _GUIDE_SELFHEAL_LAST = {}  # {import_id: epoch of the last self-heal sync}
 # whose replay needs per-show links from its playlist add-on's guide export
 # (replay_helpers.KNOWN_EXPORTERS). `name` is the exporter's name. Shown as
 # last_error only while there is no other error; last_status and the failure
-# counters are never touched. A guide export at least LINKS_OLD_AFTER_DAYS
-# old leaves about 2 days of links ahead (it covers about a week).
+# counters are never touched. imports.70 (c): from
+# replay_helpers.LINKS_STALE_AFTER_S (36 h) the export is too old to trust for
+# shows that haven't started (the stale-export guard); LINKS_MSG_STALE says so.
 LINKS_MSG_UNREADABLE = ("%(name)s guide file can't be read (%(reason)s). "
                         "Replay keeps using the links already saved. Restart Kodi or press "
                         "Export channels and EPG now in %(name)s settings, and check %(name)s is still logged in.")
 LINKS_MSG_NO_LINKS   = "%(name)s guide file has no replay links, so replay is off."
 LINKS_MSG_OUTDATED   = ("%(name)s guide file is out of date, so replay is paused. Restart Kodi or press "
                         "Export channels and EPG now in %(name)s settings, and check %(name)s is still logged in.")
-LINKS_MSG_OLD        = ("%(name)s guide file is %(days)d days old. Restart Kodi or press Export channels "
-                        "and EPG now in %(name)s settings, and check %(name)s is still logged in.")
+LINKS_MSG_STALE      = ("%(name)s guide file is %(age)s old. Upcoming shows follow your guide where it "
+                        "lists them, and keep replay only where both list them the same. Restart Kodi or "
+                        "press Export channels and EPG now in %(name)s settings, and check %(name)s is "
+                        "still logged in.")
 LINKS_MSG_DECLARED   = ("%(name)s changed how it declares replay; replay may misbehave until this "
                         "add-on is updated.")
-LINKS_OLD_AFTER_DAYS = 4
 # imports.59 (S12/S17): Movistar+ writes its guide export in place with one
 # write(), and Linux sets the mtime when that write starts. A stable read
 # that can't be parsed, of a file modified less than this many seconds
 # before the read, may have caught a writer that stalled mid-write: it is
 # retried at the next cycle instead of being recorded as damaged.
 LINKS_SETTLE_SECS = 120
+# imports.70 (c), the user's choice of 2026-11-14: while the replay-links file
+# is stale (replay_helpers.stale_after), a link-replay import is synced on
+# every hourly cycle (Imports._linksWentStale), so each channel's replay
+# on/off (S9) follows the show on air within the hour. Due again once its last
+# sync is at least this old: under an hour, so a cycle that starts a little
+# early still syncs, and a shorter auto-sync interval doesn't sync it more
+# often than about hourly.
+LINKS_STALE_RESYNC_SECS = 50 * 60
 
 
 def _ofImport(value, suffix):
     """imports.59: True when `value` is a namespaced id ending in `suffix`
     ('@<import id>') -- the same test the XML branch's slice helpers use."""
     return isinstance(value, str) and value.endswith(suffix)
+
+
+def _ageText(age_s):
+    """imports.70: '40 hours' below two days, else '3 days' (whole units, rounded down)."""
+    if age_s < 48 * 3600:
+        return '%d hours' % (age_s // 3600)
+    return '%d days' % (age_s // 86400)
 
 
 def validate_source_url(url, allowed=ALLOWED_M3U_SCHEMES):
@@ -666,6 +683,8 @@ class Imports(object):
         {
             'import_id'   : str,
             'status'      : str,            # 'ok' | 'unchanged' | 'failed' | 'disabled'
+                                            # | 'warning' (imports.70: a playlist with
+                                            # no channels; the import's channels kept)
             'updated_cfg' : dict,           # import_cfg with refreshed etag/last_modified/last_*
             'parsed'      : list,           # parseM3U output (namespaced channels)
             'new'         : list,           # channels not yet in existing
@@ -678,6 +697,11 @@ class Imports(object):
             # imports.69, present only when set (readers use .get()):
             'rediscovered'      : list,     # tombstoned ids re-created (Re-discover ticked)
             'epg_cache_written' : True,     # this sync replaced cache/epg_<id>.xml
+            # imports.70, per-sync only, never stored:
+            'epg_source_changed': True,     # a parsed download from another guide
+                                            # address than the cached one's
+            'epg_cache_mtime'   : float,    # the saved guide's mtime, taken before the
+                                            # download-failed fallback read it (or None)
         }
         """
         result = {
@@ -813,6 +837,16 @@ class Imports(object):
                     return result
                 if not parsed:
                     # Empty parsed list — defensive: don't mass-orphan (G24).
+                    # imports.70: the result says 'warning' too, as stored.
+                    # It stayed 'failed', so syncAll counted an empty
+                    # playlist as a failure (fail_count, failed_since:
+                    # backoff and abandon) against imports.28's rule that a
+                    # warning leaves them alone. Like 'failed', 'warning' is
+                    # not 'ok'/'unchanged': the import stays out of this
+                    # cycle's allocation, links read and guide merge, and its
+                    # channels keep their records, numbers, playlist entries
+                    # and guide as they are.
+                    result['status'] = 'warning'
                     result['error'] = 'M3U parse yielded zero channels (kept previous)'
                     result['updated_cfg']['last_status'] = 'warning'
                     result['updated_cfg']['last_error']  = result['error']
@@ -932,6 +966,17 @@ class Imports(object):
                 if epg_pairs:
                     result['epg_pairs'] = epg_pairs
                     self.log('[%s] syncOne, parsed EPG: %d items' % (import_id, len(epg_pairs)))
+                    # imports.70 (a): a parsed guide from another address than the one
+                    # whose guide is cached (imports.69's epg_source_key) -- the XML
+                    # branch gives upcoming shows the new guide's details. Only here:
+                    # the cache fallback below still holds the OLD address's guide, and
+                    # a 304 has nothing new. Independent of the cache write: if that
+                    # fails, the key stays and the next download re-describes again
+                    # (idempotent). No flag for an entry without a key (legacy).
+                    if importcfg_helpers.source_changed(import_cfg.get('epg_source_key'), epg_key):
+                        result['epg_source_changed'] = True
+                        self.log('[%s] syncOne, new guide address -- upcoming shows take its details'
+                                 % import_id, level=xbmc.LOGINFO)
                     # Persist the fetched bytes to per-import cache BEFORE updating
                     # validators in updated_cfg — if the write fails we keep
                     # validators at their previous (now-mismatched) state so the
@@ -983,6 +1028,14 @@ class Imports(object):
                 # guide instead of pruning it.
                 cached_pairs = None
                 if epg_fetched['status'] != 304:
+                    # imports.70 (c): the time of the saved guide this sync falls back
+                    # to, taken BEFORE reading it: a file replaced in between can only
+                    # be newer than recorded, which keeps the stale-export guard off
+                    # (_staleCut), today's behaviour. Per-sync result, never stored.
+                    try:
+                        result['epg_cache_mtime'] = os.stat(self._epgCachePath(import_id)).st_mtime
+                    except (OSError, ValueError):
+                        result['epg_cache_mtime'] = None
                     cached_pairs = self._epgCacheRead(import_id)
                 if cached_pairs:
                     result['epg_pairs'] = cached_pairs
@@ -1103,13 +1156,15 @@ class Imports(object):
                 stop = replay_helpers.xmltv_to_epoch(item.get('stop'))
                 if stop is not None:
                     stops.append(stop)
-        age_days = int((now - mtime_ns / 1e9) // 86400) if isinstance(mtime_ns, int) else 0
         if not stops:
             out['warning'] = LINKS_MSG_NO_LINKS % {'name': name}
         elif max(stops) <= now:
             out['warning'] = LINKS_MSG_OUTDATED % {'name': name}
-        elif age_days >= LINKS_OLD_AFTER_DAYS:
-            out['warning'] = LINKS_MSG_OLD % {'name': name, 'days': age_days}
+        elif replay_helpers.stale_after(mtime_ns, now) is not None:
+            # imports.70 (c): from 36 h (before: 4 days), when the stale-export
+            # guard takes over the upcoming shows. stale_after returns None
+            # for an unknown time, so mtime_ns is a number here.
+            out['warning'] = LINKS_MSG_STALE % {'name': name, 'age': _ageText(now - mtime_ns / 1e9)}
         self.log('[%s] syncAll, replay links file read: %d links%s'
                  % (import_id, len(stops), (' (%s)' % out['warning']) if out['warning'] else ''),
                  level=xbmc.LOGINFO if out['warning'] else xbmc.LOGDEBUG)
@@ -1308,6 +1363,22 @@ class Imports(object):
                 self.log('[%s] syncAll, new replay links file — forcing a sync' % (iid,),
                          level=xbmc.LOGINFO)
 
+            # imports.70 (c): the replay-links file is too old to trust
+            # (replay_helpers.LINKS_STALE_AFTER_S): sync when it became stale
+            # after this import's last sync, so upcoming shows follow the guide
+            # within the hour instead of after refresh_interval_min, and again
+            # on every hourly cycle while it stays stale (LINKS_STALE_RESYNC_SECS,
+            # the user's choice of 2026-11-14), so each channel's replay on/off
+            # (S9) follows the show on air. Same force pattern as S17: never for
+            # a switched-off or failing import, so the abandon check and the
+            # failure backoff below still rule those.
+            if (not force_active and import_cfg.get('enabled', True)
+                    and import_cfg.get('last_status') != 'failed'
+                    and self._linksWentStale(import_cfg, existing_channels)):
+                force_active = True
+                self.log('[%s] syncAll, replay links file is stale — forcing a sync' % (iid,),
+                         level=xbmc.LOGINFO)
+
             if (import_cfg.get('enabled', True)
                 and import_cfg.get('id')):
                 try:
@@ -1451,7 +1522,8 @@ class Imports(object):
             # with channels-kept) deliberately doesn't touch the fields —
             # operator's channels are intact and we want normal cadence to
             # pick up fresh content. Only `failed` (hard fetch/parse error)
-            # triggers backoff.
+            # triggers backoff. imports.70: syncOne now returns 'warning' for
+            # that case; it returned 'failed', so an empty playlist counted.
             new_status = res.get('status')
             if new_status in ('ok', 'unchanged'):
                 res['updated_cfg']['fail_count']   = 0
@@ -2005,17 +2077,6 @@ class Imports(object):
                          % (iid, matched_chan, matched_prog, skipped, skipped_disabled),
                          level=xbmc.LOGINFO)
 
-                # Conditional-GET cache safety: if we DID fetch fresh EPG data
-                # (epg_pairs non-empty) but NONE matched, clear the cache validators
-                # so next sync re-fetches. Otherwise the server's 304 response would
-                # forever pin our XML to an empty matched state, even after operator
-                # adds the per-channel `epg_id` overrides that would let it match.
-                if res['epg_pairs'] and matched_chan == 0 and matched_prog == 0:
-                    res['updated_cfg']['epg_etag']          = None
-                    res['updated_cfg']['epg_last_modified'] = None
-                    self.log('syncAll, [%s] cleared EPG cache validators (0 matched of %d items)'
-                             % (iid, len(res['epg_pairs'])), level=xbmc.LOGINFO)
-
                 # imports.56: nothing matched — and not because the channels
                 # are disabled, which must still prune — while the import does
                 # have a guide source: keep the previous guide rather than
@@ -2043,10 +2104,14 @@ class Imports(object):
                 # unavailable) rather than lose that history; this file's
                 # links then wait for the import's next sync or a new export
                 # (links_mtime_ns is already recorded, see _readLinks).
+                # imports.70: only here (fresh_path) does a new guide address
+                # re-describe upcoming shows, (a), and a stale export give way
+                # to the guide, (c); an error in either keeps the previous
+                # guide like any merge error.
                 if res.get('links') is not None:
                     try:
                         merged = self._mergeReplayLinks(iid, res, all_imported_now, published_logos,
-                                                        new_chans, new_progs)
+                                                        new_chans, new_progs, fresh_path=True)
                     except Exception as e:
                         pruned_chan, pruned_prog = _pruneSlice(import_ns_suffix, dead_only=True)
                         _applyGuideIcons(import_ns_suffix)
@@ -3251,6 +3316,24 @@ class Imports(object):
         _GUIDE_SELFHEAL_LAST[iid] = now
         return True
 
+    def _linksFileState(self, import_cfg, existing_channels):
+        """imports.59 (S17) / imports.70 (c): (True, state) for an import that
+        uses link-based replay -- a known exporter (replay_helpers.exporter_for)
+        and stored channel records with link replay (link_replay_days) --
+        where state is its replay-links file's (size, mtime_ns) from one
+        os.stat (_localFileState, never xbmcvfs.Stat), or None when it can't
+        be stat'ed. (False, None) for any other import. Errors propagate to
+        the caller's own handler."""
+        exporter = replay_helpers.exporter_for(import_cfg)
+        iid = import_cfg.get('id')
+        if exporter is None or not iid:
+            return False, None
+        records = [c for c in (existing_channels or ())
+                   if isinstance(c, dict) and c.get('import_source') == iid]
+        if not replay_helpers.link_replay_days(records):
+            return False, None
+        return True, self._localFileState(exporter[2])
+
     def _linksChanged(self, import_cfg, existing_channels):
         """imports.59 (S17): True when an import that uses link-based replay
         has a replay-links file (its playlist add-on's guide export) other
@@ -3263,24 +3346,63 @@ class Imports(object):
         stored differs too. One os.stat per cycle (_localFileState, never
         xbmcvfs.Stat). A missing file or any error gives False."""
         try:
-            exporter = replay_helpers.exporter_for(import_cfg)
-            if exporter is None:
-                return False
-            iid = import_cfg.get('id')
-            if not iid:
-                return False
-            records = [c for c in (existing_channels or ())
-                       if isinstance(c, dict) and c.get('import_source') == iid]
-            if not replay_helpers.link_replay_days(records):
-                return False
-            state = self._localFileState(exporter[2])
-            if state is None:
+            # imports.70: the checks live in _linksFileState, shared with
+            # _linksWentStale (same calls, same order as before).
+            uses, state = self._linksFileState(import_cfg, existing_channels)
+            if not uses or state is None:
                 return False
             return str(state[1]) != str(import_cfg.get('links_mtime_ns'))
         except Exception as e:
             self.log('[%s] _linksChanged, check failed: %s' % (import_cfg.get('id'), e),
                      level=xbmc.LOGWARNING)
             return False
+
+    def _linksWentStale(self, import_cfg, existing_channels, now=None):
+        """imports.70 (c): True when an import that uses link-based replay is
+        due a sync because its replay-links file is too old to trust
+        (replay_helpers.stale_after): the file became stale after the
+        import's last sync (last_sync_at before the cut), or it is still
+        stale and that sync is at least LINKS_STALE_RESYNC_SECS old -- the
+        hourly sync while stale. The file's own mtime (_linksFileState),
+        else the stored links_mtime_ns. A missing time, any error: False.
+
+        The caller (syncAll's gate) never asks for a switched-off or failing
+        import, so the abandon check and the failure backoff rule those."""
+        try:
+            uses, state = self._linksFileState(import_cfg, existing_channels)
+            if not uses:
+                return False
+            mtime_ns = state[1] if state is not None else import_cfg.get('links_mtime_ns')
+            now = time.time() if now is None else now
+            cut = replay_helpers.stale_after(mtime_ns, now)
+            if cut is None:
+                return False
+            try:
+                last = int(import_cfg.get('last_sync_at') or 0)
+            except (TypeError, ValueError):
+                last = 0
+            return last < cut or now - last >= LINKS_STALE_RESYNC_SECS
+        except Exception as e:
+            self.log('[%s] _linksWentStale, check failed: %s' % (import_cfg.get('id'), e),
+                     level=xbmc.LOGWARNING)
+            return False
+
+    def _staleCut(self, iid, res, now):
+        """imports.70 (c): replay_helpers.stale_after for this sync's links file
+        (res['updated_cfg']['links_mtime_ns']: this sync's stable read, else
+        the stored one), or None when the guard stays off -- the file is younger
+        than LINKS_STALE_AFTER_S or its time is unknown, or this sync's guide is
+        the saved copy (its download failed) and that copy, as syncOne found it
+        before reading it (res['epg_cache_mtime']), isn't newer than the file."""
+        cut = replay_helpers.stale_after(res['updated_cfg'].get('links_mtime_ns'), now)
+        if cut is None or not res.get('epg_error'):
+            return cut
+        cached = res.get('epg_cache_mtime')
+        if cached is None or cached <= cut - replay_helpers.LINKS_STALE_AFTER_S:
+            self.log("syncAll, [%s] replay links file is stale, but this sync's guide is the saved copy "
+                     "from before it -- the export keeps its schedule" % (iid,), level=xbmc.LOGINFO)
+            return None
+        return cut
 
     def _mergeLinksIntoKept(self, iid, res, all_imported_now, published_logos):
         """imports.59 (S10.3, R2C-2): on the keep-previous paths (guide
@@ -3313,7 +3435,8 @@ class Imports(object):
         xtv_c.extend(new_chans)
         xtv_p.extend(new_progs)
 
-    def _mergeReplayLinks(self, iid, res, all_imported_now, published_logos, guide_chans, guide_progs):
+    def _mergeReplayLinks(self, iid, res, all_imported_now, published_logos, guide_chans, guide_progs,
+                          fresh_path=False):
         """imports.59 (S10.3): merge this sync's replay links (res['links'],
         _readLinks) into one import's guide with replay_helpers.
         merge_replay_guide. Returns (channel elements, programmes) to publish
@@ -3327,6 +3450,18 @@ class Imports(object):
         link-replay channels (link_replay_days, which also gives each one's
         replay window). The replay history is this import's programmes in
         the guide data as loaded (self.xmltv), read before any prune.
+
+        fresh_path -- imports.70: True on the fresh-guide path only (the
+            caller in syncAll's XML branch). There, (a) a new guide address
+            (syncOne's epg_source_changed) re-describes the shows that
+            haven't started (merge_replay_guide's redescribe), and (c) a
+            stale links file (_staleCut) gives way to the guide source:
+            replay_helpers.stale_export_filter on the merge's inputs, then
+            fill_gaps on its output, with the very same guide_progs objects
+            (fill_gaps finds the published ones by identity). On the
+            keep-previous paths (_mergeLinksIntoKept) the kept slice is both
+            the details source and the history, so there is no independent
+            schedule to re-describe from or give way to: neither applies.
 
         Channel element of a merged channel: the guide source's (davidmuma),
         else the export's (e.g. a channel only the export covers), else the
@@ -3351,8 +3486,31 @@ class Imports(object):
                     if p.get('channel') in days_by_channel]
         prev_chans = {c.get('id'): c for c in (self.xmltv.XMLTVDATA.get('channels') or [])
                       if c.get('id') in days_by_channel}
+        now = int(time.time())
+        redescribe, cut = False, None
+        if fresh_path:
+            redescribe = bool(res.get('epg_source_changed'))
+            cut = self._staleCut(iid, res, now)
+            if cut is not None:
+                # imports.70 (c): on the merge's INPUTS -- the export's slots and
+                # the published copies of the stale file's shows.
+                links, previous, guard = replay_helpers.stale_export_filter(guide_progs, links, previous,
+                                                                            days_by_channel, cut)
         programmes, stats = replay_helpers.merge_replay_guide(guide_progs, links, previous,
-                                                              days_by_channel, int(time.time()))
+                                                              days_by_channel, now, redescribe=redescribe)
+        if cut is not None:
+            # imports.70 (c): on the merge's OUTPUT -- the rest of a guide show
+            # that a kept slot cut short, so the hand-over leaves no hole. Only
+            # unlinked copies of guide programmes of channels already in
+            # guide_chans, so the channel elements below are unaffected.
+            programmes, filled = replay_helpers.fill_gaps(programmes, guide_progs, days_by_channel, cut)
+            self.log('syncAll, [%s] replay links file is %.1f h old -- shows from %s follow the guide: '
+                     'export yielded=%d agreeing=%d, history yielded=%d listed=%d, not covered=%d, '
+                     'gaps filled=%d'
+                     % (iid, (now - (cut - replay_helpers.LINKS_STALE_AFTER_S)) / 3600.0,
+                        time.strftime('%Y-%m-%d %H:%M', time.localtime(cut)),
+                        guard['export_yielded'], guard['export_agreeing'], guard['history_yielded'],
+                        guard['history_listed'], guard['uncovered'], filled), level=xbmc.LOGINFO)
         have = {c.get('id') for c in guide_chans}
         extra = []
         for cid in sorted({p.get('channel') for p in programmes if p.get('channel') in days_by_channel} - have):
@@ -3364,10 +3522,12 @@ class Imports(object):
                 chan['icon'] = [{'src': icon}]
             extra.append(chan)
         self.log('syncAll, [%s] replay links merged: channels=%d linked=%d with-details=%d kept-details=%d '
-                 'overlap-details=%d titles-only=%d export=%d history=%d history-kept=%d unlinked=%d replaced=%d'
+                 'overlap-details=%d titles-only=%d export=%d history=%d history-kept=%d unlinked=%d replaced=%d '
+                 'redescribe-slots=%d'
                  % (iid, stats['channels'], stats['linked'], stats['with_content'], stats['kept_details'],
                     stats['overlap_details'], stats['plain'], stats['links_in'], stats['history_in'],
-                    stats['history_kept'], stats['fresh_kept'], stats['fresh_dropped']), level=xbmc.LOGINFO)
+                    stats['history_kept'], stats['fresh_kept'], stats['fresh_dropped'],
+                    stats['redescribe_slots']), level=xbmc.LOGINFO)
         return list(guide_chans) + extra, programmes
 
     # ------------------------------------------------------------------

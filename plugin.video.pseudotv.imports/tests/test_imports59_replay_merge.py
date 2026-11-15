@@ -310,9 +310,11 @@ def test_stats_count_what_happened():
     fresh = [_prog(NOW, NOW + H, desc='Rich'), _prog(NOW + 5 * H, NOW + 6 * H, desc='Later')]
     links = [_prog(NOW, NOW + H, link='u0'), _prog(NOW + H, NOW + 2 * H, link='u1')]
     _, stats = _merge(fresh, links)
+    # imports.70: 'redescribe_slots' (the guide re-describe; 0 without it)
     assert stats == {'links_in': 2, 'history_in': 0, 'history_kept': 0, 'linked': 2,
                      'with_content': 1, 'plain': 1, 'fresh_kept': 1, 'fresh_dropped': 1,
-                     'channels': 1, 'kept_details': 0, 'overlap_details': 0}
+                     'channels': 1, 'kept_details': 0, 'overlap_details': 0,
+                     'redescribe_slots': 0}
 
 
 # ================================================================ exporter_for
