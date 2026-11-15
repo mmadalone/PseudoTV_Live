@@ -22,8 +22,10 @@ short, without a link, so the hand-over leaves no hole.
 
 Sections (pure: no Kodi stubs):
   - the threshold, stale_after, not_started, _covered/_inside;
-  - the filter: upcoming vs on air, agreeing, coverage, published copies;
-  - the gap fill;
+  - the filter: upcoming vs on air, agreeing (also with the export's
+    bracketed season, 'Chicago Fire (13)'), coverage, published copies
+    (judged by the export's listing at their own time);
+  - the gap fill, also for a hole that starts before the cut and runs past it;
   - whole guarded merges: a 12-hour placeholder, a fixed cut, inputs;
   - the re-describe (a) and the guard (c) in one sync;
   - time zones and mixed offsets.
@@ -31,7 +33,8 @@ Sections (Imports.syncAll, on the imports70_sync_rig harness: the export
 aged with os.utime, every time built from the moment the test starts):
   - the guard in a real sync: 40 h, an on-air show that gives way (S9),
     two syncs, recovery after a new file, (a) and (c) together, 30 h, the
-    keep-previous path, a failed guide download and its saved copy's age;
+    keep-previous path, a failed guide download and its saved copy's age,
+    a read to retry (no guard) and a missing file (guard);
   - the "went stale" trigger in syncAll's gate, with the hourly sync while
     the file stays stale (the user's choice of 2026-11-14), and its units:
     _linksWentStale, _linksFileState, _staleCut;
@@ -241,6 +244,73 @@ def test_only_an_agreeing_export_slot_keeps_its_link():
     assert stats == _stats(export_yielded=3, export_agreeing=3)
 
 
+def _twin_case(export_title, export_sub, guide_title):
+    """One upcoming export slot and the guide's show at the very same channel,
+    start and stop: (kept?, stats)."""
+    fresh = [_prog(CUT, CUT + H, 'Antes'), _prog(CUT + H, CUT + 2 * H, guide_title),
+             _prog(CUT + 2 * H, CUT + 3 * H, 'Despues')]
+    links = [_prog(CUT + H, CUT + 2 * H, export_title, link='x', sub=export_sub)]
+    out_links, _, stats = _filter(fresh, links)
+    return [p['catchup-id'] for p in out_links] == ['x'], stats
+
+
+# Titles from 2026-11-15's files: the export writes the season after the
+# name in brackets, the guide as a tag before ' · <episode name>'.
+@pytest.mark.parametrize('export_title,export_sub,guide_title', [
+    ('Chicago Fire (13)', 'T13 E1 "Un monstruo en el oficio"', 'Chicago Fire T13 E1 · Un monstruo en el oficio'),
+    ('Navy:  Investigación Criminal (19)', 'T19 E7 "Atracado"', 'Navy: Investigación criminal T19 E7 · Atracado'),
+    ('Navy:  Investigación Criminal (19)', 'T19 E13 "x"', 'Navy: Investigación criminal T19 E13'),
+    ('Zoom In (1)', 'T1 E40 "Argylle: agente secreto"', 'Zoom In T1 · Argylle: agente secreto'),
+    ('Chicago Fire (13) ', 'T13 E1 "x"', 'Chicago Fire T13 E1 · x'),               # trailing space
+], ids=['chicago-fire', 'navy', 'navy-no-name', 'season-only-guide', 'trailing-space'])
+def test_the_exports_bracketed_season_is_not_part_of_the_name(export_title, export_sub, guide_title):
+    """The same show at the very same time: it keeps its link. Before, the
+    bracket made the names differ ('chicago fire 13' vs 'chicago fire t13
+    e1 ...'), so whole series gave way while the file was old."""
+    kept, stats = _twin_case(export_title, export_sub, guide_title)
+    assert kept and stats == _stats(export_agreeing=1)
+
+
+@pytest.mark.parametrize('export_title,export_sub,guide_title', [
+    # the number in brackets isn't the programme's own season: part of the name
+    ('Close Up (1)', 'T2 E59 "Halle Berry"', 'Close Up · Halle Berry'),
+    ('Behind the Music (2021)', 'T2 E8 "Ice T"', 'Behind the Music T2 E8 · Ice T'),
+    ('Toy Story (2)', None, 'Toy Story 3'),                                       # a film: no season at all
+    ('Serie (3)', 'E5 "x"', 'Serie E5 · x'),                                       # an episode, no season
+    # the bracketed season is read, but the episode clashes
+    ('Chicago Fire (13)', 'T13 E1 "x"', 'Chicago Fire T13 E2 · y'),
+    # names the two list differently still give way (the same-title rule)
+    ('Hudson & Rex (4)', 'T4 E12 "Hudson & Rex (4): Ep 412"', 'Hudson y Rex T4 E12 · Ningún hombre es una isla'),
+    ('Nitto ATP Finals 2026', None, 'DIRECTO Segundo Día: Alcaraz - Tiafoe T2026 · Nitto ATP Finals 2026'),
+], ids=['not-its-season', 'a-year', 'a-film', 'no-season', 'another-episode', 'other-spelling', 'live-event'])
+def test_a_bracketed_number_is_left_out_only_when_it_is_the_programmes_own_season(export_title, export_sub,
+                                                                                  guide_title):
+    kept, stats = _twin_case(export_title, export_sub, guide_title)
+    assert not kept and stats == _stats(export_yielded=1)
+
+
+def test_without_season_mark():
+    def p(title, sub=None):
+        return _prog(CUT, CUT + H, title, sub=sub)
+    case = p('Chicago Fire (13)', 'T13 E1 "x"')
+    assert rh._without_season_mark(case, rh._episode(case)) == {'title': 'Chicago Fire '}
+    assert rh._norm_title(rh._without_season_mark(case, (13, 1))) == 'chicago fire'
+    assert rh._without_season_mark(case, (12, 1)) is None
+    assert rh._without_season_mark(case, (None, 1)) is None
+    assert rh._without_season_mark(case, None) is None
+    for title in ('Chicago Fire', 'Chicago Fire (13) x', '(13)x', 'Chicago Fire (1234567)', 'Chicago Fire ()'):
+        assert rh._without_season_mark(p(title), (13, 1)) is None, title
+    assert rh._without_season_mark(p('(13)'), (13, None)) == {'title': ''}
+    assert rh._same_title(p('Chicago Fire T13 E1'), {'title': ''}) is False, 'an empty name matches nothing'
+
+
+def test_the_season_mark_reader_is_linear_on_a_long_title():
+    start = time.time()
+    for title in ('(' * 20000, '(1)' * 7000, '(1' + ' ' * 20000 + ')', '(1) ' * 5000 + 'x', ('(' + '1' * 7) * 2500):
+        rh._without_season_mark(_prog(CUT, CUT + H, title), (1, 1))
+    assert time.time() - start < 0.5
+
+
 def test_a_twin_on_another_channel_doesnt_count():
     fresh = [_prog(CUT, CUT + 3 * H, 'Guia'), _prog(CUT + H, CUT + 2 * H, 'Show', ch='C3@mp')]
     links = [_prog(CUT + H, CUT + 2 * H, 'Show', link='l1')]
@@ -346,6 +416,53 @@ def test_a_published_copy_listed_on_another_channel_loses_its_link():
     assert stats == _stats(history_yielded=1, uncovered=1)
 
 
+def test_a_published_copy_whose_link_the_export_lists_at_another_time_loses_it():
+    """An older file had the show at cut+1h30; this one moved it to cut+5h,
+    which the guide doesn't cover (kept: uncovered), and its own show at
+    cut+1h gave way. The copy at cut+1h30 is no listing of this file: kept,
+    its link would play the cut+5h recording there. It loses the link, and
+    the link is published once, at the export's time."""
+    fresh = [_prog(CUT, CUT + H, 'G0', desc='g0'), _prog(CUT + H, CUT + 2 * H, 'G1', desc='g1'),
+             _prog(CUT + 2 * H, CUT + 4 * H, 'G2', desc='g2')]
+    previous = [_prog(CUT + H + 30 * M, CUT + H + 50 * M, 'Serie', link='L', desc='old')]
+    links = [_prog(CUT + H, CUT + 2 * H, 'Otra', link='o'),                  # covered, no twin: gives way
+             _prog(CUT + 5 * H, CUT + 6 * H, 'Serie', link='L')]             # beyond the guide: kept
+    _, out_prev, stats = _filter(fresh, links, previous)
+    assert 'catchup-id' not in out_prev[0]
+    assert stats == _stats(export_yielded=1, history_yielded=1, uncovered=1)
+    out, _, guard, _ = _guarded(fresh, links, previous)
+    assert [(E(p['start']), p['catchup-id']) for p in out if p.get('catchup-id')] == [(CUT + 5 * H, 'L')]
+    assert [_title(p) for p in sorted(out, key=lambda p: E(p['start'])) if E(p['start']) < CUT + 4 * H] == \
+        ['G0', 'G1', 'G2']
+    assert _holes(out, CH, CUT, CUT + 4 * H) == [] and _overlaps(out, CH) == []
+
+
+def test_a_copy_of_a_listing_the_guard_leaves_alone_at_another_time_loses_its_link():
+    """A listing the guard leaves alone (started by the cut, or crossing the
+    guide's edge) backs a published copy's link only at that copy's own
+    time; a copy elsewhere inside the guide's coverage loses it."""
+    fresh = [_prog(CUT - H, CUT + 3 * H, 'Guia', desc='g')]
+    links = [_prog(CUT - 30 * M, CUT + 30 * M, 'On air', link='s'),            # started: kept
+             _prog(CUT + 2 * H + 30 * M, CUT + 3 * H + 30 * M, 'Edge', link='u')]   # crosses the edge: kept
+    previous = [_prog(CUT + H, CUT + 2 * H, 'On air', link='s', desc='old s'),       # the started show's link
+                _prog(CUT + 2 * H, CUT + 2 * H + 30 * M, 'Edge', link='u', desc='old u')]
+    _, out_prev, stats = _filter(fresh, links, previous)
+    assert [p.get('catchup-id') for p in out_prev] == [None, None]
+    assert stats == _stats(history_yielded=2, uncovered=1)
+
+
+def test_a_link_listed_twice_at_one_time_with_one_listing_giving_way_drops_the_copys_link():
+    """The export contradicts itself (one listing agrees, one doesn't): the
+    copy keeps nothing on that word. The agreeing listing stays a slot."""
+    fresh = [_prog(CUT, CUT + H, 'Antes'), _prog(CUT + H, CUT + 2 * H, 'Show', desc='g'),
+             _prog(CUT + 2 * H, CUT + 3 * H, 'Despues')]
+    links = [_prog(CUT + H, CUT + 2 * H, 'Show', link='L'), _prog(CUT + H, CUT + 2 * H, 'Other', link='L')]
+    previous = [_prog(CUT + H, CUT + 2 * H, 'Show', link='L', desc='old')]
+    out_links, out_prev, stats = _filter(fresh, links, previous)
+    assert out_links == [links[0]] and 'catchup-id' not in out_prev[0]
+    assert stats == _stats(export_agreeing=1, export_yielded=1, history_yielded=1)
+
+
 def test_a_published_copy_loses_only_its_link_an_aired_one_is_untouched():
     fresh = [_prog(CUT - 3 * H, CUT + 3 * H, 'Guia', desc='g')]
     aired = _prog(CUT - 2 * H, CUT - H, 'Aired', link='a1', desc='old aired', icon=[{'src': 'p'}])
@@ -415,20 +532,48 @@ def test_gap_fill_around_a_slot_in_an_interior_gap_of_the_guide():
     assert _holes(out, CH, CUT + H, CUT + 4 * H) == [] and _overlaps(out, CH) == []
 
 
-@pytest.mark.parametrize('fresh_span,link_span,hole', [
-    # the kept slot is on air at the cut; the guide show started before it
-    ((CUT - 2 * H, CUT + H), (CUT - 30 * M, CUT + H), (CUT - 2 * H, CUT - 30 * M)),
-    # the kept slot ends at the cut and the export has nothing after it
-    ((CUT - H, CUT + H), (CUT - 2 * H, CUT), (CUT, CUT + H)),
-], ids=['before-the-cut', 'at-the-cut'])
-def test_no_piece_starts_before_or_at_the_cut(fresh_span, link_span, hole):
+def test_no_piece_for_a_hole_that_ends_by_the_cut():
     """Up to the cut the guard changed nothing (the show on air counts as
-    aired): a hole that starts there is not the guard's, as today."""
-    fresh = [_prog(fresh_span[0], fresh_span[1], 'Long', desc='l')]
-    links = [_prog(link_span[0], link_span[1], 'Kept', link='k')]
+    aired): a hole that ends there is not the guard's, as today. The kept
+    slot is on air at the cut; the guide show started before it."""
+    fresh = [_prog(CUT - 2 * H, CUT + H, 'Long', desc='l')]
+    links = [_prog(CUT - 30 * M, CUT + H, 'Kept', link='k')]
     out, _, guard, filled = _guarded(fresh, links, [])
     assert filled == 0 and guard == NO_GUARD
-    assert _holes(out, CH, min(fresh_span[0], link_span[0]), CUT + H) == [hole]
+    assert _holes(out, CH, CUT - 2 * H, CUT + H) == [(CUT - 2 * H, CUT - 30 * M)]
+
+
+def test_a_hole_from_the_cut_is_filled():
+    """The kept slot ends at the cut and the export has nothing after it (the
+    end of its days): the rest of the guide's show is published from the
+    kept slot's stop, as for a hole after the cut."""
+    fresh = [_prog(CUT - H, CUT + H, 'Long', desc='l', offset_min=60)]
+    links = [_prog(CUT - 2 * H, CUT, 'Kept', link='k')]
+    out, _, guard, filled = _guarded(fresh, links, [])
+    assert filled == 1 and guard == NO_GUARD
+    piece = [p for p in out if _title(p) == 'Long']
+    assert [(p['start'], p['stop']) for p in piece] == [(links[0]['stop'], fresh[0]['stop'])]
+    assert _holes(out, CH, CUT - 2 * H, CUT + H) == []
+
+
+def test_a_hole_across_the_cut_is_filled_from_its_start():
+    """Movistar+'s own schedule has a 20-minute gap around the cut: A ends 10
+    minutes before it and is kept (started), B starts 10 minutes after it
+    and gives way (no twin). The guide's G overlaps A, so the merge drops
+    it; its only uncovered piece runs from A's stop past the cut. Without it
+    the channel had nothing from 10 minutes before the cut to G's stop,
+    where imports.69 left only the export's own 20-minute gap."""
+    links = [_prog(CUT - 90 * M, CUT - 10 * M, 'A', link='a'),
+             _prog(CUT + 10 * M, CUT + 70 * M, 'B', link='b')]
+    fresh = [_prog(CUT - H, CUT + H, 'G', desc='g', icon=[{'src': 'g'}]),
+             _prog(CUT + H, CUT + 3 * H, 'G2', desc='g2')]
+    out, _, guard, filled = _guarded(fresh, links, [])
+    assert guard == _stats(export_yielded=1) and filled == 1
+    assert _links(out) == ['a']
+    piece = [p for p in out if _title(p) == 'G']
+    assert [(p['start'], p['stop']) for p in piece] == [(links[0]['stop'], fresh[0]['stop'])]
+    assert 'catchup-id' not in piece[0] and _desc(piece[0]) == 'g' and piece[0]['icon'] == [{'src': 'g'}]
+    assert _holes(out, CH, CUT - 90 * M, CUT + 3 * H) == [] and _overlaps(out, CH) == []
 
 
 def test_fill_adds_nothing_when_nothing_was_dropped():
@@ -454,6 +599,16 @@ def test_fill_doesnt_add_two_pieces_for_one_time():
     assert [(E(p['start']), E(p['stop']), _title(p)) for p in out[1:]] == \
         [(CUT + H, CUT + 2 * H, 'Long'), (CUT + 2 * H, CUT + 3 * H, 'Overlapping')]
     assert _overlaps(out, CH) == []
+
+
+def test_a_fill_piece_never_carries_a_link():
+    """A guide source that has its own links: a clipped copy covers another
+    time than its programme, so it never carries one."""
+    kept = _prog(CUT - H, CUT + H, 'Kept', link='k')
+    fresh = [_prog(CUT - H, CUT + 2 * H, 'Long', link='guide-link', desc='l')]
+    out, filled = rh.fill_gaps([kept], fresh, DAYS, CUT)
+    assert filled == 1 and [p.get('catchup-id') for p in out] == ['k', None]
+    assert fresh[0]['catchup-id'] == 'guide-link', 'the input is not modified'
 
 
 # ================================================================ whole guarded merges
@@ -884,6 +1039,70 @@ def test_a_saved_guide_replaced_after_the_sync_read_it_keeps_the_guard_off(tmp_p
     assert not _guard_line(rig)
 
 
+RETRY_LINE = ('syncAll, [mp] replay links file not read this sync -- the links already in the guide stay '
+              'and the stale-export guard waits for the next read')
+
+
+@pytest.mark.parametrize('how', ['changed-while-reading', 'still-being-written', 'read-failed'])
+def test_a_read_to_retry_keeps_the_links_already_in_the_guide(tmp_path, monkeypatch, how):
+    """The stored file time is 40 h old and this sync gets no usable read --
+    Movistar+ is writing its new file while it is read, the new file is
+    still cut off, or the read raised. With no listing to judge by, the
+    guard would drop every covered upcoming link and switch replay off on
+    the channel (S9) until the next sync, just as the new file arrives. It
+    waits for the next read: the links already in the guide stay, as before
+    imports.70."""
+    rig = sr.make_rig(tmp_path, monkeypatch)
+    n, H = rig.now, sr.H
+    guide = [sr.show(n - 2 * H, n - H, 'Antes', 'g antes'),
+             sr.show(n - H, n + H, 'On Air', 'g on air'),
+             sr.show(n + H, n + 2 * H, 'Show A', 'g a'),
+             sr.show(n + 2 * H, n + 3 * H, 'Show B', 'g b')]
+    previous = [sr.published_show(sr.C1, sr.show(s, e, t, d, link=k))
+                for (s, e, t, d, _, _), k in zip(guide[1:], ('L0', 'LA', 'LB'))]
+    if how == 'still-being-written':
+        rig.export.write_bytes(b'<?xml version="1.0" encoding="UTF-8"?><tv><programme start="2')    # mtime: now
+    else:
+        sr.write_export(rig, [sr.show(n - H, n + H, 'On Air', link='L0')], age_s=AGED)
+    if how == 'changed-while-reading':
+        real_fetch = Imports.fetchSource
+
+        def changing(self, url, *a, **k):
+            if url.endswith('epg.xml'):
+                return {'status': 0, 'content': None, 'etag': None, 'last_modified': None, 'mtime_ns': None,
+                        'transient': True, 'error': 'file changed while reading; will retry'}
+            return real_fetch(self, url, *a, **k)
+        monkeypatch.setattr(Imports, 'fetchSource', changing)
+    elif how == 'read-failed':
+        def boom(self, *a, **k):
+            raise RuntimeError('simulated')
+        monkeypatch.setattr(Imports, '_readLinks', boom)
+    cfg = sr.entry(rig, links_mtime_ns=str((n - AGED) * 10 ** 9))
+    run = sr.sync(rig, monkeypatch, cfg, guide=sr.guide_xml(guide), previous=previous)
+    assert _rows(run) == [(n - 2 * H, n - H, 'Antes', 'g antes', None),
+                          (n - H, n + H, 'On Air', 'g on air', 'L0'),
+                          (n + H, n + 2 * H, 'Show A', 'g a', 'LA'),
+                          (n + 2 * H, n + 3 * H, 'Show B', 'g b', 'LB')]
+    st = run.playlist.added
+    assert (st[sr.C1]['catchup'], st[sr.C1]['catchup-source']) == ('default', '{catchup-id}')
+    assert not _guard_line(rig)
+    assert [lvl for m, lvl in rig.lines if m == RETRY_LINE] == [xbmc.LOGINFO]
+    assert run.res['updated_cfg']['links_mtime_ns'] == str((n - AGED) * 10 ** 9), 'nothing recorded'
+
+
+def test_a_stable_read_of_a_missing_file_still_runs_the_guard(tmp_path, monkeypatch):
+    """Not a read to retry: the file is gone while its stored time is 40 h
+    old, so the guard runs with no listing (accepted, FORK_NOTES limits)."""
+    rig = sr.make_rig(tmp_path, monkeypatch)
+    n, H = rig.now, sr.H
+    guide = [sr.show(n - H, n + H, 'On Air', 'g on air'), sr.show(n + H, n + 2 * H, 'Show A', 'g a')]
+    previous = [sr.published_show(sr.C1, sr.show(n + H, n + 2 * H, 'Show A', 'g a', link='LA'))]
+    cfg = sr.entry(rig, links_mtime_ns=str((n - AGED) * 10 ** 9))
+    run = sr.sync(rig, monkeypatch, cfg, guide=sr.guide_xml(guide), previous=previous)
+    assert _at(run, n + H) == (n + H, n + 2 * H, 'Show A', 'g a', None)
+    assert _guard_line(rig) and not sr.logged(rig, RETRY_LINE)
+
+
 # ================================================================ the "went stale" trigger
 
 
@@ -949,6 +1168,15 @@ def test_a_failing_import_is_left_to_the_backoff_and_the_abandon_check(tmp_path,
                      failed_since=now - 2 * sr.H, last_sync_at=now - synced_ago)
     assert run.res['status'] == status
     assert not sr.logged(rig, STALE_LINE)
+
+
+def test_an_import_whose_last_read_was_an_empty_playlist_is_still_forced(tmp_path, monkeypatch):
+    """Only a failed or switched-off import is left out: a 'warning' (an
+    empty playlist read, channels kept) has no backoff, so the hourly sync
+    while the file is stale must still come."""
+    rig, run = _gate(tmp_path, monkeypatch, AGED, last_status='warning', last_sync_at=int(time.time()) - 2 * sr.H)
+    assert run.res['status'] == 'unchanged', 'synced, not skipped'
+    assert [lvl for m, lvl in rig.lines if m == STALE_LINE] == [xbmc.LOGINFO]
 
 
 def _spy(monkeypatch, answer):
@@ -1027,6 +1255,35 @@ def test_links_went_stale_uses_the_stored_time_when_the_file_is_missing(tmp_path
     without = dict(cfg)
     without.pop('links_mtime_ns', None)
     assert imp._linksWentStale(without, recs, now=n) is False
+
+
+def test_links_went_stale_ignores_a_stored_time_without_link_replay(tmp_path, monkeypatch):
+    """An import that stopped using per-show links (Movistar+ changed how it
+    declares replay, or a catch-up row changed) keeps an old stored
+    links_mtime_ns that nothing refreshes any more: it must not be synced
+    every hour for ever."""
+    rig, imp, recs = _unit(tmp_path, monkeypatch, export_age=40 * sr.H)
+    n = rig.now
+    cfg = sr.entry(rig, last_sync_at=n - 2 * sr.H, links_mtime_ns=str((n - 40 * sr.H) * 10 ** 9))
+    assert imp._linksWentStale(cfg, recs, now=n) is True
+    assert imp._linksWentStale(cfg, sr.records(link=False), now=n) is False
+    assert imp._linksWentStale(dict(cfg, m3u_path='', m3u_url='https://example.invalid/list.m3u'),
+                               recs, now=n) is False
+    rig.export.unlink()
+    assert imp._linksWentStale(cfg, recs, now=n) is True, 'the stored time, as above'
+    assert imp._linksWentStale(cfg, sr.records(link=False), now=n) is False
+
+
+def test_an_import_without_link_replay_is_not_forced_by_its_old_stored_time(tmp_path, monkeypatch):
+    rig = sr.make_rig(tmp_path, monkeypatch)
+    monkeypatch.setattr(Imports, '_guideNeedsSelfHeal', lambda self, cfg, chans: False)
+    n = rig.now
+    ns = sr.write_export(rig, [sr.show(n, n + sr.H, 'x', link='l')], age_s=40 * sr.H)
+    cfg = sr.entry(rig, last_sync_at=n - 2 * sr.H, links_mtime_ns=str(ns))
+    run = sr.sync(rig, monkeypatch, cfg, guide=sr.guide_xml([sr.show(n, n + sr.H, 'x')]),
+                  chans=sr.records(link=False))
+    assert run.res['status'] == 'skipped'
+    assert not sr.logged(rig, STALE_LINE)
 
 
 def test_links_went_stale_never_uses_xbmcvfs_stat(tmp_path, monkeypatch):
@@ -1108,9 +1365,11 @@ def test_stale_cut_unit(tmp_path, monkeypatch):
 # ================================================================ the message from 36 h
 
 
-@pytest.mark.parametrize('hours,text', [(36, '36 hours'), (37, '37 hours'), (47.9, '47 hours'), (48.1, '2 days'),
-                                        (72.5, '3 days'), (240, '10 days')])
+@pytest.mark.parametrize('hours,text', [(36, '36 hours'), (37, '37 hours'), (47.9, '47 hours'), (48, '2 days'),
+                                        (48.1, '2 days'), (66, '2 days'), (71.9, '2 days'), (72.5, '3 days'),
+                                        (240, '10 days')])
 def test_age_text(hours, text):
+    """Whole units, rounded down: 66 h is '2 days', not '3 days'."""
     assert imports_mod._ageText(hours * 3600) == text
 
 
@@ -1130,6 +1389,23 @@ def test_the_message_from_36_hours(tmp_path, monkeypatch, hours, text):
     assert out['pairs']
     assert out['warning'] == (None if text is None else STALE_MSG % text)
     assert cfg['links_mtime_ns'] == str(os.stat(str(rig.export)).st_mtime_ns)
+
+
+def test_the_message_reads_a_file_time_given_as_text(tmp_path, monkeypatch):
+    """stale_after accepts the decimal text links_mtime_ns is stored as, so
+    the age must too: a file time handed over as text gives the message, not
+    an error that would leave the sync without links."""
+    rig = sr.make_rig(tmp_path, monkeypatch)
+    sr.write_export(rig, [sr.show(rig.now, rig.now + sr.H, 'x', link='l')], age_s=40 * sr.H)
+    real_fetch = Imports.fetchSource
+
+    def as_text(self, url, *a, **k):
+        out = real_fetch(self, url, *a, **k)
+        out['mtime_ns'] = str(out['mtime_ns'])
+        return out
+    monkeypatch.setattr(Imports, 'fetchSource', as_text)
+    out, _ = _read(rig)
+    assert out['pairs'] and out['warning'] == STALE_MSG % '40 hours'
 
 
 def test_an_old_file_whose_shows_all_ended_says_out_of_date(tmp_path, monkeypatch):

@@ -133,6 +133,11 @@ _NAME_SEP = ' \u00b7 '     # a spaced middle dot (U+00B7), written as an escape
 # in 'T4 E103' or 'T10 E224' on its own, _EPISODE_TAIL's \S is the season's
 # last digit, and the episode number alone would be read.
 _SEASON_TAG = re.compile(r'^T\d{1,6}(?:/\d{1,6})?$')
+# imports.70 (c): Movistar+'s export writes some series' season after the name
+# in brackets, 'Chicago Fire (13)' with the sub-title 'T13 E1 "..."', where the
+# guide writes 'Chicago Fire T13 E1 · ...'. Read on a right-stripped title;
+# one way to match: linear time (_without_season_mark).
+_SEASON_MARK = re.compile(r'\((\d{1,6})\)$')
 
 _BY_START = itemgetter(0)
 _BY_SPAN  = itemgetter(0, 1)
@@ -585,6 +590,21 @@ def _inside(covered, span):
     return i >= 0 and stretches[i][1] >= span[1]
 
 
+def _without_season_mark(programme, tags):
+    """imports.70 (c): an export programme's title without the season the
+    export writes after the name in brackets ('Chicago Fire (13)' ->
+    'Chicago Fire'), as a programme for _same_title, when that number is the
+    season of the programme's own tag (`tags`: its _episode, here the
+    sub-title's 'T13 E1'). None when the title has no such mark. A number
+    that isn't its own season (a year, 'Behind the Music (2021)'; 'Close Up
+    (1)' in season 2; no season to check it against) stays part of the name."""
+    text = _title_text(programme).rstrip()
+    m = _SEASON_MARK.search(text)
+    if m is None or not tags or tags[0] is None or tags[0] != int(m.group(1)):
+        return None
+    return {'title': text[:m.start()]}
+
+
 def stale_export_filter(fresh, links, previous, days_by_channel, cut):
     """imports.70 (c): merge_replay_guide's inputs with the schedule of a stale
     exporter file taken out where the guide source covers it. Returns
@@ -602,19 +622,24 @@ def stale_export_filter(fresh, links, previous, days_by_channel, cut):
     entries without a link or a usable time.
 
     An export programme (`links`) stays when a guide-source programme agrees
-    with it: the same channel, start and stop, the same title (_same_title)
-    and an episode tag that doesn't contradict (_episodes_agree is not
-    False). Otherwise it is left out.
+    with it: the same channel, start and stop, the same title (_same_title,
+    also with the export's bracketed season left out of its name when it is
+    the programme's own season: _without_season_mark, so 'Chicago Fire (13)'
+    with 'T13 E1' is the guide's 'Chicago Fire T13 E1 · ...') and an episode
+    tag that doesn't contradict (_episodes_agree is not False). Otherwise it
+    is left out.
 
     An already-published programme (`previous`) is judged by THIS export's
     listing of its link, never by its own title or tag: rule 1 gave it the
     guide source's details when it was published, so comparing it with the
     guide source would always agree. It keeps its link only when the export
-    lists that link (same channel) and that listing stayed. Otherwise --
-    the listing gave way, or the export no longer lists the link -- it stays
-    in `previous` as a copy without its replay link: still a details source
-    for rule 2, no longer a time slot. The guide source's programmes then
-    fill that time, without links.
+    lists that link on the same channel at the copy's own start and stop,
+    and that listing stayed. Otherwise -- the listing gave way, the export
+    lists the link at another time (it moved the show: the link would play
+    that other time's recording), or no longer lists it -- it stays in
+    `previous` as a copy without its replay link: still a details source for
+    rule 2, no longer a time slot. The guide source's programmes then fill
+    that time, without links.
 
     `cut` is fixed for a given file, so a show's outcome doesn't change when
     it airs.
@@ -644,16 +669,20 @@ def stale_export_filter(fresh, links, previous, days_by_channel, cut):
             return span, 'uncovered'
         return span, 'covered'
 
+    # kept / gave_way: (channel, link, span) of the export's listings, so a
+    # published copy is judged by the listing at its own time.
     out_links, kept, gave_way = [], set(), set()
     for p in links or ():
         if p.get('channel') in days_by_channel and _has_link(p):
             span, verdict = _judged(p)
-            key = (p.get('channel'), p['catchup-id'])
+            key = (p.get('channel'), p['catchup-id'], span)
             if verdict == 'covered':
                 tags = _episode(p)
+                bare = _without_season_mark(p, tags)
                 verdict = 'yielded'
                 for twin in twins.get((p.get('channel'), span[0], span[1]), ()):
-                    if _same_title(twin, p) and _episodes_agree(tags, _episode(twin)) is not False:
+                    named = _same_title(twin, p) or (bare is not None and _same_title(twin, bare))
+                    if named and _episodes_agree(tags, _episode(twin)) is not False:
                         verdict = 'agreeing'
                         break
             if verdict == 'yielded':
@@ -669,11 +698,11 @@ def stale_export_filter(fresh, links, previous, days_by_channel, cut):
     out_previous = []
     for p in previous or ():
         if p.get('channel') in days_by_channel and _has_link(p):
-            verdict = _judged(p)[1]
+            span, verdict = _judged(p)
             if verdict == 'uncovered':
                 stats['uncovered'] += 1
             elif verdict == 'covered':
-                key = (p.get('channel'), p['catchup-id'])
+                key = (p.get('channel'), p['catchup-id'], span)
                 if key in kept and key not in gave_way:
                     stats['history_listed'] += 1
                 else:
@@ -691,9 +720,14 @@ def fill_gaps(programmes, fresh, channel_ids, cut):
     cover) while the slots next to that one gave way -- is published as a
     copy of that programme without a link, for that time only. Each copy's
     start and stop are existing time texts (its neighbour's stop or start,
-    or its own), so no time is computed. Only time after `cut` is filled
-    (not_started): before it the guard changed nothing. Returns (programmes
-    plus the copies, number of copies); the inputs are not modified."""
+    or its own), so no time is computed. Only a piece that runs past `cut`
+    is added (not_started on its stop): a hole that ends by then is not the
+    guard's, since before the cut it changed nothing. A piece that starts
+    before the cut is added whole -- where the export's own schedule has a
+    gap at the cut, so the kept slot ends before it, the time after the cut
+    would otherwise stay empty -- and no time is computed to clip it.
+    Returns (programmes plus the copies, number of copies); the inputs are
+    not modified."""
     out = list(programmes or ())
     published = set(id(p) for p in out)
     spans = {}
@@ -726,7 +760,7 @@ def fill_gaps(programmes, fresh, channel_ids, cut):
         if at < stop:
             pieces.append((at, stop, at_text, p['stop']))
         for piece in pieces:
-            if not_started(piece[0], cut):
+            if not_started(piece[1], cut):
                 part = {k: v for k, v in p.items() if k != 'catchup-id'}
                 part['start'], part['stop'] = piece[2], piece[3]
                 out.append(part)

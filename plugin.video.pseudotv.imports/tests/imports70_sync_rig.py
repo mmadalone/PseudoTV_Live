@@ -219,8 +219,8 @@ def sync(rig, monkeypatch, cfg, guide=None, guide_answer=None, previous=(), chan
     `guide_answer` (a fetchSource result) when given; the playlist answers
     "unchanged"; the export is read for real. `previous`: the guide data's
     programmes when the sync starts. Returns a namespace: res (the import's
-    result), results, guide (the guide data after the sync), playlist,
-    calls ((address, etag, last_modified) of each fetch) and store."""
+    result), guide (the guide data after the sync), playlist and calls
+    ((address, etag, last_modified) of each fetch)."""
     real_fetch = Imports.fetchSource
     calls = []
 
@@ -240,8 +240,7 @@ def sync(rig, monkeypatch, cfg, guide=None, guide_answer=None, previous=(), chan
     store = Store([cfg], records() if chans is None else chans)
     data, playlist = Guide(previous), Playlist()
     results = Imports(channels=store, m3u=playlist, xmltv=data).syncAll(force_scope=force_scope)
-    return SimpleNamespace(res=results.get(IID), results=results, guide=data, playlist=playlist,
-                           calls=calls, store=store)
+    return SimpleNamespace(res=results.get(IID), guide=data, playlist=playlist, calls=calls)
 
 
 def on(run, channel):

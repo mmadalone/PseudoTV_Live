@@ -58,6 +58,18 @@ def test_an_empty_playlist_leaves_the_failure_counters_alone(request):
     assert run.res['two']['status'] == 'ok' and entry(rig, 'two')['fail_count'] == 0
 
 
+def test_an_empty_playlist_alone_is_no_disk_change(request):
+    """Like 'failed', a 'warning' changes nothing on disk: a cycle whose only
+    import read an empty playlist signals no PVR refresh (imports.22)."""
+    rig = request.getfixturevalue('env')
+    write(rig, [cfg('one')], [custom(), rec('A1', 'one', 11), rec('A2', 'one', 12)])
+    rig.source.answer(P1, EMPTY)
+    run = sync(rig)
+    assert run.res['one']['status'] == 'warning'
+    assert 'chkPVRRefresh' not in rig.timers
+    assert logged(rig, 'syncAll, no disk change this cycle', xbmc.LOGINFO)
+
+
 def test_an_empty_playlist_during_a_failure_run_keeps_its_counters(request):
     """The run's start and count stay as they were: neither raised nor reset."""
     rig = _setup(request, **FAILING)

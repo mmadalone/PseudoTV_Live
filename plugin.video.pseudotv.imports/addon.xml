@@ -82,7 +82,7 @@
         <forum>https://forum.kodi.tv/showthread.php?tid=355549</forum>
         <disclaimer lang="en_GB">BETA PROJECT; SUBJECT TO BUGS</disclaimer>
         <news>v0.8.0+imports.70
-- Fixed: once Movistar+'s own guide file is 36 hours old, upcoming Movistar+ shows follow your guide's names and times where it lists them, and keep replay only where both list them the same; Movistar+ then syncs every hour until it writes a new file. The red dashboard message now shows from 36 hours (was 4 days).
+- Fixed: once Movistar+'s own guide file is 36 hours old, upcoming Movistar+ shows follow your guide's names and times where it lists them, and keep replay only where both list them the same; Movistar+ then syncs at each automatic sync, at most hourly, until it writes a new file. The red dashboard message now shows from 36 hours (was 4 days).
 - Fixed: episode numbers in your guide's titles ("Valle Salvaje T4 E103") are read again. After a guide address change, upcoming shows take the new guide's descriptions. A playlist that comes back empty no longer counts as a failed sync.
 v0.8.0+imports.69
 - Fixed: saving an import in the web dashboard no longer makes it "never synced". It keeps its last sync time, its error and retry state (unless you change its address) and its list of deleted channels, and a sync that is running can't undo the Save. A Save that changes an import starts its sync right away (after any sync or channel build that is running); a Save that changes nothing does nothing.

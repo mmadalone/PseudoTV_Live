@@ -282,12 +282,15 @@ LINKS_MSG_DECLARED   = ("%(name)s changed how it declares replay; replay may mis
 # retried at the next cycle instead of being recorded as damaged.
 LINKS_SETTLE_SECS = 120
 # imports.70 (c), the user's choice of 2026-11-14: while the replay-links file
-# is stale (replay_helpers.stale_after), a link-replay import is synced on
-# every hourly cycle (Imports._linksWentStale), so each channel's replay
-# on/off (S9) follows the show on air within the hour. Due again once its last
-# sync is at least this old: under an hour, so a cycle that starts a little
-# early still syncs, and a shorter auto-sync interval doesn't sync it more
-# often than about hourly.
+# is stale (replay_helpers.stale_after), a link-replay import is synced at
+# every imports cycle once its last sync is at least this old
+# (Imports._linksWentStale), so each channel's replay on/off (S9) follows the
+# show on air within about an hour. Under an hour, so a cycle that starts a
+# little early still syncs, and a shorter auto-sync interval
+# (Imports_Sync_Interval_Minutes, 5 by default) doesn't sync it more often
+# than about hourly. The check runs only when a cycle runs: with a longer
+# interval at each cycle (every 2, 4 or 8 hours), and with automatic syncs
+# off (0) only when a dashboard Refresh or Save starts one.
 LINKS_STALE_RESYNC_SECS = 50 * 60
 
 
@@ -1104,7 +1107,10 @@ class Imports(object):
         Nothing is stored and nothing shown (the trigger retries) for a read
         during which the file changed, and for a stable read that can't be
         parsed of a file modified less than LINKS_SETTLE_SECS before: the
-        exporter may still be writing it.
+        exporter may still be writing it. imports.70: such a read also
+        returns 'retry': True, so that sync doesn't run the stale-export
+        guard on the stored (old) file time with no listing to judge by
+        (_staleCut): the links already in the guide stay.
         """
         addon_id, spec, path = exporter
         name = spec.get('name') or addon_id
@@ -1113,6 +1119,7 @@ class Imports(object):
         if fetched.get('transient'):
             self.log('[%s] syncAll, replay links file changed while reading; will retry' % (import_id,),
                      level=xbmc.LOGINFO)
+            out['retry'] = True
             return out
         mtime_ns = fetched.get('mtime_ns')
         reason = detail = None
@@ -1137,6 +1144,7 @@ class Imports(object):
             if 0 <= age_s < LINKS_SETTLE_SECS:
                 self.log('[%s] syncAll, replay links file %s, modified %.0fs ago -- may still be being written; will retry'
                          % (import_id, reason, age_s), level=xbmc.LOGINFO)
+                out['retry'] = True
                 return out
         if isinstance(mtime_ns, int):
             updated_cfg['links_mtime_ns'] = str(mtime_ns)
@@ -1162,9 +1170,10 @@ class Imports(object):
             out['warning'] = LINKS_MSG_OUTDATED % {'name': name}
         elif replay_helpers.stale_after(mtime_ns, now) is not None:
             # imports.70 (c): from 36 h (before: 4 days), when the stale-export
-            # guard takes over the upcoming shows. stale_after returns None
-            # for an unknown time, so mtime_ns is a number here.
-            out['warning'] = LINKS_MSG_STALE % {'name': name, 'age': _ageText(now - mtime_ns / 1e9)}
+            # guard takes over the upcoming shows. stale_after parsed mtime_ns
+            # as a whole number (an int, or the decimal text links_mtime_ns is
+            # stored as), so int() is safe here.
+            out['warning'] = LINKS_MSG_STALE % {'name': name, 'age': _ageText(now - int(mtime_ns) / 1e9)}
         self.log('[%s] syncAll, replay links file read: %d links%s'
                  % (import_id, len(stops), (' (%s)' % out['warning']) if out['warning'] else ''),
                  level=xbmc.LOGINFO if out['warning'] else xbmc.LOGDEBUG)
@@ -1366,12 +1375,13 @@ class Imports(object):
             # imports.70 (c): the replay-links file is too old to trust
             # (replay_helpers.LINKS_STALE_AFTER_S): sync when it became stale
             # after this import's last sync, so upcoming shows follow the guide
-            # within the hour instead of after refresh_interval_min, and again
-            # on every hourly cycle while it stays stale (LINKS_STALE_RESYNC_SECS,
-            # the user's choice of 2026-11-14), so each channel's replay on/off
-            # (S9) follows the show on air. Same force pattern as S17: never for
-            # a switched-off or failing import, so the abandon check and the
-            # failure backoff below still rule those.
+            # at the next imports cycle instead of after refresh_interval_min,
+            # and again at every cycle while it stays stale once the last sync
+            # is LINKS_STALE_RESYNC_SECS old (the user's choice of 2026-11-14:
+            # about hourly with a cycle of an hour or less), so each channel's
+            # replay on/off (S9) follows the show on air. Same force pattern as
+            # S17: never for a switched-off or failing import, so the abandon
+            # check and the failure backoff below still rule those.
             if (not force_active and import_cfg.get('enabled', True)
                     and import_cfg.get('last_status') != 'failed'
                     and self._linksWentStale(import_cfg, existing_channels)):
@@ -1724,8 +1734,10 @@ class Imports(object):
             except Exception as e:
                 # Still merge, with no new links: the merge is what keeps the
                 # linked history (the fresh path's prune would drop it).
+                # imports.70: 'retry' -- no listing this sync, so no
+                # stale-export guard either (_staleCut).
                 self.log('[%s] syncAll, replay links read failed: %s' % (iid, e), level=xbmc.LOGERROR)
-                res['links'] = {'pairs': [], 'warning': None}
+                res['links'] = {'pairs': [], 'warning': None, 'retry': True}
             warning = res['links'].get('warning') or self._declaredReplayWarning(exporter, link_records)
             # Shown only while there is no other error to show; last_status
             # and the failure counters stay as they are (a 'warning' status
@@ -3363,7 +3375,8 @@ class Imports(object):
         (replay_helpers.stale_after): the file became stale after the
         import's last sync (last_sync_at before the cut), or it is still
         stale and that sync is at least LINKS_STALE_RESYNC_SECS old -- the
-        hourly sync while stale. The file's own mtime (_linksFileState),
+        sync while stale, at each imports cycle (about hourly with a cycle of
+        an hour or less). The file's own mtime (_linksFileState),
         else the stored links_mtime_ns. A missing time, any error: False.
 
         The caller (syncAll's gate) never asks for a switched-off or failing
@@ -3393,7 +3406,17 @@ class Imports(object):
         the stored one), or None when the guard stays off -- the file is younger
         than LINKS_STALE_AFTER_S or its time is unknown, or this sync's guide is
         the saved copy (its download failed) and that copy, as syncOne found it
-        before reading it (res['epg_cache_mtime']), isn't newer than the file."""
+        before reading it (res['epg_cache_mtime']), isn't newer than the file.
+        Off too when this sync's read is to be retried (res['links']['retry']:
+        the file changed while it was read, a file too young to parse yet, or
+        the read failed): with no listing to judge by, every covered upcoming
+        link would be dropped, and that happens just when Movistar+ writes
+        its new file. The links already in the guide stay until the next
+        read, as before imports.70."""
+        if (res.get('links') or {}).get('retry'):
+            self.log('syncAll, [%s] replay links file not read this sync -- the links already in the guide stay '
+                     'and the stale-export guard waits for the next read' % (iid,), level=xbmc.LOGINFO)
+            return None
         cut = replay_helpers.stale_after(res['updated_cfg'].get('links_mtime_ns'), now)
         if cut is None or not res.get('epg_error'):
             return cut

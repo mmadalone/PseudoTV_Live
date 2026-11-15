@@ -392,12 +392,12 @@ FLAG_LINE = '[g1] syncOne, new guide address -- upcoming shows take its details'
 KEYS = {'old': source_key(G_OLD), 'new': source_key(G_NEW), None: None}
 
 
-def _syncone(tmp_path, monkeypatch, answer, stored=None, saved=None, saved_mtime=None, imp=None):
+def _syncone(tmp_path, monkeypatch, answer, stored=None, saved=None, saved_mtime=None, imp=None, **over):
     """syncOne of a guide-only import 'g1' (guide address G_NEW, download
     markers stored) whose epg_source_key names `stored` ('old', 'new' or
     None: an entry from before imports.69). The guide answers `answer`;
-    `saved` is a saved guide in CACHE_LOC (epg_g1.xml) with `saved_mtime`.
-    Returns (result, log lines, fetches)."""
+    `saved` is a saved guide in CACHE_LOC (epg_g1.xml) with `saved_mtime`;
+    `over`: other entry fields. Returns (result, log lines, fetches)."""
     monkeypatch.setattr('imports.CACHE_LOC', str(tmp_path))
     lines, calls = [], []
     monkeypatch.setattr(Imports, 'log', lambda self, msg, level=None: lines.append((msg, level)))
@@ -417,6 +417,7 @@ def _syncone(tmp_path, monkeypatch, answer, stored=None, saved=None, saved_mtime
     cfg = {'id': 'g1', 'enabled': True, 'epg_url': G_NEW, 'epg_etag': '"e"', 'epg_last_modified': 'lm'}
     if stored is not None:
         cfg['epg_source_key'] = KEYS[stored]
+    cfg.update(over)
     result = imp.syncOne(cfg, existing_channels=[])
     assert 'epg_source_changed' not in result['updated_cfg'] and 'epg_cache_mtime' not in result['updated_cfg']
     return result, lines, calls
@@ -439,6 +440,17 @@ def test_a_download_from_a_new_guide_address_is_flagged(tmp_path, monkeypatch):
     assert calls == [(G_NEW, None, None)], 'imports.69: no markers to another address'
     assert result['updated_cfg']['epg_source_key'] == KEYS['new'] and result['epg_cache_written'] is True
     assert 'epg_cache_mtime' not in result, 'no fallback, no saved-guide time'
+
+
+def test_a_download_from_a_new_guide_file_path_is_flagged(tmp_path, monkeypatch):
+    """A guide given as a file path (epg_path, no epg_url): the key compared
+    is imports.69's epg_key, made from the url or else the path."""
+    old_path, new_path = str(tmp_path / 'old_guide.xml'), str(tmp_path / 'new_guide.xml')
+    result, lines, calls = _syncone(tmp_path, monkeypatch, OK200, epg_url='', epg_path=new_path,
+                                    epg_source_key=source_key(old_path))
+    assert _flagged(result, lines) is True
+    assert calls == [(new_path, None, None)]
+    assert result['updated_cfg']['epg_source_key'] == source_key(new_path)
 
 
 @pytest.mark.parametrize('stored', [None, 'new'], ids=['legacy', 'same-address'])
@@ -533,19 +545,26 @@ def _descs(run):
 
 
 def _redescribe_run(tmp_path, monkeypatch, stored, guide=None):
+    """One real sync of the import with the guide address NEW_GUIDE, download
+    markers stored, and epg_source_key naming `stored`."""
     rig = sr.make_rig(tmp_path, monkeypatch)
     c1, c2, previous, new_guide = _news(rig.now)
     sr.write_export(rig, c1, c2, age_s=sr.H)
-    cfg = sr.entry(rig, epg_url=sr.NEW_GUIDE)
+    cfg = sr.entry(rig, epg_url=sr.NEW_GUIDE, epg_etag='"e"', epg_last_modified='lm')
     if stored is not None:
         cfg['epg_source_key'] = KEYS[stored]
     run = sr.sync(rig, monkeypatch, cfg, guide=guide or sr.guide_xml(new_guide), previous=previous)
     return rig, run
 
 
+def _guide_fetches(run):
+    return [c for c in run.calls if c[0] == sr.NEW_GUIDE]
+
+
 def test_a_new_guide_address_re_describes_the_upcoming_show(tmp_path, monkeypatch):
     rig, run = _redescribe_run(tmp_path, monkeypatch, 'old')
     assert run.res['epg_source_changed'] is True
+    assert _guide_fetches(run) == [(sr.NEW_GUIDE, None, None)], 'the old address\'s markers are not sent'
     assert _descs(run) == {'u1': 'new uno',          # aired: rule 1 (same second), as today
                            'u2': 'old dos',          # on air: started, today's rule 2
                            'u3': 'new tres',         # upcoming: the new guide's show 5 minutes later
@@ -560,6 +579,7 @@ def test_a_new_guide_address_re_describes_the_upcoming_show(tmp_path, monkeypatc
 def test_no_re_describe_without_an_address_change(tmp_path, monkeypatch, stored):
     rig, run = _redescribe_run(tmp_path, monkeypatch, stored)
     assert 'epg_source_changed' not in run.res
+    assert _guide_fetches(run) == [(sr.NEW_GUIDE, '"e"', 'lm')], 'markers sent: the same address, or legacy'
     assert _descs(run) == {'u1': 'new uno', 'u2': 'old dos', 'u3': 'old tres', 'sq': 'old ardilla'}
     assert sr.logged(rig, 'redescribe-slots=0') and not sr.logged(rig, 'redescribe-slots=1')
 
