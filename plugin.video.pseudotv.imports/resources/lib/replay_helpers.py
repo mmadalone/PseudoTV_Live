@@ -133,6 +133,10 @@ _NAME_SEP = ' \u00b7 '     # a spaced middle dot (U+00B7), written as an escape
 # in 'T4 E103' or 'T10 E224' on its own, _EPISODE_TAIL's \S is the season's
 # last digit, and the episode number alone would be read.
 _SEASON_TAG = re.compile(r'^T\d{1,6}(?:/\d{1,6})?$')
+# imports.70 (c): a guide title whose show part is ONLY a tag ('T26/27 E9 ·
+# Eurofighters'). _plain_episode reads no tag there (no show name), but the
+# stale-export guard still checks its numbers for a clash (_twin_agrees).
+_BARE_TAG = re.compile(r'^T(\d{1,6})(?:/\d{1,6})?(?:\s+E(\d{1,6}))?$')
 # imports.70 (c): Movistar+'s export writes some series' season after the name
 # in brackets, 'Chicago Fire (13)' with the sub-title 'T13 E1 "..."', where the
 # guide writes 'Chicago Fire T13 E1 · ...'. Read on a right-stripped title;
@@ -633,10 +637,18 @@ def _twin_agrees(twin, programme, tags, bare):
         (4)' with 'T4 E12' and 'Hudson y Rex T4 E12'); an episode number
         without a season on either side isn't enough;
       - rule B (the same day): the guide title's part after its first spaced
-        middle dot (_name_parts) has the export's title (_same_title): a live
-        event the guide names by the match, 'DIRECTO Primer Día: Zverev -
-        Jódar T2026 · Nitto ATP Finals 2026' and 'Nitto ATP Finals 2026'."""
+        middle dot (_name_parts) IS the export's title, equal once normalised
+        (case, accents and punctuation ignored; not merely one starting with
+        the other, as the user's rule says 'equals'): a live event the guide
+        names by the match, 'DIRECTO Primer Día: Zverev - Jódar T2026 · Nitto
+        ATP Finals 2026' and 'Nitto ATP Finals 2026'.
+    A guide show part that is only a tag ('T26/27 E9 · Eurofighters', which
+    _episode reads as no tag) still refuses a clashing season or episode."""
     twin_tags = _episode(twin)
+    if twin_tags is None:
+        bare_tag = _BARE_TAG.match(' '.join(_name_parts(twin)[0].split()))
+        if bare_tag and _episodes_agree(tags, (_number(bare_tag.group(1)), _number(bare_tag.group(2)))) is False:
+            return False
     agree = _episodes_agree(tags, twin_tags)
     if agree is False:
         return False
@@ -645,7 +657,10 @@ def _twin_agrees(twin, programme, tags, bare):
     if _same_title(twin, programme) or (bare is not None and _same_title(twin, bare)):
         return True
     rest = _name_parts(twin)[1]
-    return rest is not None and _same_title({'title': rest}, programme)
+    if rest is None:
+        return False
+    after_dot, exported = _norm_title({'title': rest}), _norm_title(programme)
+    return bool(after_dot) and after_dot == exported
 
 
 def stale_export_filter(fresh, links, previous, days_by_channel, cut):

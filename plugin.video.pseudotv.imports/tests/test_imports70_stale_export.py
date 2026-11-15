@@ -344,9 +344,9 @@ def test_rule_a_needs_a_season_and_an_episode_on_both_sides_all_equal(export_tit
 @pytest.mark.parametrize('export_title,export_sub,guide_title', [
     ('Nitto ATP Finals 2026', None, 'DIRECTO Segundo Día: Alcaraz - Tiafoe T2026 · Nitto ATP Finals 2026'),
     ('Euroliga', 'T2025 E10', 'DIRECTO Real Madrid - Baskonia · Euroliga'),            # a tag on one side only
-    ('Liga Endesa', None, 'Unicaja - Joventut · Liga Endesa: Jornada 8'),              # the guide's part goes on
-    ('Nitto ATP Finals 2026', None, 'DIRECTO Zverev - Jódar T2026 · Nitto ATP Finals'),  # the export's goes on
-], ids=['atp-finals', 'tag-on-one-side', 'longer-in-the-guide', 'longer-in-the-export'])
+    ('NITTO ATP Finals, 2026', None, 'DIRECTO Zverev - Jódar · Nitto ATP Finals 2026'),  # case and punctuation
+    ('Eurofighters', 'T26/27 "Episodio 9"', 'T26/27 E9 · Eurofighters'),               # a bare tag, the same numbers
+], ids=['atp-finals', 'tag-on-one-side', 'case-and-punctuation', 'bare-tag-same-numbers'])
 def test_rule_b_the_exports_title_after_the_guide_titles_dot_agrees(export_title, export_sub, guide_title):
     kept, stats = _twin_case(export_title, export_sub, guide_title)
     assert kept and stats == _stats(export_agreeing=1)
@@ -360,8 +360,16 @@ def test_rule_b_the_exports_title_after_the_guide_titles_dot_agrees(export_title
     ('Nitto ATP Finals 2026', None, 'DIRECTO Segundo Día: Alcaraz - Tiafoe T2026'),     # no dot
     ('Nitto ATP Finals 2026', None, 'DIRECTO · Alcaraz - Tiafoe · Nitto ATP Finals 2026'),  # the first dot
     ('Nitto ATP Finals 2026', None, 'DIRECTO Alcaraz - Tiafoe · '),                     # nothing after it
+    # imports.70 (recheck): the user's rule B says the names are EQUAL, not that one starts with the other.
+    ('Liga Endesa', None, 'Unicaja - Joventut · Liga Endesa: Jornada 8'),              # the guide's part goes on
+    ('Nitto ATP Finals 2026', None, 'DIRECTO Zverev - Jódar T2026 · Nitto ATP Finals'),  # the export's goes on
+    ('La Casa del Fútbol Previa', None, 'DIRECTO Real Madrid - Celta · La Casa del Fútbol'),  # a preview vs the show
+    # imports.70 (recheck): a guide show part that is only a tag still refuses a clash.
+    ('Eurofighters', 'T26/27 "Episodio 10"', 'T26/27 E9 · Eurofighters'),              # another episode
+    ('Eurofighters', 'T25/26 "Episodio 9"', 'T26/27 E9 · Eurofighters'),               # another season
 ], ids=['another-episode', 'another-season', 'dot-inside-a-word', 'unspaced-dot', 'no-dot', 'first-dot-only',
-        'empty-after-the-dot'])
+        'empty-after-the-dot', 'longer-in-the-guide', 'longer-in-the-export', 'preview-vs-show',
+        'bare-tag-another-episode', 'bare-tag-another-season'])
 def test_rule_b_needs_a_spaced_dot_and_no_clashing_episode(export_title, export_sub, guide_title):
     """Only the part after the FIRST spaced middle dot counts (the episode
     reader's split, _name_parts), and a clashing season or episode refuses
