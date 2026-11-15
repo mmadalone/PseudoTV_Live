@@ -356,14 +356,26 @@ def _number(digits):
     return int(digits) if digits and len(digits) <= 9 else None
 
 
+def _name_parts(programme):
+    """imports.70: the title without Kodi labels, split at its first SPACED
+    middle dot (_NAME_SEP): (the show's part, the rest), the rest None when
+    there is no such dot. davidmuma's plain titles: 'Alerta Cobra T23 E12 ·
+    Sangre y agua' -> ('Alerta Cobra T23 E12', 'Sangre y agua'). The one
+    split of _plain_episode (the show's part) and the stale-export guard's
+    rule B (the rest: _twin_agrees)."""
+    show, sep, rest = _LABELS.sub(' ', _title_text(programme)).partition(_NAME_SEP)
+    return show, (rest if sep else None)
+
+
 def _plain_episode(programme):
     """imports.70: (season, episode) of davidmuma's plain tag at the end of the
     show's part of the title (_EPISODE_TAIL), each an int or None; None when
     there is none, and when the text before the tag is empty or is itself a
     season tag (_SEASON_TAG: 'T4 E103' alone has no show name). Reads its own
-    label-free copy of the title: the shared title helpers (_LABELS,
-    strip_labels, _norm_title, title_text, _same_title) are unchanged."""
-    text = _LABELS.sub(' ', _title_text(programme)).split(_NAME_SEP, 1)[0].rstrip()
+    label-free copy of the title (_name_parts): the shared title helpers
+    (_LABELS, strip_labels, _norm_title, title_text, _same_title) are
+    unchanged."""
+    text = _name_parts(programme)[0].rstrip()
     m = _EPISODE_TAIL.search(text)
     if not m:
         return None
@@ -605,6 +617,37 @@ def _without_season_mark(programme, tags):
     return {'title': text[:m.start()]}
 
 
+def _twin_agrees(twin, programme, tags, bare):
+    """imports.70 (c): True when the guide source's `twin` -- a programme of
+    the same channel with the same start and stop as the export's
+    `programme` -- lists the same show. `tags`: the export programme's
+    _episode; `bare`: its _without_season_mark.
+
+    Never when a season or episode number given on both sides differs
+    (_episodes_agree is False). Otherwise any of:
+      - the same title (_same_title), also with the export's bracketed
+        season left out of its name ('Chicago Fire (13)' with 'T13 E1' and
+        'Chicago Fire T13 E1 · ...');
+      - rule A (the user's choice of 2026-11-15): both sides give a season
+        AND an episode number, all equal, whatever the names ('Hudson & Rex
+        (4)' with 'T4 E12' and 'Hudson y Rex T4 E12'); an episode number
+        without a season on either side isn't enough;
+      - rule B (the same day): the guide title's part after its first spaced
+        middle dot (_name_parts) has the export's title (_same_title): a live
+        event the guide names by the match, 'DIRECTO Primer Día: Zverev -
+        Jódar T2026 · Nitto ATP Finals 2026' and 'Nitto ATP Finals 2026'."""
+    twin_tags = _episode(twin)
+    agree = _episodes_agree(tags, twin_tags)
+    if agree is False:
+        return False
+    if agree is True and tags[0] is not None and twin_tags[0] is not None:
+        return True
+    if _same_title(twin, programme) or (bare is not None and _same_title(twin, bare)):
+        return True
+    rest = _name_parts(twin)[1]
+    return rest is not None and _same_title({'title': rest}, programme)
+
+
 def stale_export_filter(fresh, links, previous, days_by_channel, cut):
     """imports.70 (c): merge_replay_guide's inputs with the schedule of a stale
     exporter file taken out where the guide source covers it. Returns
@@ -621,25 +664,27 @@ def stale_export_filter(fresh, links, previous, days_by_channel, cut):
     has, a gap, the edges of the guide source's days), other channels, and
     entries without a link or a usable time.
 
-    An export programme (`links`) stays when a guide-source programme agrees
-    with it: the same channel, start and stop, the same title (_same_title,
-    also with the export's bracketed season left out of its name when it is
-    the programme's own season: _without_season_mark, so 'Chicago Fire (13)'
-    with 'T13 E1' is the guide's 'Chicago Fire T13 E1 · ...') and an episode
-    tag that doesn't contradict (_episodes_agree is not False). Otherwise it
-    is left out.
+    An export programme (`links`) stays when a guide-source programme of the
+    same channel, start and stop agrees with it (_twin_agrees): no clashing
+    season or episode number, and the same title (_same_title, also with the
+    export's bracketed season left out of its name when it is the
+    programme's own season: _without_season_mark, so 'Chicago Fire (13)'
+    with 'T13 E1' is the guide's 'Chicago Fire T13 E1 · ...'), or the same
+    season and episode whatever the names (rule A), or the export's title
+    after the guide title's first ' · ' (rule B). Otherwise it is left out.
 
     An already-published programme (`previous`) is judged by THIS export's
     listing of its link, never by its own title or tag: rule 1 gave it the
     guide source's details when it was published, so comparing it with the
     guide source would always agree. It keeps its link only when the export
     lists that link on the same channel at the copy's own start and stop,
-    and that listing stayed. Otherwise -- the listing gave way, the export
-    lists the link at another time (it moved the show: the link would play
-    that other time's recording), or no longer lists it -- it stays in
-    `previous` as a copy without its replay link: still a details source for
-    rule 2, no longer a time slot. The guide source's programmes then fill
-    that time, without links.
+    and that listing stayed (the same agreement, rules A and B included).
+    Otherwise -- the listing gave way, the export lists the link at another
+    time (it moved the show: the link would play that other time's
+    recording), or no longer lists it -- it stays in `previous` as a copy
+    without its replay link: still a details source for rule 2, no longer a
+    time slot. The guide source's programmes then fill that time, without
+    links.
 
     `cut` is fixed for a given file, so a show's outcome doesn't change when
     it airs.
@@ -681,8 +726,7 @@ def stale_export_filter(fresh, links, previous, days_by_channel, cut):
                 bare = _without_season_mark(p, tags)
                 verdict = 'yielded'
                 for twin in twins.get((p.get('channel'), span[0], span[1]), ()):
-                    named = _same_title(twin, p) or (bare is not None and _same_title(twin, bare))
-                    if named and _episodes_agree(tags, _episode(twin)) is not False:
+                    if _twin_agrees(twin, p, tags, bare):
                         verdict = 'agreeing'
                         break
             if verdict == 'yielded':

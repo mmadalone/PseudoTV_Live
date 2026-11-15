@@ -1110,7 +1110,7 @@ class Imports(object):
         exporter may still be writing it. imports.70: such a read also
         returns 'retry': True, so that sync doesn't run the stale-export
         guard on the stored (old) file time with no listing to judge by
-        (_staleCut): the links already in the guide stay.
+        (_mergeReplayLinks): the links already in the guide stay.
         """
         addon_id, spec, path = exporter
         name = spec.get('name') or addon_id
@@ -1735,7 +1735,7 @@ class Imports(object):
                 # Still merge, with no new links: the merge is what keeps the
                 # linked history (the fresh path's prune would drop it).
                 # imports.70: 'retry' -- no listing this sync, so no
-                # stale-export guard either (_staleCut).
+                # stale-export guard either (_mergeReplayLinks).
                 self.log('[%s] syncAll, replay links read failed: %s' % (iid, e), level=xbmc.LOGERROR)
                 res['links'] = {'pairs': [], 'warning': None, 'retry': True}
             warning = res['links'].get('warning') or self._declaredReplayWarning(exporter, link_records)
@@ -3403,20 +3403,13 @@ class Imports(object):
     def _staleCut(self, iid, res, now):
         """imports.70 (c): replay_helpers.stale_after for this sync's links file
         (res['updated_cfg']['links_mtime_ns']: this sync's stable read, else
-        the stored one), or None when the guard stays off -- the file is younger
-        than LINKS_STALE_AFTER_S or its time is unknown, or this sync's guide is
-        the saved copy (its download failed) and that copy, as syncOne found it
+        the stored one -- also on a read to retry, which records nothing), or
+        None when the guard stays off -- the file is younger than
+        LINKS_STALE_AFTER_S or its time is unknown, or this sync's guide is the
+        saved copy (its download failed) and that copy, as syncOne found it
         before reading it (res['epg_cache_mtime']), isn't newer than the file.
-        Off too when this sync's read is to be retried (res['links']['retry']:
-        the file changed while it was read, a file too young to parse yet, or
-        the read failed): with no listing to judge by, every covered upcoming
-        link would be dropped, and that happens just when Movistar+ writes
-        its new file. The links already in the guide stay until the next
-        read, as before imports.70."""
-        if (res.get('links') or {}).get('retry'):
-            self.log('syncAll, [%s] replay links file not read this sync -- the links already in the guide stay '
-                     'and the stale-export guard waits for the next read' % (iid,), level=xbmc.LOGINFO)
-            return None
+        A read to retry is the caller's to handle (_mergeReplayLinks: no
+        filter, but the gap fill still runs)."""
         cut = replay_helpers.stale_after(res['updated_cfg'].get('links_mtime_ns'), now)
         if cut is None or not res.get('epg_error'):
             return cut
@@ -3481,7 +3474,15 @@ class Imports(object):
             stale links file (_staleCut) gives way to the guide source:
             replay_helpers.stale_export_filter on the merge's inputs, then
             fill_gaps on its output, with the very same guide_progs objects
-            (fill_gaps finds the published ones by identity). On the
+            (fill_gaps finds the published ones by identity). On a read to
+            retry (res['links']['retry']: the file changed while it was read,
+            a file too young to parse yet, or the read failed) there is no
+            listing to judge by -- the filter would drop every covered
+            upcoming link, just as Movistar+ writes its new file -- so it
+            waits for the next read and the links already in the guide stay;
+            fill_gaps still runs, so the pieces the last guarded sync filled
+            in come back (the merge never republishes unlinked copies) and the
+            channel's replay on/off stays as it was. On the
             keep-previous paths (_mergeLinksIntoKept) the kept slice is both
             the details source and the history, so there is no independent
             schedule to re-describe from or give way to: neither applies.
@@ -3510,11 +3511,11 @@ class Imports(object):
         prev_chans = {c.get('id'): c for c in (self.xmltv.XMLTVDATA.get('channels') or [])
                       if c.get('id') in days_by_channel}
         now = int(time.time())
-        redescribe, cut = False, None
+        redescribe, cut, guard = False, None, None
         if fresh_path:
             redescribe = bool(res.get('epg_source_changed'))
             cut = self._staleCut(iid, res, now)
-            if cut is not None:
+            if cut is not None and not (res.get('links') or {}).get('retry'):
                 # imports.70 (c): on the merge's INPUTS -- the export's slots and
                 # the published copies of the stale file's shows.
                 links, previous, guard = replay_helpers.stale_export_filter(guide_progs, links, previous,
@@ -3525,15 +3526,21 @@ class Imports(object):
             # imports.70 (c): on the merge's OUTPUT -- the rest of a guide show
             # that a kept slot cut short, so the hand-over leaves no hole. Only
             # unlinked copies of guide programmes of channels already in
-            # guide_chans, so the channel elements below are unaffected.
+            # guide_chans, so the channel elements below are unaffected. Also
+            # on a read to retry (no filter): see fresh_path above.
             programmes, filled = replay_helpers.fill_gaps(programmes, guide_progs, days_by_channel, cut)
-            self.log('syncAll, [%s] replay links file is %.1f h old -- shows from %s follow the guide: '
-                     'export yielded=%d agreeing=%d, history yielded=%d listed=%d, not covered=%d, '
-                     'gaps filled=%d'
-                     % (iid, (now - (cut - replay_helpers.LINKS_STALE_AFTER_S)) / 3600.0,
-                        time.strftime('%Y-%m-%d %H:%M', time.localtime(cut)),
-                        guard['export_yielded'], guard['export_agreeing'], guard['history_yielded'],
-                        guard['history_listed'], guard['uncovered'], filled), level=xbmc.LOGINFO)
+            if guard is None:
+                self.log('syncAll, [%s] replay links file not read this sync -- the links already in the guide '
+                         'stay and the stale-export guard waits for the next read; gaps filled=%d'
+                         % (iid, filled), level=xbmc.LOGINFO)
+            else:
+                self.log('syncAll, [%s] replay links file is %.1f h old -- shows from %s follow the guide: '
+                         'export yielded=%d agreeing=%d, history yielded=%d listed=%d, not covered=%d, '
+                         'gaps filled=%d'
+                         % (iid, (now - (cut - replay_helpers.LINKS_STALE_AFTER_S)) / 3600.0,
+                            time.strftime('%Y-%m-%d %H:%M', time.localtime(cut)),
+                            guard['export_yielded'], guard['export_agreeing'], guard['history_yielded'],
+                            guard['history_listed'], guard['uncovered'], filled), level=xbmc.LOGINFO)
         have = {c.get('id') for c in guide_chans}
         extra = []
         for cid in sorted({p.get('channel') for p in programmes if p.get('channel') in days_by_channel} - have):

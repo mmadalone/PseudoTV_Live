@@ -25,7 +25,7 @@ import time
 import xbmc
 
 from test_imports69_sync_commit import (  # noqa: F401 -- env: imports.69's autouse rig, used by name
-    DOWN, NOW, P1, _XMLTV, cfg, custom, disk, entry, env, logged, ok, playlist, rec, sync, write)
+    DOWN, NOW, P1, _XMLTV, cfg, custom, disk, entry, env, logged, ok, playlist, rec, record, sync, write)
 
 
 EMPTY = ok(b'#EXTM3U\n')
@@ -90,6 +90,23 @@ def test_an_empty_playlist_keeps_the_imports_channels(request):
     assert not {'A1@one', 'A2@one'}.intersection(run.m3u.added + run.m3u.removed), 'playlist entries untouched'
     assert run.xmltv.XMLTVDATA['programmes'] == shows, 'its guide kept'
     assert 'B1@two' in run.m3u.added, 'the other import synced as usual'
+
+
+def test_an_empty_imports_channel_never_takes_a_number_from_another_imports_new_channel(request):
+    """Review recheck (2026-11-15): a 'warning' import stays out of the
+    cycle's number allocation. One of your own channels holds 5. Import 'w'
+    (first in the list) reads an empty playlist; its switched-on channel W1
+    is remembered at 5, with the source number 6. Import 'o' brings a new
+    channel O1, source number 6: O1 gets 6. Were 'w' allocated, its kept W1
+    would claim 6 first (its 5 is taken) and push O1 to 7."""
+    rig = request.getfixturevalue('env')
+    write(rig, [cfg('w'), cfg('o')], [custom(number=5), rec('W1', 'w', 5, source_tvg_chno=6)])
+    rig.source.answer('https://example.invalid/w.m3u', EMPTY)
+    rig.source.answer('https://example.invalid/o.m3u', ok(playlist(('O1', 'Omega', 6))))
+    run = sync(rig)
+    assert (run.res['w']['status'], run.res['o']['status']) == ('warning', 'ok')
+    assert record(rig, 'O1@o')['number'] == 6
+    assert record(rig, 'W1@w')['number'] == 5, 'kept as it was'
 
 
 def test_a_later_real_failure_still_counts(request):

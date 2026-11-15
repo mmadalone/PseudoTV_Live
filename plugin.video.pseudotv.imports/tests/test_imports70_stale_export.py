@@ -12,7 +12,10 @@ stale_export_filter takes out the linked shows that had not started at the
 cut (not_started: the show on air counts as aired) and whose whole time the
 guide source covers on that channel (joined stretches, _covered/_inside).
 An export show stays only when the guide source lists it the same: channel,
-start, stop, title, and no clashing episode. A show already published is
+start and stop, no clashing season or episode, and the same title -- or
+(the user's rules A and B of 2026-11-15) the same season and episode
+whatever the names, or the export's title after the guide title's first
+' · '. A show already published is
 judged by this export's listing of its link (never by its own title: rule 1
 gave it the guide's details), and when it gives way it stays as a copy
 without its link (a details source, no longer a slot). Squirrel-like
@@ -23,8 +26,10 @@ short, without a link, so the hand-over leaves no hole.
 Sections (pure: no Kodi stubs):
   - the threshold, stale_after, not_started, _covered/_inside;
   - the filter: upcoming vs on air, agreeing (also with the export's
-    bracketed season, 'Chicago Fire (13)'), coverage, published copies
-    (judged by the export's listing at their own time);
+    bracketed season, 'Chicago Fire (13)'; rule A, the same season and
+    episode; rule B, the export's title after the guide title's ' · '),
+    coverage, published copies (judged by the export's listing at their own
+    time, rules A and B included);
   - the gap fill, also for a hole that starts before the cut and runs past it;
   - whole guarded merges: a 12-hour placeholder, a fixed cut, inputs;
   - the re-describe (a) and the guard (c) in one sync;
@@ -34,7 +39,8 @@ aged with os.utime, every time built from the moment the test starts):
   - the guard in a real sync: 40 h, an on-air show that gives way (S9),
     two syncs, recovery after a new file, (a) and (c) together, 30 h, the
     keep-previous path, a failed guide download and its saved copy's age,
-    a read to retry (no guard) and a missing file (guard);
+    a read to retry (no guard, the filled-in pieces kept) and a missing
+    file (guard);
   - the "went stale" trigger in syncAll's gate, with the hourly sync while
     the file stays stale (the user's choice of 2026-11-14), and its units:
     _linksWentStale, _linksFileState, _staleCut;
@@ -266,27 +272,145 @@ def _twin_case(export_title, export_sub, guide_title):
 def test_the_exports_bracketed_season_is_not_part_of_the_name(export_title, export_sub, guide_title):
     """The same show at the very same time: it keeps its link. Before, the
     bracket made the names differ ('chicago fire 13' vs 'chicago fire t13
-    e1 ...'), so whole series gave way while the file was old."""
+    e1 ...'), so whole series gave way while the file was old. Rule A (the
+    same season and episode) now agrees on most of these too, so the
+    bracket rule is also checked on its own here, and decides alone where
+    the guide gives the season only ('season-only-guide')."""
     kept, stats = _twin_case(export_title, export_sub, guide_title)
     assert kept and stats == _stats(export_agreeing=1)
+    export = _prog(CUT + H, CUT + 2 * H, export_title, sub=export_sub)
+    bare = rh._without_season_mark(export, rh._episode(export))
+    assert bare is not None and rh._same_title({'title': guide_title}, bare)
 
 
 @pytest.mark.parametrize('export_title,export_sub,guide_title', [
     # the number in brackets isn't the programme's own season: part of the name
     ('Close Up (1)', 'T2 E59 "Halle Berry"', 'Close Up · Halle Berry'),
-    ('Behind the Music (2021)', 'T2 E8 "Ice T"', 'Behind the Music T2 E8 · Ice T'),
+    ('Behind the Music (2021)', 'T2 E8 "Ice T"', 'Behind the Music T2 · Ice T'),    # the guide: season only
     ('Toy Story (2)', None, 'Toy Story 3'),                                       # a film: no season at all
     ('Serie (3)', 'E5 "x"', 'Serie E5 · x'),                                       # an episode, no season
+    ('Chicago Fire (13)', None, 'Chicago Fire T13 E1 · x'),       # no tag of its own: nothing to check against
     # the bracketed season is read, but the episode clashes
     ('Chicago Fire (13)', 'T13 E1 "x"', 'Chicago Fire T13 E2 · y'),
-    # names the two list differently still give way (the same-title rule)
-    ('Hudson & Rex (4)', 'T4 E12 "Hudson & Rex (4): Ep 412"', 'Hudson y Rex T4 E12 · Ningún hombre es una isla'),
-    ('Nitto ATP Finals 2026', None, 'DIRECTO Segundo Día: Alcaraz - Tiafoe T2026 · Nitto ATP Finals 2026'),
-], ids=['not-its-season', 'a-year', 'a-film', 'no-season', 'another-episode', 'other-spelling', 'live-event'])
+], ids=['not-its-season', 'a-year', 'a-film', 'no-season', 'no-own-season', 'another-episode'])
 def test_a_bracketed_number_is_left_out_only_when_it_is_the_programmes_own_season(export_title, export_sub,
                                                                                   guide_title):
+    """None of these has the same season AND episode on both sides (rule A)
+    or the export's title after the guide's ' · ' (rule B), so the title
+    rule alone decides. The guide's season ('T13' in 'no-own-season') never
+    stands in for the export's own. Names the two list differently: the
+    rule A and rule B tests below."""
     kept, stats = _twin_case(export_title, export_sub, guide_title)
     assert not kept and stats == _stats(export_yielded=1)
+
+
+# imports.70, rule A (the user's choice of 2026-11-15): at the very same
+# channel, start and stop, the same season AND episode on both sides agree
+# whatever the names. Neither the title nor rule B agrees on any of these.
+@pytest.mark.parametrize('export_title,export_sub,guide_title', [
+    ('Hudson & Rex (4)', 'T4 E12 "Hudson & Rex (4): Ep 412"', 'Hudson y Rex T4 E12 · Ningún hombre es una isla'),
+    ('Dragones: Los defensores de Mema', 'T1 E5 "La gran carrera"',
+     'Dragones: Los jinetes de Mema T1 E5 · La gran carrera'),
+    ('El tercer tiempo', 'T26/27 E11', 'DIRECTO T26/27 E11'),                      # a sports season
+    ('Behind the Music (2021)', 'T2 E8 "Ice T"', 'Behind the Music T2 E8 · Ice T'),  # a year in the name
+    ('Serie', 'T3 "Episodio 7"', 'Otra serie T3 E7'),                              # the export's 'Episodio N'
+], ids=['other-spelling', 'other-translation', 'sports-season', 'a-year-in-the-name', 'episodio-n'])
+def test_rule_a_the_same_season_and_episode_agree_whatever_the_names(export_title, export_sub, guide_title):
+    kept, stats = _twin_case(export_title, export_sub, guide_title)
+    assert kept and stats == _stats(export_agreeing=1)
+
+
+@pytest.mark.parametrize('export_title,export_sub,guide_title', [
+    ('Hudson & Rex (4)', 'T4 E12 "x"', 'Hudson y Rex T5 E12 · x'),          # another season
+    ('Hudson & Rex (4)', 'T4 E12 "x"', 'Hudson y Rex T4 E13 · x'),          # another episode
+    ('Hudson & Rex T4', None, 'Hudson y Rex T4 · x'),                       # seasons only: no episode
+    ('Serie', 'E12 "x"', 'Otra serie E12 · x'),                             # episodes only: no season
+    ('Hudson & Rex', 'T4 E12 "x"', 'Hudson y Rex E12 · x'),                 # the guide gives no season
+    ('Hudson & Rex', 'E12 "x"', 'Hudson y Rex T4 E12 · x'),                 # the export gives no season
+    ('Hudson & Rex', None, 'Hudson y Rex T4 E12 · x'),                      # the export gives no tag
+], ids=['another-season', 'another-episode', 'seasons-only', 'episodes-only', 'guide-without-season',
+        'export-without-season', 'export-without-tag'])
+def test_rule_a_needs_a_season_and_an_episode_on_both_sides_all_equal(export_title, export_sub, guide_title):
+    """Rule A is the user's 'same season and episode': an episode number
+    without a season on either side, or a season alone, isn't enough when
+    the names differ."""
+    kept, stats = _twin_case(export_title, export_sub, guide_title)
+    assert not kept and stats == _stats(export_yielded=1)
+
+
+# imports.70, rule B (the user's choice of 2026-11-15): the guide names a live
+# event by the match and puts the export's title after its first spaced
+# middle dot. Neither the title nor rule A agrees on any of these.
+@pytest.mark.parametrize('export_title,export_sub,guide_title', [
+    ('Nitto ATP Finals 2026', None, 'DIRECTO Segundo Día: Alcaraz - Tiafoe T2026 · Nitto ATP Finals 2026'),
+    ('Euroliga', 'T2025 E10', 'DIRECTO Real Madrid - Baskonia · Euroliga'),            # a tag on one side only
+    ('Liga Endesa', None, 'Unicaja - Joventut · Liga Endesa: Jornada 8'),              # the guide's part goes on
+    ('Nitto ATP Finals 2026', None, 'DIRECTO Zverev - Jódar T2026 · Nitto ATP Finals'),  # the export's goes on
+], ids=['atp-finals', 'tag-on-one-side', 'longer-in-the-guide', 'longer-in-the-export'])
+def test_rule_b_the_exports_title_after_the_guide_titles_dot_agrees(export_title, export_sub, guide_title):
+    kept, stats = _twin_case(export_title, export_sub, guide_title)
+    assert kept and stats == _stats(export_agreeing=1)
+
+
+@pytest.mark.parametrize('export_title,export_sub,guide_title', [
+    ('Euroliga', 'T2025 E10', 'DIRECTO Real Madrid - Baskonia T2025 E11 · Euroliga'),   # another episode
+    ('Euroliga', 'T2024 E10', 'DIRECTO Real Madrid - Baskonia T2025 · Euroliga'),       # another season
+    ('Lapse', None, 'Col·lapse'),                                                       # a dot inside a word
+    ('Nitto ATP Finals 2026', None, 'DIRECTO Alcaraz - Tiafoe·Nitto ATP Finals 2026'),  # not spaced
+    ('Nitto ATP Finals 2026', None, 'DIRECTO Segundo Día: Alcaraz - Tiafoe T2026'),     # no dot
+    ('Nitto ATP Finals 2026', None, 'DIRECTO · Alcaraz - Tiafoe · Nitto ATP Finals 2026'),  # the first dot
+    ('Nitto ATP Finals 2026', None, 'DIRECTO Alcaraz - Tiafoe · '),                     # nothing after it
+], ids=['another-episode', 'another-season', 'dot-inside-a-word', 'unspaced-dot', 'no-dot', 'first-dot-only',
+        'empty-after-the-dot'])
+def test_rule_b_needs_a_spaced_dot_and_no_clashing_episode(export_title, export_sub, guide_title):
+    """Only the part after the FIRST spaced middle dot counts (the episode
+    reader's split, _name_parts), and a clashing season or episode refuses
+    it as it refuses the same title."""
+    kept, stats = _twin_case(export_title, export_sub, guide_title)
+    assert not kept and stats == _stats(export_yielded=1)
+
+
+def test_name_parts():
+    """The one split of the guide title: the episode reader reads the show's
+    part, rule B the rest. Kodi labels go first."""
+    assert rh._name_parts({'title': 'Alerta Cobra T23 E12 · Sangre y agua'}) == ('Alerta Cobra T23 E12',
+                                                                                 'Sangre y agua')
+    assert rh._name_parts({'title': 'A · B · C'}) == ('A', 'B · C')
+    assert rh._name_parts({'title': 'Col·lapse'}) == ('Col·lapse', None)
+    assert rh._name_parts({'title': 'Serie T1 E2'}) == ('Serie T1 E2', None)
+    assert rh._name_parts({'title': 'X · '}) == ('X', '')
+    assert rh._name_parts({'title': '[COLOR a]A · B[/COLOR] C · D'}) == ('  C', 'D')
+    assert rh._name_parts({}) == ('', None)
+
+
+@pytest.mark.parametrize('export,guide,kept', [
+    (dict(title='Hudson & Rex (4)', sub='T4 E12 "x"'), 'Hudson y Rex T4 E12 · x', True),
+    (dict(title='Nitto ATP Finals 2026'), 'DIRECTO Alcaraz - Tiafoe T2026 · Nitto ATP Finals 2026', True),
+    (dict(title='Hudson & Rex (4)', sub='T4 E12 "x"'), 'Hudson y Rex T4 E13 · x', False),
+    (dict(title='Euroliga', sub='T2025 E10'), 'DIRECTO Real Madrid - Baskonia T2025 E11 · Euroliga', False),
+], ids=['rule-a', 'rule-b', 'rule-a-another-episode', 'rule-b-another-episode'])
+def test_a_published_copy_follows_its_listing_under_rules_a_and_b(export, guide, kept):
+    """The same agreement for a show already in the guide: the filter judges
+    the copy by the export's listing of its link at the copy's own time, so
+    a listing that agrees by rule A or B keeps the copy's link, and one that
+    gives way takes it."""
+    fresh = [_prog(CUT - H, CUT + H, 'Antes', desc='antes'),
+             _prog(CUT + H, CUT + 2 * H, guide, desc='guide details'),
+             _prog(CUT + 2 * H, CUT + 3 * H, 'Despues', desc='despues')]
+    links = [_prog(CUT + H, CUT + 2 * H, link='x', **export)]
+    published = _published(fresh, links, CUT - 10 * H)
+    copy = [p for p in published if p.get('catchup-id') == 'x']
+    assert len(copy) == 1 and _title(copy[0]) == guide, 'rule 1: the guide\'s show with the export\'s link'
+    out, _, guard, filled = _guarded(fresh, links, published)
+    at = [p for p in out if p.get('channel') == CH and E(p['start']) == CUT + H]
+    assert len(at) == 1 and _title(at[0]) == guide and _desc(at[0]) == 'guide details'
+    if kept:
+        assert at[0].get('catchup-id') == 'x'
+        assert guard == _stats(export_agreeing=1, history_listed=1)
+    else:
+        assert not at[0].get('catchup-id')
+        assert guard == _stats(export_yielded=1, history_yielded=1)
+    assert _holes(out, CH, CUT, CUT + 3 * H) == [] and _overlaps(out, CH) == [] and filled == 0
 
 
 def test_without_season_mark():
@@ -1039,8 +1163,22 @@ def test_a_saved_guide_replaced_after_the_sync_read_it_keeps_the_guard_off(tmp_p
     assert not _guard_line(rig)
 
 
+RETRY_TEXT = 'replay links file not read this sync'
 RETRY_LINE = ('syncAll, [mp] replay links file not read this sync -- the links already in the guide stay '
-              'and the stale-export guard waits for the next read')
+              'and the stale-export guard waits for the next read; gaps filled=%d')
+
+
+def _changing_while_read(monkeypatch):
+    """The export's read answers 'the file changed while reading' (Movistar+
+    writing its new file); every other address as sr.sync answers it."""
+    real_fetch = Imports.fetchSource
+
+    def changing(self, url, *a, **k):
+        if url.endswith('epg.xml'):
+            return {'status': 0, 'content': None, 'etag': None, 'last_modified': None, 'mtime_ns': None,
+                    'transient': True, 'error': 'file changed while reading; will retry'}
+        return real_fetch(self, url, *a, **k)
+    monkeypatch.setattr(Imports, 'fetchSource', changing)
 
 
 @pytest.mark.parametrize('how', ['changed-while-reading', 'still-being-written', 'read-failed'])
@@ -1065,14 +1203,7 @@ def test_a_read_to_retry_keeps_the_links_already_in_the_guide(tmp_path, monkeypa
     else:
         sr.write_export(rig, [sr.show(n - H, n + H, 'On Air', link='L0')], age_s=AGED)
     if how == 'changed-while-reading':
-        real_fetch = Imports.fetchSource
-
-        def changing(self, url, *a, **k):
-            if url.endswith('epg.xml'):
-                return {'status': 0, 'content': None, 'etag': None, 'last_modified': None, 'mtime_ns': None,
-                        'transient': True, 'error': 'file changed while reading; will retry'}
-            return real_fetch(self, url, *a, **k)
-        monkeypatch.setattr(Imports, 'fetchSource', changing)
+        _changing_while_read(monkeypatch)
     elif how == 'read-failed':
         def boom(self, *a, **k):
             raise RuntimeError('simulated')
@@ -1086,8 +1217,61 @@ def test_a_read_to_retry_keeps_the_links_already_in_the_guide(tmp_path, monkeypa
     st = run.playlist.added
     assert (st[sr.C1]['catchup'], st[sr.C1]['catchup-source']) == ('default', '{catchup-id}')
     assert not _guard_line(rig)
-    assert [lvl for m, lvl in rig.lines if m == RETRY_LINE] == [xbmc.LOGINFO]
+    assert [lvl for m, lvl in rig.lines if m == RETRY_LINE % 0] == [xbmc.LOGINFO]
     assert run.res['updated_cfg']['links_mtime_ns'] == str((n - AGED) * 10 ** 9), 'nothing recorded'
+
+
+def test_a_read_to_retry_keeps_the_pieces_the_last_guarded_sync_filled_in(tmp_path, monkeypatch):
+    """Review recheck (2026-11-15). A guarded sync (the file 40 h old, the
+    cut 4 h ago) keeps the export's A, on air at the cut, and publishes the
+    rest of the guide's P2 after A's stop: that piece is on air now, without
+    a link, so the channel offers no replay (S9). At the next sync Movistar+
+    is writing its new file, a read to retry: the filter waits, but the gap
+    fill still runs. Before, it didn't: the merge never republishes an
+    unlinked copy and drops P2 (it overlaps A), so the piece's time was a
+    hole until the next read, and with nothing on air the kept A (linked)
+    switched the channel's replay back on."""
+    rig = sr.make_rig(tmp_path, monkeypatch)
+    n, H, M = rig.now, sr.H, sr.M
+    guide = [sr.show(n - 5 * H, n - 3 * H, 'P1', 'p1'),
+             sr.show(n - 3 * H, n + 30 * M, 'P2', 'p2'),
+             sr.show(n + 30 * M, n + 2 * H, 'P3', 'p3')]
+    c1 = [sr.show(n - 5 * H, n - H, 'A', link='a'),            # on air at the cut: kept
+          sr.show(n - H, n + H, 'B', link='b')]                # after it, no guide twin: gives way
+    sr.write_export(rig, c1, age_s=AGED)
+    first = sr.sync(rig, monkeypatch, sr.entry(rig), guide=sr.guide_xml(guide))
+    rows = [(n - 5 * H, n - H, 'P1', 'p1', 'a'),                # A, with rule 1's details
+            (n - H, n + 30 * M, 'P2', 'p2', None),             # the rest of P2: on air, no link
+            (n + 30 * M, n + 2 * H, 'P3', 'p3', None)]
+    assert _rows(first) == rows
+    assert 'export yielded=1 agreeing=0' in _guard_line(rig)[0] and 'gaps filled=1' in _guard_line(rig)[0]
+    assert first.playlist.added[sr.C1]['catchup'] == ''
+    stored = first.res['updated_cfg']['links_mtime_ns']
+    _changing_while_read(monkeypatch)
+    second = sr.sync(rig, monkeypatch, sr.entry(rig, links_mtime_ns=stored), guide=sr.guide_xml(guide),
+                     previous=list(first.guide.XMLTVDATA['programmes']))
+    assert _rows(second) == rows, 'the same links, the piece filled in again: no hole'
+    assert second.playlist.added[sr.C1]['catchup'] == '', 'replay stays off: the piece is on air'
+    assert len(_guard_line(rig)) == 1, 'no filter on the read to retry'
+    assert [lvl for m, lvl in rig.lines if m == RETRY_LINE % 1] == [xbmc.LOGINFO]
+    assert second.res['updated_cfg']['links_mtime_ns'] == stored, 'nothing recorded'
+
+
+def test_a_read_to_retry_of_a_young_file_says_nothing_about_the_guard(tmp_path, monkeypatch):
+    """The stored file time is an hour old: no cut, so no filter, no gap fill
+    and no line about the stale-export guard; _readLinks' own retry line
+    says what happened."""
+    rig = sr.make_rig(tmp_path, monkeypatch)
+    n, H = rig.now, sr.H
+    guide, c1, c2 = _day(n)
+    sr.write_export(rig, c1, c2, age_s=H)
+    previous = [sr.published_show(sr.C1, sr.show(n + H, n + 2 * H, 'Otro', 'g otro', link='u3'))]
+    _changing_while_read(monkeypatch)
+    run = sr.sync(rig, monkeypatch, sr.entry(rig, links_mtime_ns=str((n - H) * 10 ** 9)),
+                  guide=sr.guide_xml(guide), previous=previous)
+    assert _at(run, n + H) == (n + H, n + 2 * H, 'Otro', 'g otro', 'u3')
+    assert sr.logged(rig, '[mp] syncAll, replay links file changed while reading; will retry', xbmc.LOGINFO)
+    assert not sr.logged(rig, RETRY_TEXT) and not _guard_line(rig)
 
 
 def test_a_stable_read_of_a_missing_file_still_runs_the_guard(tmp_path, monkeypatch):
@@ -1100,7 +1284,7 @@ def test_a_stable_read_of_a_missing_file_still_runs_the_guard(tmp_path, monkeypa
     cfg = sr.entry(rig, links_mtime_ns=str((n - AGED) * 10 ** 9))
     run = sr.sync(rig, monkeypatch, cfg, guide=sr.guide_xml(guide), previous=previous)
     assert _at(run, n + H) == (n + H, n + 2 * H, 'Show A', 'g a', None)
-    assert _guard_line(rig) and not sr.logged(rig, RETRY_LINE)
+    assert _guard_line(rig) and not sr.logged(rig, RETRY_TEXT)
 
 
 # ================================================================ the "went stale" trigger
@@ -1349,6 +1533,9 @@ def test_stale_cut_unit(tmp_path, monkeypatch):
     ns = str(t_file * 10 ** 9)
     cut = t_file + 36 * H
     assert imp._staleCut('mp', _res(ns), n) == cut
+    # a read to retry: the cut from the stored time all the same (the caller
+    # skips the filter and keeps the gap fill)
+    assert imp._staleCut('mp', _res(ns, links={'pairs': [], 'warning': None, 'retry': True}), n) == cut
     assert imp._staleCut('mp', _res(str((n - 30 * H) * 10 ** 9)), n) is None       # younger than 36 h
     assert imp._staleCut('mp', _res(None), n) is None
     assert imp._staleCut('mp', {'updated_cfg': {}}, n) is None
