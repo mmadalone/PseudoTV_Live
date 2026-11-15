@@ -205,6 +205,15 @@ class JSONRPC(object):
         return (self.sendJSON(param, delay=False) or {}).get('result') is True
 
 
+    # madteevee (imports fork, imports.70): the channel's guide entries as times only, for the move
+    # of a replay frozen at its end (replayend_helpers.next_broadcast, Kodi's own next-show rule).
+    # Each row is its broadcastid with the start and end; never 'file' (signed links), plot or
+    # artwork. delay=False: its caller acts on the answer at once, as the imports.62 reads.
+    def getPVRBroadcastTimes(self, channelid):
+        param = {"method":"PVR.GetBroadcasts","params":{"channelid":channelid,"properties":["starttime","endtime"]}}
+        return ((self.sendJSON(param, delay=False) or {}).get('result') or {}).get('broadcasts') or []
+
+
     def getSetting(self, category, section, cache=False):
         param = {"method":"Settings.GetSettings","params":{"filter":{"category":category,"section":section}}}
         if cache: return self.cacheJSON(param).get('result',{}).get('settings',[])

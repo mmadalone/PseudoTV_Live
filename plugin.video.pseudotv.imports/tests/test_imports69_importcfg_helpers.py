@@ -227,6 +227,9 @@ BITOR_REVIEWED = {
     # changes there (the episode reader, the re-describe, the stale-export
     # guard and its gap fill) stays free of '|'.
     'replay_helpers.py': ['merge_ids = set(link_slots) | set(prev_slots)'],
+    # imports.70 (the replay-end watcher): none. Its BUSY condition's '|' is
+    # Kodi's OR inside a string, not an operator.
+    'replayend_helpers.py': [],
 }
 
 

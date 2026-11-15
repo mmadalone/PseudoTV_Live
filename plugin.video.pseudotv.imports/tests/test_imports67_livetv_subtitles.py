@@ -1415,9 +1415,11 @@ def _run_chkidle(pseudotv, ticks):
     """The real Monitor._chkIdle for `ticks` loop turns (then the service shuts down)."""
     calls = []
     answers = iter([False] * (2 * ticks) + [True])
+    # imports.70: the replay-end watcher ticks right after the transition supervisor.
     player = types.SimpleNamespace(isPlayingPseudoTV=lambda: pseudotv, _onIdle=lambda: calls.append('onIdle'),
                                    _chkLiveSubtitles=lambda: calls.append('chkLiveSubtitles'),
-                                   _chkTransition=lambda: calls.append('chkTransition'))
+                                   _chkTransition=lambda: calls.append('chkTransition'),
+                                   _chkReplayEnd=lambda: calls.append('chkReplayEnd'))
     monitor = types.SimpleNamespace(isRunning=False, idleTime=0, isIdle=False, abortRequested=lambda: False,
                                     service=types.SimpleNamespace(_shutdown=lambda wait: next(answers)),
                                     player=player, log=lambda msg, level=None: None)
@@ -1428,7 +1430,8 @@ def _run_chkidle(pseudotv, ticks):
 
 
 def test_chkidle_reads_live_subtitles_on_every_not_custom_tick():
-    assert _run_chkidle(False, 3) == ['chkLiveSubtitles', 'chkTransition'] * 3
+    # imports.70: then the replay-end watcher (test_imports70_replay_end.py)
+    assert _run_chkidle(False, 3) == ['chkLiveSubtitles', 'chkTransition', 'chkReplayEnd'] * 3
 
 
 def test_chkidle_never_reads_live_subtitles_while_a_custom_channel_plays():
