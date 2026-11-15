@@ -9,7 +9,7 @@ does at a natural end. The decisions live in replayend_helpers (tested in
 test_imports70_replayend_helpers.py); services.py only reads Kodi and acts:
   - Player._chkReplayEnd, Monitor._chkIdle's ~1 s tick right after
     _chkTransition: the only writer of _replayEndTrack, Kodi reads only
-    (_replayEndSample), one warning per playback on a failure;
+    (_replayEndSample), one ERROR line per playback on a failure (written even with debug off);
   - Player._lookupReplayEnd (@threadit), once per replay 5 s after it
     started: Player.GetItem + PVR.GetChannels, the only writer of
     _replayEndFacts;
@@ -848,17 +848,17 @@ def test_kodi_closing_before_the_move_does_nothing(rig):
     assert [c[0] for c in rig.player.jsonRPC.calls] == ['GetItem', 'GetChannels']
 
 
-def test_a_failing_tick_warns_once_per_playback(rig):
+def test_a_failing_tick_logs_one_error_per_playback(rig):
     to_the_live_edge(rig)
 
     def broken(): raise RuntimeError('Kodi went away')
     rig.hooks['getIdle'] = broken
     rig.tick(100)
-    assert rig.warnings() == ['_chkReplayEnd, failed: Kodi went away']
+    assert rig.errors() == ['_chkReplayEnd, failed: Kodi went away'] and rig.warnings() == []
     assert rig.player._replayEndTrack == {'epoch': rig.player._play_epoch, 'failed': True}
     rig.kodi.play_show(NEXT)                                  # a new playback: watched again
     rig.tick(100)
-    assert rig.warnings() == ['_chkReplayEnd, failed: Kodi went away'] * 2
+    assert rig.errors() == ['_chkReplayEnd, failed: Kodi went away'] * 2
     assert rig.opens() == [] and rig.player.moves == []
 
 
@@ -993,7 +993,7 @@ def test_a_failing_lookup_is_logged_and_watches_nothing(rig):
     rig.hooks['GetChannels'] = None
     rig.kodi.seek(rig.kodi.times()[1] - 1)
     rig.tick_until(E + TAIL + 300)
-    assert rig.warnings() == ['_lookupReplayEnd, failed: JSON-RPC went away']
+    assert rig.errors() == ['_lookupReplayEnd, failed: JSON-RPC went away'] and rig.warnings() == []
     assert rig.player._replayEndFacts is None and rig.opens() == [] and len(rig.player.lookups) == 1
 
 

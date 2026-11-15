@@ -1634,7 +1634,10 @@ class Player(xbmc.Player):
                 self._moveReplayEnd(dict(facts), epoch)
         except Exception as e:
             self._replayEndTrack = {'epoch': epoch, 'failed': True}
-            self.log('_chkReplayEnd, failed: %s'%(e), xbmc.LOGWARNING)
+            # imports.70: ERROR (at most once per playback, the track is marked failed): the add-on
+            # writes WARNING/INFO lines only with its debug logging on, and a watcher that never runs
+            # must leave a trace in kodi.log for the next frozen replay to be diagnosable.
+            self.log('_chkReplayEnd, failed: %s'%(e), xbmc.LOGERROR)
 
 
     def _replayEndSample(self):
@@ -1673,7 +1676,8 @@ class Player(xbmc.Player):
             self.log('replay end: watching broadcast %s on channel %s, show ends %s UTC'
                      %(bid, facts['channelid'], facts['endtime']), xbmc.LOGINFO)
         except Exception as e:
-            self.log('_lookupReplayEnd, failed: %s'%(e), xbmc.LOGWARNING)
+            # imports.70: ERROR, once per playback (one lookup per playback): see _chkReplayEnd.
+            self.log('_lookupReplayEnd, failed: %s'%(e), xbmc.LOGERROR)
 
 
     @threadit
