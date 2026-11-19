@@ -1714,7 +1714,10 @@ class Player(xbmc.Player):
             return (replayend_helpers.ready(xbmc.getCondVisibility(replayend_helpers.ACT_WINDOW), BUILTIN.getIdle())
                     and self._play_epoch == epoch)
 
-        if self.service._shutdown(0): return
+        # imports.70: asked without waiting (Service._aborted). The first build asked with
+        # _shutdown(0); Kodi's waitForAbort takes 0 as "no timeout", so the move stood on this
+        # line until Kodi closed, holding the RESTART lock (TV test 2026-11-19).
+        if self.service._aborted(): return
         item = frozen()
         if item is None:
             self.log('replay end: broadcast %s no longer plays; nothing to do'%(bid), xbmc.LOGINFO)
@@ -1974,8 +1977,26 @@ class Service(object):
         self._que(self.tasks._chkEpochTimer,-1,*('chkQueTimer', self.tasks.chkQueTimer, 15)) #keep CustomQueue alive after interrupt.
     
     
+    def _aborted(self) -> bool: #service break, asked without waiting
+        # madteevee (imports fork, imports.70): True when Kodi or this service is closing, asked
+        # without waiting; the same two signals as _shutdown (cache.py's _aborted is the precedent).
+        # For a one-off check before acting. Kodi's Monitor.waitForAbort takes a timeout of 0 or
+        # less as "no timeout" (xbmc/interfaces/legacy/Monitor.cpp: timeoutMS <= 0 ->
+        # endTime.SetInfinite(); the default argument is -1), so imports.70's first build, which
+        # asked with _shutdown(0), waited there until Kodi closed: the replay-end move never ran
+        # and kept Player._restart_lock (TV test 2026-11-19). abortRequested() only reads Kodi's
+        # flag. No bookkeeping and no log line, so any thread may call it at any time.
+        return any([self.monitor.abortRequested(),PROPERTIES.isPendingShutdown()])
+
+
     def _shutdown(self, wait=SERVICE_INTERVAL) -> bool: #service break
-        pendingShutdown = any([self.monitor.waitForAbort(wait),PROPERTIES.isPendingShutdown()])
+        # madteevee (imports fork, imports.70): a wait of 0 or less asks without waiting (_aborted)
+        # where it used to wait until Kodi closed; a positive wait is the same waitForAbort call as
+        # before. A loop must still wait a positive time: Kodi delivers the Player's and the
+        # Monitor's callbacks only inside waitForAbort (or xbmc.sleep), on the thread that created
+        # them.
+        if wait > 0: pendingShutdown = any([self.monitor.waitForAbort(wait),PROPERTIES.isPendingShutdown()])
+        else:        pendingShutdown = self._aborted()
         if self.pendingShutdown != pendingShutdown:
             self.pendingShutdown = pendingShutdown
             self.log('_shutdown, pendingShutdown = %s, wait = %s'%(self.pendingShutdown,wait))

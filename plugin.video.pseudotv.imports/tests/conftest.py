@@ -74,3 +74,40 @@ def clock_zone(request, tz):
     zone, fields = CLOCK_ZONES[request.param]
     tz(zone)
     return calendar.timegm(fields)
+
+
+# ---------------------------------------------------------------- imports.70: waits Kodi would never end
+# TV test 2026-11-19: the replay-end move called Monitor.waitForAbort(0), which Kodi turns into a
+# wait without end, and 5,743 tests passed because their stand-ins for Kodi returned at once. The
+# stand-ins of kodi_faithful.py refuse such a wait (ForeverWait) and record it; this check fails
+# the test for whatever was recorded, so a refusal that an `except` swallowed, or that happened
+# on a worker thread, can't pass either. A test that provokes one on purpose takes it off the
+# record (kodi_faithful.provoked()).
+import kodi_faithful   # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def no_wait_kodi_would_never_end():
+    del kodi_faithful.VIOLATIONS[:]
+    yield
+    kodi_faithful.check()
+
+
+# ---------------------------------------------------------------- imports.70: a memory cap for the test run
+# 2026-11-19 23:25 a deliberately broken stand-in (a service whose waits let no time pass) made a
+# test loop for ever while its rig recorded every call: the run grew by about 45 MB a second, filled
+# RAM and swap and froze this machine, which also runs Kodi. kodi_faithful.Standstill now ends such
+# a loop within SPIN_CAP calls; this cap is the net under it: a run that still runs away ends with
+# MemoryError instead. RLIMIT_AS (the address space, what `ulimit -v` sets) is only ever lowered
+# here: a lower limit already in force stays, and the hard limit is left alone (a soft limit
+# above the cap means a hard one above it too). Linux only, where the resource module has it.
+TEST_MEMORY_CAP = 3 * 1024 ** 3   # bytes (3 GB); a whole-suite run passes under it
+
+
+def pytest_configure(config):
+    if not sys.platform.startswith('linux'): return
+    try: import resource
+    except ImportError: return
+    soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+    if soft == resource.RLIM_INFINITY or soft > TEST_MEMORY_CAP:
+        resource.setrlimit(resource.RLIMIT_AS, (TEST_MEMORY_CAP, hard))

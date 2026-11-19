@@ -31,6 +31,7 @@ import pytest
 
 import globals as globals_mod
 import onnext_helpers as oh
+from kodi_faithful import positive_wait
 
 HERE      = os.path.dirname(os.path.abspath(__file__))
 ADDON     = os.path.dirname(HERE)
@@ -338,6 +339,9 @@ class Rig(object):
             LOGO='', RULES_ACTION_OVERLAY_OPEN=0)
 
     def _shutdown(self, wait):
+        # imports.70: a wait of 0 or less is refused (kodi_faithful.ForeverWait): through the real
+        # Service._shutdown of the first imports.70 build Kodi would never have come back from it.
+        positive_wait(wait, '_shutdown')
         self.waits.append((wait, self.prop, len(self.video.controls)))
         if self.on_wait: self.on_wait()
         time.sleep(0.001)

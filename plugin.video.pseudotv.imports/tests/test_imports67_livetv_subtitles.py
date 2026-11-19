@@ -57,6 +57,7 @@ import pytest
 import livesubs_helpers as lh
 import xbmc
 from globals import FileAccess   # first: fileaccess can't be the first addon module imported (circular)
+from kodi_faithful import positive_wait
 
 HERE      = os.path.dirname(os.path.abspath(__file__))
 ADDON_LIB = os.path.join(os.path.dirname(HERE), 'resources', 'lib')
@@ -238,12 +239,16 @@ class Files(object):
 
 class Wait(object):
     """Player.monitor: waitForAbort records the wait, lets Kodi's player apply what was queued, runs
-    `during` (what happens in Kodi meanwhile) and answers `abort`."""
+    `during` (what happens in Kodi meanwhile) and answers `abort`. imports.70: a missing timeout or
+    one of 0 or less is refused (kodi_faithful.ForeverWait): Kodi would never come back from it,
+    which is how the replay-end move hung on the TV (2026-11-19) while a fake like this one
+    answered at once."""
 
     def __init__(self, kodi):
         self.kodi, self.waits, self.during, self.abort = kodi, [], None, False
 
     def waitForAbort(self, timeout=None):
+        positive_wait(timeout, 'waitForAbort')
         self.waits.append(timeout)
         self.kodi.flush()
         if self.during is not None: self.during()
@@ -1411,6 +1416,16 @@ def test_onplay_library_playback_is_left_alone(tmp_path):
     assert rig.player.monitor.waits == [] and rig.player._liveSubsState is None
 
 
+def _answered_shutdown(answers):
+    """service._shutdown for _run_chkidle: the next answer of `answers`. imports.70: only for a
+    wait Kodi would end (kodi_faithful.positive_wait); the loop's waits must stay positive, or it
+    would spin (Kodi delivers the player's events only inside a wait)."""
+    def _shutdown(wait):
+        positive_wait(wait, '_shutdown')
+        return next(answers)
+    return _shutdown
+
+
 def _run_chkidle(pseudotv, ticks):
     """The real Monitor._chkIdle for `ticks` loop turns (then the service shuts down)."""
     calls = []
@@ -1421,7 +1436,7 @@ def _run_chkidle(pseudotv, ticks):
                                    _chkTransition=lambda: calls.append('chkTransition'),
                                    _chkReplayEnd=lambda: calls.append('chkReplayEnd'))
     monitor = types.SimpleNamespace(isRunning=False, idleTime=0, isIdle=False, abortRequested=lambda: False,
-                                    service=types.SimpleNamespace(_shutdown=lambda wait: next(answers)),
+                                    service=types.SimpleNamespace(_shutdown=_answered_shutdown(answers)),
                                     player=player, log=lambda msg, level=None: None)
     chk = _function('Monitor', '_chkIdle', BUILTIN=types.SimpleNamespace(getIdle=lambda: 0), OSD_TIMER=5)
     chk(monitor)

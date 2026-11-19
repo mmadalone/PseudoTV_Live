@@ -19,7 +19,7 @@ test_imports70_replayend_helpers.py); services.py only reads Kodi and acts:
     _replayEndOpen (imports.62's watch_outcome) with its fallbacks.
 
 services.py can't be imported under the test stubs, so (as in
-test_imports67_livetv_subtitles.py, whose helpers this reuses) the real
+test_imports67_livetv_subtitles.py, whose ast helpers this reuses) the real
 methods are compiled out of the source with their decorators dropped: the two
 workers run inline, in the tick that starts them. Kodi is a model on the
 test's clock: Movistar+'s growing window (it opens 174 s before the guide start
@@ -27,22 +27,37 @@ and closes 720 s after the guide end, as measured), the player's position and
 length, pause, seeks, the guide, Player.Open (switching in place, as
 VideoPlayer does, or refused / failing in the ways watch_outcome tells apart),
 a natural end with Kodi's own next show, and the time passing while the
-add-on waits (service._shutdown). The structure (where the calls sit, who
-writes what) is checked with ast.
+add-on waits. The structure (where the calls sit, who writes what) is checked
+with ast.
+
+The repair after the TV test of 2026-11-19 (the watcher never acted: its move
+began with service._shutdown(0), which Kodi turns into a wait without end, and
+it stood there holding the RESTART lock): Player.service is kodi_faithful's
+FaithfulService, the REAL Service._shutdown / _aborted over a monitor with
+Kodi's rules, so a wait Kodi would never end fails the test (ForeverWait, which
+the add-on's `except Exception` can't swallow). The first build's fake
+_shutdown(wait=0) returned at once, and 78 tests passed over the bug. After
+every test (the autouse check below): no such wait happened, and the RESTART
+lock is free unless the test itself holds it. Every call into the rig counts
+against a loop that never waits (kodi_faithful.Standstill): such a loop fails
+within SPIN_CAP calls instead of recording calls until the memory is full.
 """
 import ast
 import calendar
 import json
 import os
+import threading
 import time
 import types
 import xml.etree.ElementTree as ET
 
 import pytest
 
+import kodi_faithful
 import replayend_helpers as reh
 import restart_helpers as rh
-from test_imports67_livetv_subtitles import SERVICES, S_TREE, _calls, _class, _function, _method, _owner_map
+from kodi_faithful import FaithfulMonitor, FaithfulService, ForeverWait, Standstill, compile_method
+from test_imports67_livetv_subtitles import SERVICES, S_TREE, _calls, _class, _method, _owner_map
 
 HERE  = os.path.dirname(os.path.abspath(__file__))
 ADDON = os.path.dirname(HERE)
@@ -81,24 +96,9 @@ def shows(next_start=E):
             (OTHER, OTHER_CID, S - 1800, E + 9000, 'Another channel')]
 
 
-class Lock(object):
-    """Player._restart_lock: a blocking acquire while it is held would wait for the restart (a
-    deadlock in a test), so it raises instead; every acquire is recorded."""
-
-    def __init__(self):
-        self.held, self.acquires = False, []
-
-    def acquire(self, blocking=True, timeout=-1):
-        self.acquires.append(blocking)
-        if self.held:
-            if blocking: raise AssertionError('a blocking acquire would wait for the restart')
-            return False
-        self.held = True
-        return True
-
-    def release(self):
-        if not self.held: raise RuntimeError('release unlocked lock')
-        self.held = False
+# Player._restart_lock: kodi_faithful.RestartLock (a blocking acquire while it is held raises ForeverWait;
+# the imports.62 rig uses it too).
+Lock = kodi_faithful.RestartLock
 
 
 class Kodi(object):
@@ -224,6 +224,7 @@ class RPC(object):
     def _call(self, name, *args):
         self.calls.append((name,) + args)
         self.rig.rpc_times.append((name, self.rig.t))
+        self.rig.note(name)
         hook = self.rig.hooks.get(name)
         if hook is not None: hook()
 
@@ -265,6 +266,7 @@ class FakeXbmc(object):
 
     def getCondVisibility(self, condition):
         self.reads.append(condition)
+        self.rig.note(condition)
         hook = self.rig.hooks.get(condition)
         if hook is not None: hook()
         p = self.rig.kodi.playing
@@ -283,23 +285,14 @@ class FakeBuiltin(object):
         self.rig = rig
 
     def getIdle(self):
+        self.rig.note('getIdle')
         hook = self.rig.hooks.get('getIdle')
         if hook is not None: hook()
         return self.rig.kodi.idle()
 
     def isBusyDialog(self):
+        self.rig.note('isBusyDialog')
         return False
-
-
-class Service(object):
-    """Player.service: _shutdown(wait) is the add-on waiting; Kodi goes on meanwhile."""
-
-    def __init__(self, rig):
-        self.rig = rig
-
-    def _shutdown(self, wait=0):
-        self.rig.kodi.advance(wait)
-        return self.rig.closing_at is not None and self.rig.t >= self.rig.closing_at
 
 
 class PlayerBase(object):
@@ -308,26 +301,40 @@ class PlayerBase(object):
     def __init__(self, rig):
         self.rig = rig
         self._play_epoch, self._play_stops, self._play_errors = 0, 0, 0
-        self._restart_lock = Lock()
-        self.jsonRPC, self.service = RPC(rig), Service(rig)
+        self._restart_lock = rig.lock
+        self.jsonRPC = RPC(rig)
+        # imports.70 (the repair): the REAL Service._shutdown / _aborted over a monitor with Kodi's
+        # rules. While the add-on waits, the rig's clock moves and Kodi goes on (kodi.advance); a
+        # wait Kodi would never end raises ForeverWait. Kodi closes at `rig.closing_at`; the
+        # add-on's own shutdown flag is `rig.pending_shutdown`.
+        # The monitor counts its own calls on the rig's standstill guard and is traced (rig.traced).
+        self.service = FaithfulService(advance=rig.kodi.advance, clock=lambda: rig.t, closing_at=lambda: rig.closing_at,
+                                       pending=rig.pending, violations=rig.violations, on_call=rig.traced, gate=rig.gate,
+                                       standstill=rig.standstill)
+        self.monitor = self.service.monitor                   # as services.py wires it: Service.monitor is the Player's
         self.logged, self.moves, self.lookups = [], [], []
         # as Player.__init__ does, last (test_state_is_per_instance_and_set_last_in_init checks it)
         self._replayEndFacts = None
         self._replayEndTrack = None
 
     def log(self, msg, level=0):
+        self.rig.note('log')
         self.logged.append((msg, level, self.rig.t))
 
     def isPlaying(self):
+        self.rig.note('isPlaying')
         return self.rig.kodi.playing is not None
 
     def getTime(self):
+        self.rig.note('getTime')
         return self.rig.kodi.times()[0]
 
     def getTotalTime(self):
+        self.rig.note('getTotalTime')
         return self.rig.kodi.times()[1]
 
     def getPlayingItem(self):
+        self.rig.note('getPlayingItem')
         p = self.rig.kodi.playing
         if p is None: raise RuntimeError('Kodi is not playing any media file')
         props = dict(p['props'])
@@ -335,27 +342,56 @@ class PlayerBase(object):
 
     def stop(self):
         self.rig.stops.append(self.rig.t)
+        self.rig.note('stop')
         if self.rig.kodi.playing is not None: self.rig.kodi.gone(stops=1)
+
+    def _runRestart(self, request):
+        """imports.62's restart itself, recorded (the real requestRestart around it takes and
+        gives back the RESTART lock); `rig.during_restart` runs while it holds the lock."""
+        self.rig.standstill('_runRestart')
+        self.rig.restarts.append((self.rig.t, dict(request)))
+        if self.rig.during_restart is not None: self.rig.during_restart()
 
     def at_level(self, level):
         return [m for m, lv, _ in self.logged if lv == level]
 
 
+RIGS = []                                                     # every Rig of the running test (the autouse check)
+
+
 class Rig(object):
     """A fake player whose imports.70 methods are the real ones, on Kodi's model and the test's
-    clock (it starts 10 minutes into the frozen show, when the 2026-11-15 RESTART came)."""
+    clock (it starts 10 minutes into the frozen show, when the 2026-11-15 RESTART came). Also real:
+    Player.service's _shutdown / _aborted (kodi_faithful) and imports.62's requestRestart, the
+    other taker of the RESTART lock (its _runRestart is PlayerBase's recorder).
+    `threads`: the move and the restart run on real threads through the add-on's own @threadit, as
+    in Kodi (`rig.threads`; the default drops the decorators, so they run inline). `lock`: the
+    RESTART lock to use (default: the recording Lock above). `gate`: a threading.Event; with it a
+    wait Kodi would never end blocks, as on the TV, until the test sets it (FaithfulMonitor)."""
 
-    def __init__(self, guide=None, t=S + 600):
+    def __init__(self, guide=None, t=S + 600, threads=False, lock=None, gate=None):
         self.t, self.closing_at, self.item_id, self.broadcasts_fail = float(t), None, None, None
         self.hooks, self.rpc_times, self.stops, self.kodi_autoplays = {}, [], [], []
         self.before_move = None
+        # imports.70 (the repair): what Kodi would never do (kodi_faithful), the add-on's own
+        # shutdown flag, the restarts that ran, and the call sweep (note()). `standstill` counts
+        # every call into the rig: a loop that never waits fails within SPIN_CAP calls
+        # (kodi_faithful.Standstill), where it would record its calls for ever.
+        self.violations, self.pending_shutdown, self.gate = [], False, gate
+        self.standstill = Standstill(lambda: self.t, self.violations)
+        self.restarts, self.during_restart, self.threads = [], None, []
+        self.tracing, self.trace, self.traces, self.at_call = False, None, [], None
+        self.lock = Lock(self.violations, self.standstill) if lock is None else lock
         self.kodi = Kodi(self, shows() if guide is None else guide)
         self.xbmc = FakeXbmc(self)
         g = dict(xbmc=self.xbmc, BUILTIN=FakeBuiltin(self), replayend_helpers=reh, restart_helpers=rh,
-                 clock_helpers=types.SimpleNamespace(now=lambda: self.t),
+                 clock_helpers=types.SimpleNamespace(now=self.now),
                  Globals=types.SimpleNamespace(_decodePlot=decode))
-        ns = {name: _function('Player', name, **g) for name in NEW_METHODS}
+        # compile_method keeps each method's compiled code (the sweeps build hundreds of rigs) and
+        # its real line numbers in services.py.
+        ns = {name: compile_method('services.py', 'Player', name, **g) for name in NEW_METHODS}
         real_lookup, real_move = ns['_lookupReplayEnd'], ns['_moveReplayEnd']
+        real_restart = compile_method('services.py', 'Player', 'requestRestart', **g)
         rig = self
 
         def _lookupReplayEnd(player, epoch):
@@ -365,10 +401,66 @@ class Rig(object):
         def _moveReplayEnd(player, facts, epoch):
             player.moves.append((rig.t, dict(facts), epoch))
             if rig.before_move is not None: rig.before_move()
-            return real_move(player, facts, epoch)
+            if not rig.tracing: return real_move(player, facts, epoch)
+            rig.trace = []
+            try: return real_move(player, facts, epoch)
+            finally:
+                rig.traces.append(rig.trace)
+                rig.trace = None
 
-        ns.update(_lookupReplayEnd=_lookupReplayEnd, _moveReplayEnd=_moveReplayEnd)
+        def requestRestart(player, request=None):
+            return real_restart(player, request)
+
+        if threads:
+            from globals import threadit                      # pool.py's own decorator: a real thread per call
+
+            def on_a_thread(method):
+                threaded = threadit(method)
+
+                def start(*args):
+                    thread = threaded(*args)
+                    rig.threads.append(thread)
+                    return thread
+                return start
+            _moveReplayEnd, requestRestart = on_a_thread(_moveReplayEnd), on_a_thread(requestRestart)
+
+        ns.update(_lookupReplayEnd=_lookupReplayEnd, _moveReplayEnd=_moveReplayEnd, requestRestart=requestRestart)
         self.player = type('FakePlayer', (PlayerBase,), ns)(self)
+        RIGS.append(self)
+
+    def note(self, name):
+        """Every call the compiled methods make into Kodi (JSON-RPC, conditions, the idle time, the
+        player) and into the add-on's own log and shutdown flag passes here: counted by the rig's
+        standstill guard, then traced (traced()). The monitor's calls are traced directly: the
+        monitor counts them itself."""
+        self.standstill(name)
+        self.traced(name)
+
+    def traced(self, name):
+        """While a move is traced (`tracing`) the calls are listed, one list per move in `traces`,
+        and `at_call` = (n, action) runs `action` during the n-th one, once: it raises (that call
+        failing) or changes Kodi (it starts to close)."""
+        if self.trace is None: return
+        self.trace.append(name)
+        if self.at_call is not None and len(self.trace) == self.at_call[0]:
+            action, self.at_call = self.at_call[1], None
+            action()
+
+    def pending(self):
+        """PROPERTIES.isPendingShutdown(): the add-on's own shutdown flag."""
+        self.note('isPendingShutdown')
+        return self.pending_shutdown
+
+    def now(self):
+        """clock_helpers.now(): counted (a loop that only reads the clock would turn for ever on
+        this one), not traced: the sweeps make Kodi calls fail, and reading the clock can't."""
+        self.standstill('clock_helpers.now()')
+        return self.t
+
+    def lock_leaked(self):
+        """The RESTART lock was taken by the code under test and not given back."""
+        lock = self.player._restart_lock
+        return lock.leaked() if isinstance(lock, Lock) else lock.locked()
 
     def tick(self, times=1):
         """Monitor._chkIdle's not-Custom tick, about once a second."""
@@ -420,6 +512,38 @@ def to_the_live_edge(rig, flag=None):
     rig.tick(8)
     rig.kodi.seek(rig.kodi.times()[1] - 1)
     return E + TAIL
+
+
+def about_to_move(flag=None, **rig_options):
+    """A rig whose replay stands frozen at the live edge, one tick before the move is due
+    -> (rig, the time it is due). The 12 minutes in which the window still grows are jumped over
+    (the tick's count restarts after such a gap, as after a suspend), so the freeze and the move
+    come at the same times as in to_the_live_edge: well after the guide end, whatever the rule."""
+    rig = Rig(t=E - 100, **rig_options)
+    stuck = to_the_live_edge(rig, flag=flag)
+    rig.t = stuck - 3.0
+    rig.tick_until(stuck + reh.STALL_S - 1)
+    assert rig.player.moves == [] and rig.player._replayEndTrack['since'] == stuck
+    return rig, stuck + reh.STALL_S
+
+
+def check_rigs(rigs):
+    """imports.70 (the repair): what must hold for every rig a test built. No wait Kodi would never
+    end was asked for (also one swallowed by an `except`), and the RESTART lock is free unless the
+    test itself holds it. 2026-11-19: the move stood in such a wait, holding the lock."""
+    for built in rigs:
+        assert built.violations == [], 'Kodi would wait forever: %s' % built.violations
+        assert not built.lock_leaked(), 'the RESTART lock was not given back'
+
+
+@pytest.fixture(autouse=True)
+def kodi_faithful_checks():
+    """check_rigs after every test of this file."""
+    del RIGS[:]
+    yield
+    rigs = RIGS[:]
+    del RIGS[:]
+    check_rigs(rigs)
 
 
 @pytest.fixture
@@ -831,6 +955,8 @@ def test_a_custom_channels_show_is_never_watched():
 
 
 def test_kodi_closing_ends_the_watch_without_falling_back(rig):
+    """The watch waits through the real Service._shutdown, WATCH_POLL at a time; the wait in which
+    Kodi starts to close ends there and ends the move: no fallback, nothing stopped."""
     stuck = to_the_live_edge(rig)
     rig.kodi.behave[('broadcast', NEXT)] = 'ignore'
     rig.closing_at = stuck + reh.STALL_S + 3
@@ -838,14 +964,36 @@ def test_kodi_closing_ends_the_watch_without_falling_back(rig):
     assert rig.opens() == [broadcast(NEXT)] and rig.stops == []
     assert rig.lines()[-1] == 'replay end: broadcast %s: playing broadcast %s' % (BID, NEXT)
     assert rig.t == stuck + reh.STALL_S + 3
+    assert rig.player.monitor.waits == [rh.WATCH_POLL] * 6
+    assert rig.player.service.logged == [('_shutdown, pendingShutdown = True, wait = %s' % rh.WATCH_POLL, 0)]
 
 
 def test_kodi_closing_before_the_move_does_nothing(rig):
+    """The move's first question, "is Kodi closing?", is asked without waiting (Service._aborted:
+    one read of Kodi's flag, no time passes, no bookkeeping). TV test 2026-11-19: the first build
+    asked with _shutdown(0), which Kodi turns into a wait without end."""
     stuck = to_the_live_edge(rig)
     rig.closing_at = stuck
     rig.tick_until(stuck + reh.STALL_S)
     assert len(rig.player.moves) == 1 and rig.opens() == [] and rig.stops == []
     assert [c[0] for c in rig.player.jsonRPC.calls] == ['GetItem', 'GetChannels']
+    assert rig.player.monitor.waits == [] and rig.player.monitor.checks == 1 and rig.t == stuck + reh.STALL_S
+    assert rig.player.service.pendingShutdown is False and rig.player.service.logged == []
+
+
+def test_the_addons_own_shutdown_flag_before_the_move_does_nothing(rig):
+    """The other signal of Service._aborted: the add-on's own pending-shutdown flag, with Kodi
+    still running. Asked without waiting too."""
+    stuck = to_the_live_edge(rig)
+    rig.tick_until(stuck + reh.STALL_S - 1)
+    rig.pending_shutdown = True
+    rig.tick(1)
+    assert len(rig.player.moves) == 1 and rig.opens() == [] and rig.stops == []
+    assert [c[0] for c in rig.player.jsonRPC.calls] == ['GetItem', 'GetChannels']
+    assert rig.player.monitor.waits == [] and rig.t == stuck + reh.STALL_S
+    rig.pending_shutdown = False
+    rig.tick_until(stuck + reh.STALL_S + reh.RETRY_S)             # the second attempt, a minute later, moves
+    assert rig.open_times() == [stuck + reh.STALL_S + reh.RETRY_S] and rig.opens() == [broadcast(NEXT)]
 
 
 def test_a_failing_tick_logs_one_error_per_playback(rig):
@@ -1021,6 +1169,472 @@ def test_the_sample_reads(rig):
     assert (sample['pos'], sample['total']) == (None, None)
 
 
+# === the repair of 2026-11-19: the RESTART lock after every way out of the move ===================
+# The move takes Player._restart_lock, which RESTART (imports.62) takes too, both without waiting.
+# On the TV the first build's move never left its first line and never gave the lock back: every
+# RESTART was refused until Kodi restarted. These tests use freezes well after the guide end
+# (to_the_live_edge / about_to_move), where the old and the new wait rule act at the same time.
+
+def _away_during_the_live_watch(rig):
+    def viewer():
+        if len(rig.opens()) == 2:
+            rig.kodi.window = False
+            rig.hooks['GetItem'] = None
+    rig.hooks['GetItem'] = viewer
+
+
+def _key_during_player_open(rig):
+    rig.kodi.rpc_delay = 1.0
+    rig.hooks['Open'] = rig.kodi.press_key
+
+
+# name: (Kodi's flag, what happens, the Player.Open calls, stops, what plays afterwards, the move's JSON-RPC reads)
+WAYS_OUT = {
+    '01 the lock is busy':
+        (None, lambda rig, due: setattr(rig.lock, 'held', True), [], 0, BID, []),
+    '02 Kodi is closing':
+        (None, lambda rig, due: setattr(rig, 'closing_at', rig.t), [], 0, BID, []),
+    "03 the add-on's own shutdown flag":
+        (None, lambda rig, due: setattr(rig, 'pending_shutdown', True), [], 0, BID, []),
+    '04 it no longer plays':
+        (None, lambda rig, due: setattr(rig, 'item_id', PREV), [], 0, BID, ['GetItem']),
+    '05 the viewer is not ready':
+        (None, lambda rig, due: rig.hooks.update(GetBroadcasts=lambda: setattr(rig.kodi, 'window', False)), [], 0, BID,
+         ['GetItem', 'GetBroadcasts']),
+    '06 the flag is off: stop':
+        (False, lambda rig, due: None, [], 1, None, ['GetItem']),
+    '07 the next show starts':
+        (None, lambda rig, due: None, [broadcast(NEXT)], 0, NEXT, None),
+    '08a something else plays':
+        (None, lambda rig, due: rig.kodi.behave.update({('broadcast', NEXT): 'other'}), [broadcast(NEXT)], 0, 'other', None),
+    '08b the viewer took over':
+        (None, lambda rig, due: (rig.kodi.behave.update({('broadcast', NEXT): 'gone'}), _key_during_player_open(rig)),
+         [broadcast(NEXT)], 0, None, None),
+    '08c it went without an error':
+        (None, lambda rig, due: rig.kodi.behave.update({('broadcast', NEXT): 'gone'}), [broadcast(NEXT)], 0, None, None),
+    '09 Kodi closes during the watch':
+        (None, lambda rig, due: (rig.kodi.behave.update({('broadcast', NEXT): 'ignore'}), setattr(rig, 'closing_at', due + 3)),
+         [broadcast(NEXT)], 0, BID, None),
+    '10 next refused, live starts':
+        (None, lambda rig, due: rig.kodi.behave.update({('broadcast', NEXT): 'refuse'}), [broadcast(NEXT), channel(CID)], 0,
+         'live', None),
+    '11 live refused, not stopping now':
+        (None, lambda rig, due: (rig.kodi.behave.update({('broadcast', NEXT): 'refuse', ('channel', CID): 'ignore'}),
+                                 _away_during_the_live_watch(rig)), [broadcast(NEXT), channel(CID)], 0, BID, None),
+    '12 live refused, stop':
+        (None, lambda rig, due: rig.kodi.behave.update({('broadcast', NEXT): 'refuse', ('channel', CID): 'refuse'}),
+         [broadcast(NEXT), channel(CID)], 1, None, None),
+}
+
+
+def _plays(rig):
+    p = rig.kodi.playing
+    if p is None: return None
+    if p['kind'] == 'live': return 'live' if p['cid'] == CID else 'other'
+    return p['bid']
+
+
+@pytest.mark.parametrize('way', sorted(WAYS_OUT))
+def test_the_restart_lock_is_free_after_every_way_out(way):
+    """Every way the move can end: it took the lock once, without waiting, and gave it back once
+    (a lock someone else holds is left alone), and a RESTART pressed afterwards runs."""
+    flag, happens, opens, stops, plays, reads = WAYS_OUT[way]
+    rig, due = about_to_move(flag=flag)
+    happens(rig, due)
+    rig.tick(1)
+    assert len(rig.player.moves) == 1 and rig.player.moves[0][0] == due
+    assert rig.opens() == opens and len(rig.stops) == stops and _plays(rig) == plays
+    if reads is not None: assert [c[0] for c in rig.player.jsonRPC.calls][2:] == reads
+    busy = way.startswith('01')
+    assert rig.lock.acquires == [False] and rig.lock.held is busy
+    assert (rig.lock.taken, rig.lock.released) == ((0, 0) if busy else (1, 1))
+    assert rig.violations == [] and rig.errors() == []
+    rig.lock.held = False                                     # (01: whoever held it is done)
+    rig.player.requestRestart({'source': 'remote'})
+    assert [request for _t, request in rig.restarts] == [{'source': 'remote'}]
+    assert rig.lock.held is False and rig.lock.taken == rig.lock.released
+
+
+def _both(behaviour):
+    def setup(rig):
+        rig.kodi.behave[('broadcast', NEXT)] = rig.kodi.behave[('channel', CID)] = behaviour
+    return setup
+
+
+def _the_last_guide_entry(rig):
+    rig.kodi.guide = _last_entry(rig.kodi.guide)
+
+
+# name: (Kodi's flag, the setup)
+SCENARIOS = {'next-works': (None, None), 'next-and-live-refused-stop': (None, _both('refuse')),
+             'next-and-live-ignored-stop': (None, _both('ignore')), 'flag-off-stop': (False, None),
+             'live': (None, _the_last_guide_entry)}
+
+
+def scenario_rig(name):
+    """A rig of that scenario, one tick before its move, with the move's calls traced."""
+    flag, setup = SCENARIOS[name]
+    rig, due = about_to_move(flag=flag)
+    if setup is not None: setup(rig)
+    rig.tracing = True
+    return rig, due
+
+
+def move_calls(name):
+    """Every call one undisturbed move of that scenario makes, in order: JSON-RPC, Kodi's
+    conditions, the idle time, the player, the monitor, the add-on's shutdown flag, the log. A
+    call added to the move later is covered by the sweeps without a change here."""
+    rig, _due = scenario_rig(name)
+    rig.tick(1)
+    assert len(rig.traces) == 1 and rig.traces[0][:2] == ['abortRequested', 'isPendingShutdown']
+    return rig.traces[0]
+
+
+def _raising(error):
+    """An action for Rig.at_call: that call fails with `error`."""
+    def fail():
+        raise error
+    return fail
+
+
+def _closing(rig, seen):
+    """An action for Rig.at_call: Kodi starts to close during that call; `seen` gets the time and
+    what had gone out to Kodi by then."""
+    def close():
+        rig.closing_at = rig.t
+        seen.update(t=rig.t, opens=len(rig.opens()), stops=len(rig.stops))
+    return close
+
+
+def test_the_sweeps_cover_the_whole_move():
+    """What the two sweeps below walk through: every kind of call, the watch included."""
+    seen = {name: move_calls(name) for name in SCENARIOS}
+    wait = 'waitForAbort'                                         # the watch's poll, through the real Service._shutdown
+    assert set(seen['next-works']) == {'abortRequested', 'isPendingShutdown', 'Pvr.IsPlayingEpgTag', 'GetItem',
+                                       'getPlayingItem', 'GetBroadcasts', reh.ACT_WINDOW, 'getIdle', 'log', 'Open',
+                                       wait, 'isPlaying', 'isBusyDialog'}
+    assert seen['next-works'].count('Open') == 1 and seen['live'].count('Open') == 1
+    assert 'Pvr.IsPlayingTv' in seen['live'] and seen['flag-off-stop'][-1] == 'stop'
+    assert seen['next-and-live-refused-stop'].count('Open') == 2 and seen['next-and-live-refused-stop'][-1] == 'stop'
+    polls = int(rh.WATCH_GRACE / rh.WATCH_POLL)
+    assert seen['next-and-live-ignored-stop'].count(wait) == 2 * polls
+    assert [len(seen[name]) for name in sorted(SCENARIOS)] == [9, 19, 305, 25, 19]
+
+
+@pytest.mark.parametrize('failure', [RuntimeError, KeyError, ValueError])
+@pytest.mark.parametrize('scenario', sorted(SCENARIOS))
+def test_the_restart_lock_is_free_after_a_failure_at_any_call(scenario, failure):
+    """Each call of the move fails in turn (three kinds of exception): the lock is free afterwards,
+    at most 2 opens and 1 stop were tried, at most one ERROR line was written; and the second
+    attempt a minute later leaves nothing behind either."""
+    calls = move_calls(scenario)
+    for k in range(1, len(calls) + 1):
+        rig, due = scenario_rig(scenario)
+        rig.at_call = (k, _raising(failure('call %d (%s) failed' % (k, calls[k - 1]))))
+        rig.tick(1)
+        what = (scenario, k, calls[k - 1])
+        assert rig.at_call is None and len(rig.player.moves) == 1, what
+        assert rig.lock.held is False and (rig.lock.taken, rig.lock.released) == (1, 1), what
+        assert len(rig.opens()) <= 2 and len(rig.stops) <= 1 and len(rig.errors()) <= 1, what
+        assert all(m.startswith('_moveReplayEnd, failed!') for m in rig.errors()) and rig.violations == [], what
+        # reported once, except the flag read, whose failure counts as "flag off" (_replayEndAutoplay)
+        if calls[k - 1] != 'getPlayingItem': assert len(rig.errors()) == 1, what
+        rig.tick(int(reh.RETRY_S) + 30)
+        assert rig.lock.held is False and rig.lock.taken == rig.lock.released and rig.violations == [], what
+        assert len(rig.player.moves) <= 2 and len(rig.opens()) <= 4 and len(rig.stops) <= 2 and len(rig.errors()) <= 1, what
+
+
+@pytest.mark.parametrize('scenario', sorted(SCENARIOS))
+def test_the_restart_lock_is_free_when_kodi_ends_the_thread_at_any_call(scenario):
+    """At shutdown Kodi ends an add-on's threads by raising SystemExit in them, wherever they are
+    (xbmc/interfaces/python/PythonInvoker.cpp: 'Raise a SystemExit exception in python threads').
+    That is no Exception, so the move's `except` never sees it: the `finally` gives the lock back."""
+    calls = move_calls(scenario)
+    for k in range(1, len(calls) + 1):
+        rig, due = scenario_rig(scenario)
+        rig.at_call = (k, _raising(SystemExit(0)))
+        with pytest.raises(SystemExit):
+            rig.tick(1)
+        what = (scenario, k, calls[k - 1])
+        assert rig.lock.held is False and (rig.lock.taken, rig.lock.released) == (1, 1), what
+        assert rig.errors() == [] and len(rig.opens()) <= 2 and len(rig.stops) <= 1, what
+
+
+@pytest.mark.parametrize('scenario', sorted(SCENARIOS))
+def test_kodi_closing_at_any_call_ends_the_move_within_one_poll(scenario):
+    """Kodi starts to close during each call of the move in turn: the move ends without another
+    wait (the clock moves at most one WATCH_POLL further), the lock is free, nothing fails. When
+    Kodi answers the opens (it takes them, or lets them pass), at most one more open or stop goes
+    out to the closing Kodi: the watch after it sees the shutdown. When Kodi refuses the opens
+    outright there is no watch, so no wait and no shutdown check between the steps: the usual
+    bounds (2 opens, 1 stop) hold."""
+    calls = move_calls(scenario)
+    answered = scenario != 'next-and-live-refused-stop'
+    for k in range(1, len(calls) + 1):
+        rig, due = scenario_rig(scenario)
+        closing = {}
+        rig.at_call = (k, _closing(rig, closing))
+        rig.tick(1)
+        what = (scenario, k, calls[k - 1])
+        assert closing and rig.t - closing['t'] <= rh.WATCH_POLL, what
+        assert rig.lock.held is False and (rig.lock.taken, rig.lock.released) == (1, 1), what
+        assert rig.errors() == [] and rig.violations == [], what
+        after = len(rig.opens()) - closing['opens'] + len(rig.stops) - closing['stops']
+        assert len(rig.opens()) <= 2 and len(rig.stops) <= 1 and after <= (1 if answered else 3), what
+        if calls[k - 1] == 'abortRequested' and k == 1: assert rig.opens() == [] and rig.stops == [], what
+        waits = rig.player.monitor.waits
+        assert all(w == rh.WATCH_POLL for w in waits), what
+
+
+def test_restart_works_after_a_move(rig):
+    """The real requestRestart (imports.62) takes the same lock after a whole move."""
+    stuck = to_the_live_edge(rig)
+    rig.tick_until(stuck + reh.STALL_S + 5)
+    assert rig.opens() == [broadcast(NEXT)] and rig.kodi.playing['bid'] == NEXT
+    rig.player.requestRestart({'source': 'remote'})
+    assert rig.restarts == [(rig.t, {'source': 'remote'})]
+    assert rig.lock.acquires == [False, False] and (rig.lock.taken, rig.lock.released) == (2, 2) and rig.lock.held is False
+    assert rig.errors() == []
+
+
+def test_restart_pressed_during_a_move_is_ignored_and_works_afterwards(rig):
+    """While the move watches its open it holds the lock: a RESTART pressed then is dropped, as a
+    second restart is (no note); once the move is over the next press runs."""
+    stuck = to_the_live_edge(rig)
+    rig.kodi.behave[('broadcast', NEXT)] = 'ignore'           # the watch runs its 10 s
+    during = []
+
+    def press_restart():
+        if rig.opens() and not during:
+            rig.player.requestRestart({'source': 'remote'})
+            during.append((rig.lock.held, list(rig.restarts), rig.lock.taken, rig.lock.released))
+    rig.hooks['GetItem'] = press_restart
+    rig.tick_until(stuck + reh.STALL_S)
+    assert during == [(True, [], 1, 0)]                       # the move still held it; the press did nothing
+    assert rig.opens() == [broadcast(NEXT), channel(CID)] and rig.kodi.playing['kind'] == 'live'
+    assert rig.lock.held is False and (rig.lock.taken, rig.lock.released) == (1, 1)
+    rig.player.requestRestart({'source': 'remote'})
+    assert [request for _t, request in rig.restarts] == [{'source': 'remote'}]
+    assert rig.lock.acquires == [False, False, False] and (rig.lock.taken, rig.lock.released) == (2, 2)
+    assert rig.errors() == []
+
+
+def test_a_move_due_during_a_restart_waits_for_the_second_attempt(rig):
+    """A RESTART is running (it holds the lock) when the move comes due: that attempt does nothing
+    and gives nothing back; the second one, a minute later, moves."""
+    stuck = to_the_live_edge(rig)
+    due = stuck + reh.STALL_S
+    rig.tick_until(due - 2)
+    rig.during_restart = lambda: rig.tick_until(due + 5)      # the idle tick goes on while the restart runs
+    rig.player.requestRestart({'source': 'popup'})
+    assert len(rig.restarts) == 1 and rig.t == due + 5
+    assert [t for t, _facts, _epoch in rig.player.moves] == [due] and rig.opens() == [] and rig.stops == []
+    assert rig.lock.acquires == [False, False] and (rig.lock.taken, rig.lock.released) == (1, 1) and rig.lock.held is False
+    rig.during_restart = None
+    rig.tick_until(due + reh.RETRY_S + 5)
+    assert rig.open_times() == [due + reh.RETRY_S] and rig.opens() == [broadcast(NEXT)]
+    assert rig.lock.acquires == [False, False, False] and (rig.lock.taken, rig.lock.released) == (2, 2)
+    assert rig.errors() == []
+
+
+def test_the_rigs_lock_refuses_a_wait_for_the_restart(rig):
+    """The rig's own lock: taking it with a wait while it is held (what a blocking acquire in the
+    move or in requestRestart would do) is a ForeverWait, recorded like a refused Kodi wait."""
+    rig.lock.held = True
+    assert rig.lock.acquire(False) is False
+    for blocking in ((), (True,), (True, 5)):
+        with pytest.raises(ForeverWait):
+            rig.lock.acquire(*blocking)
+    assert rig.lock.acquires == [False, True, True, True] and len(rig.violations) == 3
+    assert kodi_faithful.provoked() == rig.violations and not rig.lock.leaked()
+    del rig.violations[:]
+    rig.lock.held = False
+    assert rig.lock.acquire() is True and rig.lock.leaked() and rig.lock_leaked()
+    rig.lock.release()
+    assert not rig.lock.leaked() and (rig.lock.taken, rig.lock.released) == (1, 1)
+    with pytest.raises(RuntimeError):
+        rig.lock.release()
+
+
+def test_the_check_after_every_test_catches_a_forever_wait_and_a_kept_lock():
+    """The autouse check itself: a recorded wait Kodi would never end, or a RESTART lock the code
+    under test took and kept, fails it; a lock the test holds itself does not."""
+    rig = Rig(t=E - 100)
+    check_rigs([rig])
+    rig.violations.append('waitForAbort(0)')
+    with pytest.raises(AssertionError, match='Kodi would wait forever'):
+        check_rigs([rig])
+    del rig.violations[:]
+    rig.lock.acquire(False)
+    with pytest.raises(AssertionError, match='not given back'):
+        check_rigs([rig])
+    rig.lock.release()
+    rig.lock.held = True                                      # the test's own hold: fine
+    check_rigs([rig])
+    rig.lock.held = False
+    real = Rig(t=E - 100, lock=threading.Lock())
+    real.lock.acquire()
+    with pytest.raises(AssertionError, match='not given back'):
+        check_rigs([real])
+    real.lock.release()
+    check_rigs([real])
+    assert RIGS == [rig, real]                                # every rig a test builds is on the list
+
+
+def _compiled_globals(rig):
+    """What the compiled methods see as their module globals (BUILTIN, clock_helpers, ...)."""
+    return type(rig.player).__dict__['_chkReplayEnd'].__globals__
+
+
+# Every call the compiled methods can make into the rig, by the name it is traced under (a
+# condition read under 'getCondVisibility'; the clock, the lock and the restart recorder are
+# counted but not traced): name -> a function of the rig that makes one such call.
+RIG_CALLS = {
+    'GetItem':           lambda rig: rig.player.jsonRPC.getPlayerItemRef,
+    'GetChannels':       lambda rig: rig.player.jsonRPC.getPVRChannelsNow,
+    'GetBroadcasts':     lambda rig: lambda: rig.player.jsonRPC.getPVRBroadcastTimes(CID),
+    'Open':              lambda rig: lambda: rig.player.jsonRPC.playerOpen(broadcast(NEXT)),
+    'getCondVisibility': lambda rig: lambda: rig.xbmc.getCondVisibility(reh.ACT_WINDOW),
+    'getIdle':           lambda rig: _compiled_globals(rig)['BUILTIN'].getIdle,
+    'isBusyDialog':      lambda rig: _compiled_globals(rig)['BUILTIN'].isBusyDialog,
+    'log':               lambda rig: lambda: rig.player.log('a line'),
+    'isPlaying':         lambda rig: rig.player.isPlaying,
+    'getTime':           lambda rig: rig.player.getTime,
+    'getTotalTime':      lambda rig: rig.player.getTotalTime,
+    'getPlayingItem':    lambda rig: rig.player.getPlayingItem,
+    'stop':              lambda rig: rig.player.stop,
+    'isPendingShutdown': lambda rig: rig.pending,
+    'abortRequested':    lambda rig: rig.player.monitor.abortRequested,
+    'clock':             lambda rig: _compiled_globals(rig)['clock_helpers'].now,
+    'lock':              lambda rig: lambda: rig.player._restart_lock.acquire(False),
+    'restart':           lambda rig: lambda: rig.player._runRestart({'source': 'remote'}),
+}
+
+
+def test_every_call_into_the_rig_counts_against_a_loop_that_never_waits():
+    """The rig's standstill guard (kodi_faithful.Standstill) sees every call the compiled methods
+    can make into the rig: each one, made more than SPIN_CAP times in a row at one instant of the
+    rig's clock, is refused on the last (ForeverWait, recorded), and time passing starts the count
+    again. So a loop whose wait the rig never sees fails within SPIN_CAP calls, whatever it calls,
+    where it would record calls for ever (2026-11-19 23:25: about 45 MB a second, until this
+    machine froze). The calls a move makes (the sweeps' traces) are all on the list."""
+    cap = kodi_faithful.SPIN_CAP
+    assert 100 <= cap <= 10000                                # this test loops that often
+    traced = set()
+    for scenario in SCENARIOS: traced.update(move_calls(scenario))
+    conditions = {reh.ACT_WINDOW, reh.BUSY, 'Pvr.IsPlayingEpgTag', 'Pvr.IsPlayingTv'}
+    assert traced - conditions - {'waitForAbort'} <= set(RIG_CALLS)       # waitForAbort: the contract tests
+    for name in sorted(RIG_CALLS):
+        rig = Rig(t=E - 100)
+        rig.restart()
+        call = RIG_CALLS[name](rig)
+        rig.t += 0.25                                         # a new instant, reached without a call
+        for _ in range(cap): call()
+        rig.t += 0.25                                         # time passed: the count starts again
+        for _ in range(cap): call()
+        assert rig.violations == [] and rig.standstill.count == cap, name
+        with pytest.raises(ForeverWait, match='calls in a row while no time passed'):
+            call()
+        assert len(rig.violations) == 1 and kodi_faithful.provoked() == rig.violations, name
+        del rig.violations[:]
+        if rig.lock.held: rig.lock.release()
+
+
+class _WayOut(BaseException):
+    """A test's own way out of a loop the standstill guard should have ended (after WAY_OUT turns,
+    whatever SPIN_CAP says)."""
+
+
+WAY_OUT = 20000
+
+
+def test_a_watch_whose_waits_let_no_time_pass_fails_within_spin_cap_calls():
+    """2026-11-19 23:25: a deliberately broken stand-in, a service whose waits let no time pass,
+    made the move's watch turn for ever on the rig's clock while the rig recorded every call: about
+    45 MB a second, until RAM and swap were full and this machine froze. The same loop through the
+    real move: Kodi's clock stands still in every wait (the monitor moves it no more) and the next
+    show never starts. The standstill guard ends it within SPIN_CAP calls into the rig: the move
+    fails loudly (ForeverWait passes its `except Exception`), its `finally` gives the RESTART lock
+    back, the refusal is on the record, and only a few hundred calls were recorded."""
+    cap = kodi_faithful.SPIN_CAP
+    assert 100 <= cap <= 10000
+    rig, due = about_to_move()
+    rig.kodi.behave[('broadcast', NEXT)] = 'ignore'
+    rig.player.monitor._advance = lambda seconds: None
+    polls = []
+
+    def way_out():
+        polls.append(rig.t)
+        if len(polls) > WAY_OUT: raise _WayOut('the standstill guard let the watch turn on')
+    rig.hooks['GetItem'] = way_out
+    with pytest.raises(ForeverWait, match='calls in a row while no time passed'):
+        rig.tick(1)
+    assert rig.t == due and len(rig.player.moves) == 1 and rig.opens() == [broadcast(NEXT)] and rig.stops == []
+    assert 0 < len(polls) < cap // 4 and len(rig.player.jsonRPC.calls) < cap // 2 and len(rig.xbmc.reads) < cap // 2
+    assert rig.lock.held is False and (rig.lock.taken, rig.lock.released) == (1, 1) and rig.errors() == []
+    assert len(rig.violations) == 1 and kodi_faithful.provoked() == rig.violations
+    del rig.violations[:]
+
+
+# How long a real thread gets to finish work that takes it a few ms (the box may be busy).
+REAL_THREAD_S = 5.0
+
+
+@pytest.fixture
+def kodi_gate():
+    """For the test with real threads: the gate a wait Kodi would never end stands at
+    (FaithfulMonitor). It is opened afterwards (Kodi closing), so a thread that got stuck there, as
+    on the TV, ends with its test."""
+    gate = threading.Event()
+    yield gate
+    gate.set()
+
+
+def test_the_2026_11_19_hang_is_gone(kodi_gate):
+    """The TV failure, with what it had: a real thread through the add-on's own @threadit, a real
+    threading.Lock, and a Kodi that really blocks on a wait it never ends. The first build's move
+    stood in service._shutdown(0) with the RESTART lock held (this test then fails after
+    REAL_THREAD_S: thread alive, lock held, the RESTART press refused). Repaired: the move ends,
+    the next show plays, the lock is free and a RESTART pressed afterwards runs."""
+    rig, due = about_to_move(threads=True, lock=threading.Lock(), gate=kodi_gate)
+    try:
+        rig.tick(1)                                           # the tick starts the move on its own thread
+        assert rig.t >= due and len(rig.threads) == 1 and rig.threads[0].name.startswith('threadit.')
+        rig.threads[0].join(REAL_THREAD_S)
+        assert not rig.threads[0].is_alive(), 'the move still waits: %s' % rig.violations
+        assert not rig.lock.locked() and rig.violations == []
+        assert rig.opens() == [broadcast(NEXT)] and rig.kodi.playing['bid'] == NEXT and rig.errors() == []
+        rig.player.requestRestart({'source': 'remote'})
+        assert len(rig.threads) == 2
+        rig.threads[1].join(REAL_THREAD_S)
+        assert not rig.threads[1].is_alive()
+        assert [request for _t, request in rig.restarts] == [{'source': 'remote'}] and not rig.lock.locked()
+    finally:
+        kodi_gate.set()
+        for thread in rig.threads: thread.join(REAL_THREAD_S)
+
+
+def test_the_rig_runs_the_real_shutdown_over_the_faithful_monitor(rig):
+    """The wiring: Player.service's _shutdown and _aborted are the code of services.py, and its
+    monitor has Kodi's rules. A fake service that answers at once on any wait must not come back:
+    it let the wait Kodi never ends pass every test."""
+    service = rig.player.service
+    for name in ('_shutdown', '_aborted'):
+        code = getattr(service, name).__func__.__code__
+        assert (os.path.basename(code.co_filename), code.co_name) == ('services.py', name)
+    assert isinstance(service, FaithfulService) and isinstance(service.monitor, FaithfulMonitor)
+    assert rig.player.monitor is service.monitor and service.monitor.standstill is rig.standstill
+    t0 = rig.t
+    assert service._shutdown(rh.WATCH_POLL) is False and rig.t == t0 + rh.WATCH_POLL
+    assert service.monitor.waits == [rh.WATCH_POLL]
+    rig.closing_at = rig.t
+    assert service._aborted() is True and service._shutdown(rh.WATCH_POLL) is True and rig.t == t0 + rh.WATCH_POLL
+    for name in ('_chkReplayEnd', '_replayEndSample', '_runReplayEnd', '_replayEndOpen', '_replayEndAutoplay'):
+        code = type(rig.player).__dict__[name].__code__       # the Player's methods: the real ones, at their real lines
+        assert (os.path.basename(code.co_filename), code.co_name, code.co_firstlineno) == \
+            ('services.py', name, _method('Player', name).lineno)
+
+
 # === structure: where the calls sit, who writes what ==============================================
 
 def test_services_imports_replayend_helpers():
@@ -1060,6 +1674,21 @@ def test_the_move_takes_the_restart_lock_without_waiting():
     assert [ast.unparse(s) for s in tries[0].body] == ['self._runReplayEnd(facts, epoch)']
     mine = [c for c in _calls(S_TREE, 'acquire') if ast.unparse(c.func) == 'self._restart_lock.acquire']
     assert len(mine) == 2 and all([ast.unparse(a) for a in c.args] == ['False'] and not c.keywords for c in mine)
+
+
+def test_the_move_asks_whether_kodi_is_closing_without_waiting():
+    """The repair of 2026-11-19: the move's first step is Service._aborted(), which never waits.
+    The first build's _shutdown(0) is gone, and the only wait the watcher makes is the watch's
+    WATCH_POLL (through the real Service._shutdown); it never calls Kodi's waitForAbort itself."""
+    steps = [s for s in _method('Player', '_runReplayEnd').body if not isinstance(s, ast.FunctionDef)]
+    assert isinstance(steps[0], ast.Assign)                       # bid, cid = ...: no Kodi call before the question
+    assert ast.unparse(steps[1]) == 'if self.service._aborted():\n    return'
+    for name in NEW_METHODS:
+        calls = [ast.unparse(c) for c in ast.walk(_method('Player', name)) if isinstance(c, ast.Call)]
+        waits = [c for c in calls if '_shutdown' in c.split('(')[0] or 'waitForAbort' in c.split('(')[0]]
+        assert waits == (['self.service._shutdown(restart_helpers.WATCH_POLL)'] if name == '_replayEndOpen' else []), name
+        asked = [c for c in calls if c == 'self.service._aborted()']
+        assert len(asked) == (1 if name == '_runReplayEnd' else 0), name
 
 
 def test_single_writers():
@@ -1139,8 +1768,9 @@ def test_the_new_methods_are_python38_and_free_of_bitor():
             src = fh.read()
         ast.parse(src, feature_version=(3, 8))
         assert py39_api_leaks(src) == [], name
-    for name in NEW_METHODS:
-        node = _method('Player', name)
+    changed = [('Player', name) for name in NEW_METHODS] + [('Service', '_shutdown'), ('Service', '_aborted')]
+    for cls, name in changed:
+        node = _method(cls, name)
         assert [n for n in ast.walk(node) if isinstance(n, (ast.BinOp, ast.AugAssign)) and isinstance(n.op, ast.BitOr)] == []
         assert 'imports.70' in ast.get_source_segment(SERVICES, node), name
 

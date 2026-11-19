@@ -7,12 +7,27 @@ the restart methods are compiled out of services.py and run against fakes:
 a stand-in Player whose restart methods are the real ones. The decisions
 themselves are tested in test_imports62_restart_helpers.py. Rule 54, the
 jsonrpc reads and context_restart.py run for real under the stubs.
+
+imports.70 (the repair after the TV test of 2026-11-19): the rig's service is
+kodi_faithful's FaithfulService, the REAL Service._shutdown over a monitor with
+Kodi's rules, as in test_imports70_replay_end.py. RESTART shares its lock with
+the replay-end move, which stood in a wait Kodi never ends while holding it. A
+restart loop that stops waiting (a `step` of 0 in _restartWait, say: the real
+_shutdown then only asks, and no time passes on the rig's clock) now fails its
+test (kodi_faithful.SPIN_CAP), where the old fake _shutdown(wait=0) let it
+turn for ever. Every call into the rig counts there (kodi_faithful.Standstill:
+the monitor and every fake below), so a loop whose wait the rig never sees fails
+too, within SPIN_CAP calls, instead of recording calls until the memory is full.
+The RESTART lock is kodi_faithful.RestartLock, as in the replay-end rig: a take
+that waits while it is held fails its test (ForeverWait), where a threading.Lock
+would hang the run; and Kodi ending the thread at any call of a restart leaves it
+free (the sweep below). After every test: no wait Kodi would never end was
+asked for, and the RESTART lock is free.
 """
 import ast
 import json
 import os
 import sys
-import threading
 import time
 import types
 import xml.etree.ElementTree as ET
@@ -20,6 +35,8 @@ import xml.etree.ElementTree as ET
 import pytest
 
 import restart_helpers as rh
+import kodi_faithful
+from kodi_faithful import FaithfulMonitor, FaithfulService, ForeverWait, RestartLock, Standstill
 
 HERE      = os.path.dirname(os.path.abspath(__file__))
 ADDON     = os.path.dirname(HERE)
@@ -213,6 +230,28 @@ CUSTOM_ROW   = {'channelid': 7, 'hasarchive': True,
                                  'filenameandpath': CUSTOM_PATH}}
 
 
+RIGS = []                       # every Rig of the running test (the autouse check)
+KODI_CLOSES_AT = 120.0          # s on a rig's clock: Kodi closes, so no wait loop of a broken restart runs on
+
+
+def check_rigs(rigs):
+    """imports.70 (the repair): what must hold for every rig a test built. No wait Kodi would never
+    end was asked for (also one swallowed by an `except`), and the RESTART lock is free."""
+    for built in rigs:
+        assert built.violations == [], 'Kodi would wait forever: %s' % built.violations
+        assert not built._restart_lock.locked(), 'the RESTART lock was not given back'
+
+
+@pytest.fixture(autouse=True)
+def kodi_faithful_checks():
+    """check_rigs after every test of this file."""
+    del RIGS[:]
+    yield
+    rigs = RIGS[:]
+    del RIGS[:]
+    check_rigs(rigs)
+
+
 class Rig(object):
     """A stand-in services.Player whose restart methods are the real ones."""
 
@@ -223,92 +262,150 @@ class Rig(object):
         self.calls, self.logs, self.notes, self.dialogs = [], [], [], []
         self.playingItem = self.state.get('info') or {}
         self.replayPercentage, self.maxProgress, self.replay = 5, 98, None
-        self._restart_lock, self._pendingRestart, self._play_epoch = threading.Lock(), None, 1
+        self._pendingRestart, self._play_epoch = None, 1
         self._play_stops, self._play_errors = 0, 0
         self.t0, self.t = time.time(), 0.0
         rig = self
+        # imports.70 (the repair): every call into the rig counts on its standstill guard (the
+        # monitor's too): a loop that never waits fails within kodi_faithful.SPIN_CAP calls.
+        self.violations = []
+        count = self.standstill = Standstill(lambda: rig.t, self.violations)
+        # imports.70 (the fix stage): the RESTART lock refuses a take that waits while it is held
+        # (kodi_faithful.RestartLock, the replay-end rig's), where a threading.Lock would hang the run.
+        self._restart_lock = RestartLock(self.violations, count)
 
         class JSONRPC(object):
             def getPlayerItemRef(self):
+                count('GetItem')
                 rig.calls.append('GetItem')
                 return dict(rig.state['item'])
 
             def getPVRChannelInfo(self, channelid, properties=('hasarchive',)):
+                count('GetChannelDetails')
                 rig.calls.append(('GetChannelDetails', channelid, tuple(properties)))
                 details = rig.state.get('details', LIVE_DETAILS)
                 return details if 'broadcastnow' in properties else {'hasarchive': details.get('hasarchive')}
 
             def getPVRChannelsNow(self):
+                count('GetChannels')
                 rig.calls.append('GetChannels')
                 return rig.state.get('channels', [])
 
             def isBroadcastPlayable(self, bid):
+                count('IsPlayable')
                 rig.calls.append(('IsPlayable', bid))
                 return rig.state.get('playable', True)
 
             def playerOpen(self, params={}):
+                count('Open')
                 rig.calls.append(('Open', params))
                 rig.t += rig.state.get('open_delay', 0)        # RPC_Delay pause, a busy JSON-RPC lock
                 return rig.state.get('open_ok', True)
 
         class Builtin(object):
-            def getInfoBool(self, key, param='Library'): return rig.state['bools'].get('%s.%s' % (param, key), False)
-            def isBusyDialog(self): return rig.state['busy']
+            def getInfoBool(self, key, param='Library'):
+                count('getInfoBool')
+                return rig.state['bools'].get('%s.%s' % (param, key), False)
+            def isBusyDialog(self):
+                count('isBusyDialog')
+                return rig.state['busy']
             def getIdle(self):                 # whole seconds since the last key press
+                count('getIdle')
                 key = rig.state.get('key_at')
                 return int(rig.t - key) if key is not None else int(rig.state['idle'] + rig.t)
-            def executewindow(self, key, *args, **kwargs): rig.calls.append(('window', key))
+            def executewindow(self, key, *args, **kwargs):
+                count('executewindow')
+                rig.calls.append(('window', key))
 
         class Dialog(object):
-            def notificationDialog(self, message, show=None, **kwargs): rig.notes.append((message, show))
+            def notificationDialog(self, message, show=None, **kwargs):
+                count('notificationDialog')
+                rig.notes.append((message, show))
 
-        class Service(object):
-            def _shutdown(self, wait=0):
-                rig.t += wait
-                if rig.state.get('on_poll'): rig.state['on_poll'](rig)
-                return rig.t > 120
+        def kodi_goes_on(seconds):
+            # The add-on waits: the rig's clock moves and Kodi acts meanwhile (`on_poll`).
+            rig.t += seconds
+            if rig.state.get('on_poll'): rig.state['on_poll'](rig)
 
         class Replay(object):
             def __init__(self, *args, **kwargs):
+                count('Replay')
                 self.args, self.kwargs, self.restart, self.closing = args, kwargs, False, False
                 rig.dialogs.append(self)
 
             def doModal(self):
+                count('Replay.doModal')
                 if rig.state.get('modal_raises'): raise RuntimeError('dialog failed')
                 rig.state['replay_seen'] = rig.replay is self
                 self.restart = rig.state['choose']
 
         class ListItem(object):
             def getProperty(self, key):
+                count('ListItem.getProperty')
                 return json.dumps({'_tune_ts': rig.state['tune_ts']}) if key == 'sysInfo' and rig.state['tune_ts'] else ''
 
+        def language(i):
+            count('LANGUAGE')
+            return 'L%s' % i
+
+        def setting(key):
+            count('getSettingInt')
+            return 5
+
+        def condition(cond):
+            count('getCondVisibility')
+            return rig.state['ready'] and cond == rh.WINDOW_READY
+
+        def clock():
+            count('time.time()')                    # a loop that only reads the clock never ends on this one
+            return rig.t0 + rig.t
+
         self._ListItem = ListItem
-        self.jsonRPC, self.service = JSONRPC(), Service()
-        g = dict(restart_helpers=rh, BUILTIN=Builtin(), DIALOG=Dialog(), LANGUAGE=lambda i: 'L%s' % i,
-                 SETTINGS=types.SimpleNamespace(getSettingInt=lambda key: 5),
+        # imports.70 (the repair): the REAL Service._shutdown / _aborted (kodi_faithful) over a
+        # monitor with Kodi's rules, where a fake _shutdown(wait=0) returned at once on any wait.
+        self.jsonRPC = JSONRPC()
+        self.service = FaithfulService(advance=kodi_goes_on, clock=lambda: rig.t, closing_at=lambda: KODI_CLOSES_AT,
+                                       pending=lambda: False, violations=self.violations, standstill=self.standstill)
+        RIGS.append(self)
+        g = dict(restart_helpers=rh, BUILTIN=Builtin(), DIALOG=Dialog(), LANGUAGE=language,
+                 SETTINGS=types.SimpleNamespace(getSettingInt=setting),
                  Globals=types.SimpleNamespace(_decodePlot=decode),
                  FileAccess=types.SimpleNamespace(_decodeString=lambda s: json.loads(s) if s else ''),
-                 xbmc=types.SimpleNamespace(LOGDEBUG=0, LOGINFO=1, LOGWARNING=2, LOGERROR=3,
-                                            getCondVisibility=lambda cond: rig.state['ready'] and cond == rh.WINDOW_READY),
-                 time=types.SimpleNamespace(time=lambda: rig.t0 + rig.t),
+                 xbmc=types.SimpleNamespace(LOGDEBUG=0, LOGINFO=1, LOGWARNING=2, LOGERROR=3, getCondVisibility=condition),
+                 time=types.SimpleNamespace(time=clock),
                  OSD_TIMER=5, Replay=Replay, REPLAY_XML='restart.xml', ADDON_PATH='/addon')
         for name in RESTART_METHODS:
             setattr(self, name, types.MethodType(_function(SERVICES, S_TREE, 'Player', name, **g), self))
 
-    # the rest of the Player the restart methods use
-    def log(self, msg, level=0): self.logs.append((level, msg))
-    def isPlayingPseudoTV(self): return self.state['pseudotv']
-    def isPlayingVideo(self): return self.state['video']
-    def isPlaying(self): return self.state['video']
-    def getPlayedTime(self): return self.state['played']
-    def getPlayerTime(self): return self.state['duration']
+    # the rest of the Player the restart methods use (each call counted: self.standstill)
+    def log(self, msg, level=0):
+        self.standstill('log')
+        self.logs.append((level, msg))
+    def isPlayingPseudoTV(self):
+        self.standstill('isPlayingPseudoTV')
+        return self.state['pseudotv']
+    def isPlayingVideo(self):
+        self.standstill('isPlayingVideo')
+        return self.state['video']
+    def isPlaying(self):
+        self.standstill('isPlaying')
+        return self.state['video']
+    def getPlayedTime(self):
+        self.standstill('getPlayedTime')
+        return self.state['played']
+    def getPlayerTime(self):
+        self.standstill('getPlayerTime')
+        return self.state['duration']
     def seekTime(self, sec):
+        self.standstill('seekTime')
         if self.state.get('seek_raises'): raise RuntimeError('nothing plays')
         self.calls.append(('seek', sec))
     def stop(self):
+        self.standstill('stop')
         self.calls.append('stop')
         self.state['video'] = False
     def getPlayingItem(self):
+        self.standstill('getPlayingItem')
         if not self.state['video']: raise RuntimeError('Kodi is not playing any media file')
         return self._ListItem()
 
@@ -505,6 +602,236 @@ def test_a_second_request_while_one_runs_is_dropped():
     rig._restart_lock.acquire()
     rig.requestRestart({'source': 'remote'})
     assert not rig.notes and any('already running' in m for _, m in rig.logs)
+    assert rig._restart_lock.locked()               # imports.70: the dropped request left the running one's lock alone
+    rig._restart_lock.release()
+
+
+def test_the_rig_runs_the_real_shutdown_over_the_faithful_monitor():
+    """imports.70 (the repair): the restart methods wait through the real Service._shutdown, on a
+    monitor with Kodi's rules; a fake _shutdown that returns at once on any wait must not come back
+    (it let a wait Kodi never ends pass 5,743 tests)."""
+    rig = Rig()
+    for name in ('_shutdown', '_aborted'):
+        code = getattr(rig.service, name).__func__.__code__
+        assert (os.path.basename(code.co_filename), code.co_name) == ('services.py', name)
+    assert isinstance(rig.service, FaithfulService) and isinstance(rig.service.monitor, FaithfulMonitor)
+    assert rig.service.monitor.standstill is rig.standstill
+    assert rig.service._shutdown(rh.WATCH_POLL) is False
+    assert rig.t == rh.WATCH_POLL and rig.service.monitor.waits == [rh.WATCH_POLL]
+    rig.t = KODI_CLOSES_AT
+    assert rig.service._shutdown(rh.WATCH_POLL) is True and rig.t == KODI_CLOSES_AT     # Kodi closing: at once
+
+
+def test_a_restart_wait_that_stops_waiting_fails_instead_of_turning_for_ever():
+    """imports.70 (the repair): _restartWait(done, limit, step) with a step of 0 never gets
+    anywhere: `waited` stays 0, so the limit is never reached, and the real Service._shutdown(0)
+    only asks: the loop turns without a pause until done() or a shutdown. On the rig, where no
+    time passes outside a wait, that is a loud failure after kodi_faithful.SPIN_CAP questions;
+    under the old fake _shutdown(wait=0) it turned for ever. (No caller passes a step:
+    test_imports70_shutdown_contract.py reads that from the source.) The default step waits and
+    ends at the limit."""
+    rig, asked = Rig(), []
+    assert kodi_faithful.SPIN_CAP <= 10000
+
+    def done():
+        asked.append(rig.t)
+        return len(asked) > 30000                             # this test's own way out, should the refusal be gone
+    with pytest.raises(ForeverWait, match='a loop that never waits'):
+        rig._restartWait(done, 5, 0)
+    assert len(asked) == kodi_faithful.SPIN_CAP + 1 and set(asked) == {0.0}
+    assert rig.service.monitor.waits == [] and rig.service.monitor.checks == kodi_faithful.SPIN_CAP
+    assert len(rig.violations) == 1 and kodi_faithful.provoked() == rig.violations
+    del rig.violations[:]
+    assert rig._restartWait(lambda: False, 5) is False and rig.t == 5.0
+    assert rig.service.monitor.waits == [0.25] * 20 and rig.violations == []
+
+
+def _rig_globals(rig):
+    """What the compiled restart methods see as their module globals (BUILTIN, DIALOG, ...)."""
+    return rig.requestRestart.__func__.__globals__
+
+
+def _property_read(item):
+    return lambda: item.getProperty('sysInfo')
+
+
+# Every call the compiled restart methods can make into the rig: name -> a function of the rig
+# that makes one such call.
+RIG_CALLS = {
+    'GetItem':             lambda rig: rig.jsonRPC.getPlayerItemRef,
+    'GetChannelDetails':   lambda rig: lambda: rig.jsonRPC.getPVRChannelInfo(42),
+    'GetChannels':         lambda rig: rig.jsonRPC.getPVRChannelsNow,
+    'IsPlayable':          lambda rig: lambda: rig.jsonRPC.isBroadcastPlayable(777),
+    'Open':                lambda rig: lambda: rig.jsonRPC.playerOpen({'item': {'broadcastid': 777}}),
+    'getInfoBool':         lambda rig: lambda: _rig_globals(rig)['BUILTIN'].getInfoBool('IsPlayingTv', 'Pvr'),
+    'isBusyDialog':        lambda rig: _rig_globals(rig)['BUILTIN'].isBusyDialog,
+    'getIdle':             lambda rig: _rig_globals(rig)['BUILTIN'].getIdle,
+    'executewindow':       lambda rig: lambda: _rig_globals(rig)['BUILTIN'].executewindow('a window'),
+    'notificationDialog':  lambda rig: lambda: _rig_globals(rig)['DIALOG'].notificationDialog('a note'),
+    'Replay':              lambda rig: lambda: _rig_globals(rig)['Replay']('restart.xml', '/addon'),
+    'Replay.doModal':      lambda rig: _rig_globals(rig)['Replay']('restart.xml', '/addon').doModal,
+    'ListItem':            lambda rig: _property_read(rig.getPlayingItem()),
+    'LANGUAGE':            lambda rig: lambda: _rig_globals(rig)['LANGUAGE'](30154),
+    'getSettingInt':       lambda rig: lambda: _rig_globals(rig)['SETTINGS'].getSettingInt('Restart_Delay'),
+    'getCondVisibility':   lambda rig: lambda: _rig_globals(rig)['xbmc'].getCondVisibility(rh.WINDOW_READY),
+    'time':                lambda rig: _rig_globals(rig)['time'].time,
+    'log':                 lambda rig: lambda: rig.log('a line'),
+    'isPlayingPseudoTV':   lambda rig: rig.isPlayingPseudoTV,
+    'isPlayingVideo':      lambda rig: rig.isPlayingVideo,
+    'isPlaying':           lambda rig: rig.isPlaying,
+    'getPlayedTime':       lambda rig: rig.getPlayedTime,
+    'getPlayerTime':       lambda rig: rig.getPlayerTime,
+    'seekTime':            lambda rig: lambda: rig.seekTime(0),
+    'stop':                lambda rig: rig.stop,
+    'abortRequested':      lambda rig: rig.service.monitor.abortRequested,
+}
+
+
+def test_every_call_into_the_rig_counts_against_a_loop_that_never_waits():
+    """imports.70 (the repair): the rig's standstill guard (kodi_faithful.Standstill) sees every
+    call the restart methods can make into it: each one, made more than SPIN_CAP times in a row at
+    one instant of the rig's clock, is refused on the last (ForeverWait, recorded), and time
+    passing starts the count again. A loop whose wait the rig never sees fails within SPIN_CAP
+    calls, where it would record calls for ever (2026-11-19 23:25: until this machine froze)."""
+    cap = kodi_faithful.SPIN_CAP
+    assert 100 <= cap <= 10000                                # this test loops that often
+    names = set(_rig_globals(Rig()))
+    assert {'BUILTIN', 'DIALOG', 'LANGUAGE', 'SETTINGS', 'xbmc', 'time', 'Replay'} <= names
+    for name in sorted(RIG_CALLS):
+        rig = Rig(**live())
+        call = RIG_CALLS[name](rig)
+        rig.t += 0.25                                         # a new instant, reached without a call
+        for _ in range(cap): call()
+        rig.t += 0.25                                         # time passed: the count starts again
+        for _ in range(cap): call()
+        assert rig.violations == [] and rig.standstill.count == cap, name
+        with pytest.raises(ForeverWait, match='calls in a row while no time passed'):
+            call()
+        assert len(rig.violations) == 1 and kodi_faithful.provoked() == rig.violations, name
+        del rig.violations[:]
+
+
+class _WayOut(BaseException):
+    """A test's own way out of a loop the standstill guard should have ended (after WAY_OUT turns,
+    whatever SPIN_CAP says)."""
+
+
+WAY_OUT = 20000
+
+
+def test_a_restart_watch_whose_waits_let_no_time_pass_fails_within_spin_cap_calls():
+    """imports.70 (the repair): RESTART on live TV, a replay that never starts, and Kodi's clock
+    standing still in every wait (the monitor moves it no more: what a stand-in whose waits let no
+    time pass did on 2026-11-19 at 23:25, when a rig recorded calls for ever until this machine
+    froze). The watch of _restartOpen fails within SPIN_CAP calls into the rig (ForeverWait passes
+    requestRestart's `except Exception`), its `finally` gives the RESTART lock back, the refusal is
+    on the record, and only a few hundred calls were recorded."""
+    cap = kodi_faithful.SPIN_CAP
+    assert 100 <= cap <= 10000
+    rig, polls = Rig(**live()), []
+    rig.service.monitor._advance = lambda seconds: None
+    real = rig.jsonRPC.getPlayerItemRef
+
+    def item():
+        polls.append(rig.t)
+        if len(polls) > WAY_OUT: raise _WayOut('the standstill guard let the watch turn on')
+        return real()
+    rig.jsonRPC.getPlayerItemRef = item
+    with pytest.raises(ForeverWait, match='calls in a row while no time passed'):
+        rig.run({'source': 'remote'})
+    assert opens(rig) == [('Open', {'item': {'broadcastid': 777}})] and rig.t == 0.0 and not rig.notes
+    assert 0 < len(polls) < cap // 4 and len(rig.calls) < cap // 2 and not rig._restart_lock.locked()
+    assert len(rig.violations) == 1 and kodi_faithful.provoked() == rig.violations
+    del rig.violations[:]
+
+
+def test_the_check_after_every_test_catches_a_forever_wait_and_a_kept_lock():
+    """imports.70 (the repair): the autouse check itself."""
+    rig = Rig()
+    check_rigs([rig])
+    rig.violations.append('waitForAbort(0)')
+    with pytest.raises(AssertionError, match='Kodi would wait forever'):
+        check_rigs([rig])
+    del rig.violations[:]
+    rig._restart_lock.acquire()
+    with pytest.raises(AssertionError, match='not given back'):
+        check_rigs([rig])
+    rig._restart_lock.release()
+    assert RIGS == [rig]
+
+
+def test_the_rigs_restart_lock_refuses_a_take_that_waits():
+    """imports.70 (the fix stage): the rig's RESTART lock is kodi_faithful.RestartLock, the replay-end
+    rig's. requestRestart takes it without waiting; a take that waits while a restart (or a
+    replay-end move) holds it would wait for that one: it is refused (ForeverWait, recorded), where
+    a threading.Lock here would hang the test run, and the lock stays with its holder."""
+    rig = Rig()
+    lock = rig._restart_lock
+    assert isinstance(lock, RestartLock) and lock.count is rig.standstill and lock.violations is rig.violations
+    assert lock.acquire(False) is True and lock.acquire(False) is False
+    for blocking in ((), (True,), (True, 5)):
+        with pytest.raises(ForeverWait):
+            lock.acquire(*blocking)
+    assert lock.held and lock.acquires == [False, False, True, True, True] and len(rig.violations) == 3
+    assert kodi_faithful.provoked() == rig.violations
+    del rig.violations[:]
+    lock.release()
+    assert not lock.locked() and not lock.leaked()
+
+
+def _replay_starts(rig):
+    """Kodi plays the broadcast RESTART opened (the replay started)."""
+    rig.state['bools'] = {'Pvr.IsPlayingEpgTag': True}
+    rig.state['item'] = {'type': 'unknown', 'id': 777}
+
+
+# Each kind of RESTART the sweep below runs: (the rig's state, the request).
+SWEPT_RESTARTS = {
+    'live tv, the replay starts':     (lambda: live(on_poll=_replay_starts), {'source': 'remote'}),
+    'live tv, the replay is refused': (live, {'source': 'remote'}),
+    'a custom channel, jump to 0':    (custom, {'source': 'remote'}),
+    'a guide entry, tune then jump':  (lambda: dict(channels=[CUSTOM_ROW]), {'source': 'guide', 'path': CUSTOM_PATH}),
+    'nothing plays, unavailable':     (dict, {'source': 'remote'}),
+}
+
+
+def restart_calls(kind):
+    """Every call one undisturbed RESTART of that kind makes into the rig, in order: the names its
+    standstill guard is told (Standstill.on_call), the lock's own included."""
+    make, request = SWEPT_RESTARTS[kind]
+    rig, seen = Rig(**make()), []
+    rig.standstill.on_call = seen.append
+    rig.run(dict(request))
+    assert not rig._restart_lock.locked() and rig.violations == []
+    return seen
+
+
+@pytest.mark.parametrize('kind', sorted(SWEPT_RESTARTS))
+def test_the_restart_lock_is_free_when_kodi_ends_the_thread_at_any_call(kind):
+    """imports.70 (the fix stage): at shutdown Kodi ends an add-on's threads by raising SystemExit in
+    them, wherever they are (xbmc/interfaces/python/PythonInvoker.cpp: 'Raise a SystemExit exception
+    in python threads'). That is no Exception, so requestRestart's `except Exception` never sees it:
+    its `finally` gives the lock back, whichever call of the restart it hit (the lock's own release
+    aside: a lock is not left half given back). The replay-end move has the same sweep
+    (test_imports70_replay_end.py), and the lock is shared."""
+    make, request = SWEPT_RESTARTS[kind]
+    calls = restart_calls(kind)
+    assert calls[0] == '_restart_lock.acquire' and calls[-1] == '_restart_lock.release' and len(calls) > 3
+    for k, name in enumerate(calls, 1):
+        if name == '_restart_lock.release': continue
+        rig, seen = Rig(**make()), []
+
+        def end_the_thread(call, k=k, seen=seen):
+            seen.append(call)
+            if len(seen) == k: raise SystemExit(0)
+        rig.standstill.on_call = end_the_thread
+        with pytest.raises(SystemExit):
+            rig.run(dict(request))
+        lock, what = rig._restart_lock, (kind, k, name)
+        given_back = [] if k == 1 else ['_restart_lock.release']            # by requestRestart's `finally`
+        assert seen == calls[:k] + given_back and not lock.locked() and lock.taken == lock.released, what
+        assert lock.acquires == ([] if k == 1 else [False]) and rig.violations == [], what
+        assert not [m for _level, m in rig.logs if 'failed!' in m], what
 
 
 def test_a_restart_closes_an_open_popup():
