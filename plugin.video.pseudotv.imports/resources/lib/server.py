@@ -243,7 +243,14 @@ class Discovery(Thread):
                             zconf = Zeroconf()
                             self.log("run, Multicast DNS Service waiting for (%s)"%(ZEROCONF_SERVICE))
                             ServiceBrowser(zconf, ZEROCONF_SERVICE, self.MyListener(multiroom=self.multiroom))
-                            SETTINGS.setSetting('ZeroConf_Status','[COLOR=yellow][B]%s[/B][/COLOR]'%(LANGUAGE(32252)))
+                            # madteevee (imports fork, imports.71): the 30 s search is no longer saved as
+                            # ZeroConf_Status ('Listening', 32252). With the status below that made two saves of
+                            # the settings file per ~10.5 min cycle, about 274 a day and the add-on's only routine
+                            # ones; each save makes Kodi reload the service's REAL_SETTINGS in place
+                            # (xbmc/addons/Addon.cpp:375-406, AddonManager.cpp:214-225), the window in which the
+                            # service ended on 2026-06-05, 2026-10-04 and 2026-11-07. The status below is saved
+                            # only when it changes (kodi.py Settings._setSetting compares first); the search itself
+                            # shows in the debug lines around it.
                             if self.service._sleep(DISCOVER_INTERVAL): break
                             self.log("run, Multicast DNS Service stopping search for (%s)"%(ZEROCONF_SERVICE))
                             zconf.close()

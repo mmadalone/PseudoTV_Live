@@ -673,7 +673,8 @@ class Player(xbmc.Player):
     def _liveSubsChannels(self):
         # A fresh channel list for each LiveTV tune (Channels() reads channels.json), so a channel
         # imported or renamed since the service started resolves to its id; the service's list
-        # (refreshed only on a settings save) when that read fails.
+        # when that read fails. madteevee (imports fork, imports.71): that list is refreshed every
+        # 5 minutes (Tasks.chkServiceChannels) and after each settings save.
         try: return list(self.service.tasks.getChannels() or [])
         except Exception as e:
             self.log('_liveSubsChannels, channel list unavailable: %s'%(e), xbmc.LOGWARNING)

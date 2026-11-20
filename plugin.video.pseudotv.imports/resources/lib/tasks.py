@@ -535,7 +535,10 @@ class Tasks(object):
         self._chkEpochTimer('chkCacheClean'   , self.chkCacheClean    , 3600  , 1)#1HR
         self._chkEpochTimer('chkDiscovery'    , self.chkDiscovery     , 300   , 1)#5MINS
         self._chkEpochTimer('chkQUES'         , self.chkQUES          , 120   , 1)#2MINS
-        
+        # madteevee (imports fork, imports.71): the service's channel list on a timer of its own
+        # (chkServiceChannels); host and client both play Custom channels.
+        self._chkEpochTimer('chkServiceChannels', self.chkServiceChannels, 300 , 1)#5MINS
+
         if not self.service.isClient:
             self._chkEpochTimer('chkFiles'    , self.chkFiles         , 600   , 1)#10MINS
             # 'Library_Walk_Interval' (hours, default 12, range 1-72) controls how often
@@ -1352,6 +1355,20 @@ class Tasks(object):
             FileAccess.copyFolder(old, new, dia)
         PROPERTIES.setPendingRestart()
         DIALOG.progressDialog(100, dia)
+
+
+    def chkServiceChannels(self):
+        # madteevee (imports fork, imports.71): the service's copy of the channel list (Service.channels,
+        # laid over the playing Custom channel's guide entry by Player.getplayingItem: its rules, logo
+        # and name) was re-read only after a settings save (Monitor._updateServiceSettings). Discovery
+        # saved ZeroConf_Status twice every ~10.5 min, so the copy was never more than minutes old;
+        # imports.71 stopped those saves. This keeps the old pace: an edited channel still reaches
+        # playback within minutes. Until a read of Enable_Executor has succeeded, the queue retries
+        # it here too (CustomQueue._chkExecutor, retry=True), first, so a failed channel read can't
+        # skip it.
+        self.log('chkServiceChannels')
+        self.service.priorityQUE._chkExecutor(retry=True)
+        self.service.channels = self.getChannels()
 
 
     def getChannels(self):

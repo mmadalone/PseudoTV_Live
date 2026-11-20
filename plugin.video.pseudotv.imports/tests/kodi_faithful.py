@@ -46,6 +46,9 @@ show that: its typed getters never raise (a missing id reads 0 or False), its ha
     file, reloads only the oldest live handle, then queues onSettingsChanged, which deliver() runs
     inside a rig's wait on the thread that made the monitor.
   - install_settings: xbmcaddon.Addon and REAL_SETTINGS, for one test (the test passes the stub in).
+  - FaithfulWindows: xbmcgui.Window for the properties: one map per window id shared by every object,
+    lower-cased keys, text values only, each read a new str (the repo-root stub stores nothing).
+  - lib_strings: {id: text} from the add-on's own en_gb strings.po (the stubs read the live add-on's).
 
 Nothing here imports Kodi or a Kodi stub; the only files read are the add-on's own sources.
 """
@@ -440,6 +443,15 @@ def _from_text(kind, text):
     return text
 
 
+def _text(value, argument, method):
+    """A text argument as Kodi's Python binding takes it (interfaces/python/swig.cpp:95-141): None is '',
+    bytes are decoded, anything else but str raises TypeError."""
+    if value is None: return ''
+    if isinstance(value, bytes): return value.decode('utf-8')
+    if isinstance(value, str): return value
+    raise TypeError('argument "%s" for method "%s" must be unicode or str' % (argument, method))
+
+
 def _to_text(value):
     """A value as Kodi writes it to the user file (CSetting*::ToString)."""
     if isinstance(value, bool): return 'true' if value else 'false'
@@ -539,10 +551,9 @@ class FaithfulAddon(object):
 
     # --- setters ------------------------------------------------------------------------------------
     def setSetting(self, id, value):
-        # Kodi's binding converts the value before the call (interfaces/python/swig.cpp:105-141).
-        if isinstance(value, bytes): value = value.decode('utf-8')
-        if not isinstance(value, str):
-            return self._registry._wrong_type('argument "value" for method "setSetting" must be unicode or str')
+        # Kodi's binding converts the value before the call (interfaces/python/swig.cpp:95-141).
+        try: value = _text(value, 'value', 'setSetting')
+        except TypeError as e: return self._registry._wrong_type(str(e))
         self.calls.append(('setSetting', id))
         if self._load():                                         # CAddon::UpdateSetting
             kind = self._kind(id)
@@ -615,7 +626,12 @@ class FaithfulAddons(object):
     Switches: torn_next_load (the next load reads a half-written user file: Kodi logs 'failed to load
     addon settings', the handle serves the defaults silently and its saves are skipped, Addon.cpp:
     346-367, 377-378); fail_definitions (settings.xml can't be read: the handle stays without
-    settings, typed getters raise and getSetting returns '' for good, Addon.cpp:274-279, 295-312)."""
+    settings, typed getters raise and getSetting returns '' for good, Addon.cpp:274-279, 295-312).
+    Not modelled: building or freeing a handle waits on the add-on manager's lock while a reload runs
+    (AddonManager.cpp:185, 216, 635); here it doesn't wait, and reads the same thing, because the file
+    is written before the reload starts. Nor: a setter going into an open settings dialog instead of
+    saving (legacy Addon.cpp UpdateSettingInActiveDialog); Kodi's unlocked microseconds inside the
+    reload (CSettingsManager::Clear against a getter), which Python can't catch anyway."""
 
     def __init__(self, user=None, addon_id=ADDON_ID, kodi_log=None):
         self.addon_id = addon_id
@@ -745,3 +761,68 @@ def install_settings(monkeypatch, registry, xbmcaddon_module, real_settings):
         path = getattr(module, '__file__', None)
         if path and os.path.abspath(path).startswith(ADDON_LIB + os.sep) and hasattr(module, 'REAL_SETTINGS'):
             monkeypatch.setattr(module, 'REAL_SETTINGS', real_settings)
+
+
+class FaithfulWindows(object):
+    """xbmcgui.Window for the add-on's properties, as Kodi 21.3 keeps them (interfaces/legacy/Window.cpp:
+    605-634): Window(id) is an object over that window id's ONE property map (Window(10000) is Kodi's Home
+    window, which every add-on and interpreter shares); `maps` is {window id: {key: value}}. Keys are
+    lower-cased; a value is text (None is stored as '', bytes are decoded, anything else raises TypeError:
+    interfaces/python/swig.cpp:95-141); clearProperty(key) is setProperty(key, ''); a missing key reads ''.
+    Each getProperty hands back a NEW str, decoded from Kodi's copy of the text (Window::getProperty
+    returns a std::string, interfaces/legacy/Window.cpp:615-623, which the binding decodes on every call:
+    interfaces/python/typemaps/python.string.outtm:10-11), so code that compares two reads by identity
+    fails here as in Kodi (fix stage of imports.71: the stand-in kept and returned the stored object).
+    The repo-root stub stores nothing (its getProperty always returns '')."""
+
+    def __init__(self):
+        self.maps = {}
+
+    def Window(self, existingWindowId=-1):
+        return _FaithfulWindow(self.maps.setdefault(existingWindowId, {}))
+
+    def get(self, key, window_id=10000):
+        return self.maps.get(window_id, {}).get(key.lower(), '')
+
+
+class _FaithfulWindow(object):
+    def __init__(self, properties):
+        self._properties = properties
+
+    def setProperty(self, key, value):
+        self._properties[_text(key, 'key', 'setProperty').lower()] = _text(value, 'value', 'setProperty')
+
+    def getProperty(self, key):
+        value = self._properties.get(_text(key, 'key', 'getProperty').lower(), '')
+        return value.encode('utf-8', 'surrogateescape').decode('utf-8', 'surrogateescape')   # a new str, as Kodi's
+
+    def clearProperty(self, key):
+        self._properties[_text(key, 'key', 'clearProperty').lower()] = ''
+
+
+def install_windows(monkeypatch, windows, xbmcgui_module):
+    """xbmcgui.Window builds `windows`' objects for one test (monkeypatch undoes it). Code that kept a
+    Window object from before (kodi.Properties made at import keeps self.window) still holds the stub's:
+    build such objects after this."""
+    monkeypatch.setattr(xbmcgui_module, 'Window', windows.Window)
+
+
+STRINGS_PO = os.path.join(os.path.dirname(ADDON_LIB), 'language', 'resource.language.en_gb', 'strings.po')
+
+
+def lib_strings(path=STRINGS_PO):
+    """{id: text} of the add-on's own en_gb strings.po (msgctxt "#<id>" -> msgid, continuation lines
+    joined): LANGUAGE for a rig. The repo-root stubs read the live add-on's file instead."""
+    found, current, text, field = {}, None, None, None
+    with open(path, encoding='utf-8') as fh:
+        for raw in fh:
+            line = raw.strip()
+            if line.startswith('msgctxt "#'):
+                current, field = int(line[len('msgctxt "#'):-1]), None
+            elif line.startswith('msgid ') and current is not None:
+                text, field = ast.literal_eval(line[len('msgid '):]), 'msgid'
+            elif line.startswith('"') and field == 'msgid':
+                text += ast.literal_eval(line)
+            elif line.startswith('msgstr') and current is not None:
+                found[current], current, field = text, None, None
+    return found

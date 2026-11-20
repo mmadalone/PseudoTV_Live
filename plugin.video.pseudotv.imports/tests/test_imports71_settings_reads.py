@@ -55,9 +55,13 @@ KODI_EXCEPTION = 'EXCEPTION: Invalid setting type'
 
 @pytest.fixture
 def env(monkeypatch):
+    return make_env(monkeypatch)
+
+
+def make_env(monkeypatch, user=None):
     """The library under the stubs, with Kodi's settings: REAL_SETTINGS is the first handle built (the
     service's, constants.py), every xbmcaddon.Addon() call builds a new one, and `lines` is kodi.log:
-    Kodi's own lines and the add-on's (xbmc.log, with Kodi 21's levels)."""
+    Kodi's own lines and the add-on's (xbmc.log, with Kodi 21's levels). `user`: the user file (USER)."""
     import xbmc
     import xbmcaddon
     import cache
@@ -68,7 +72,7 @@ def env(monkeypatch):
     lines = []
     for name, level in KODI_LOG.items(): monkeypatch.setattr(xbmc, name, level)
     monkeypatch.setattr(xbmc, 'log', lambda msg, level=0: lines.append((msg, level)))
-    reg = FaithfulAddons(user=USER, kodi_log=lines)
+    reg = FaithfulAddons(user=USER if user is None else user, kodi_log=lines)
     real = reg.Addon(kodi_faithful.ADDON_ID)
     real.getSetting('Debug_Enable')                          # loaded, as by the service's first log line
     install_settings(monkeypatch, reg, xbmcaddon, real)
