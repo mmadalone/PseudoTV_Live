@@ -2558,6 +2558,16 @@ msgctxt "#30909"
 msgid "Restart from beginning"
 msgstr ""
 
+# madteevee imports fork, imports.71: the background service waits for a Kodi restart (services.py _kodiRestart).
+
+msgctxt "#30910"
+msgid "Restart Kodi to finish restoring the channel backup"
+msgstr ""
+
+msgctxt "#30911"
+msgid "Restart Kodi to finish moving the data folder"
+msgstr ""
+
 msgctxt "#33900"
 msgid "When enabled, pseudotv's Min Days, Max Days and OSD Timer stop auto-syncing from Kodi's PVR settings every hour. Required to set Max Days higher than Kodi's epg.futuredaystodisplay. NOTE: After changing Max Days, restart Kodi for downstream caches to pick up the new value."
 msgstr ""

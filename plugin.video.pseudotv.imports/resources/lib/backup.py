@@ -83,6 +83,10 @@ class Backup(object):
             with BUILTIN.busy_dialog(), PROPERTIES.interruptActivity():
                 FileAccess.move(CHANNELFLEPATH,CHANNELFLE_RESTORE)
                 if FileAccess.copy(file,CHANNELFLEPATH):
+                    # madteevee (imports fork, imports.71): only a Kodi restart finishes a restore; the
+                    # service pauses until then and says so once (Service._kodiRestart). The marker
+                    # first, so whoever sees the request sees it too.
+                    PROPERTIES.setPendingKodiRestart('restore')
                     PROPERTIES.setPendingRestart()
                     return True
         

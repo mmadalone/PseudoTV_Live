@@ -27,6 +27,7 @@ import types
 
 import pytest
 
+import loopguard_helpers
 from kodi_faithful import (KODI_LOG, SETTING_TYPES, FaithfulService, FaithfulWindows, compile_method, install_windows,
                            lib_constant, lib_source, lib_strings)
 from test_imports70_shutdown_contract import _File
@@ -481,11 +482,14 @@ class InlineThread(object):
 
 class LoopRig(object):
     """The service's main loop on a rig clock, as on the box: the REAL Service._start and what it calls
-    (_initialize, _tasks, _que, _restart, _interrupt, _suspend, _sleep, _isPlaying; FaithfulService's
-    real _shutdown over a FaithfulMonitor), the REAL CustomQueue (its pop thread inline), the REAL
-    Tasks.chkQueTimer, _chkEpochTimer and chkServiceChannels over the REAL kodi.Properties (Window(10000):
-    FaithfulWindows). Every other task records its run. channels.json is `self.disk`; Kodi closes after
-    `hours`; `at(t, fn)` runs fn when the rig clock reaches T0 + t (inside a wait, as Kodi goes on)."""
+    (_initialize, _tasks, _que, _restart, _interrupt, _suspend, _sleep, _isPlaying, _passFailed;
+    FaithfulService's real _shutdown over a FaithfulMonitor), the REAL CustomQueue (its pop thread inline),
+    the REAL Tasks.chkQueTimer, _chkEpochTimer and chkServiceChannels over the REAL kodi.Properties
+    (Window(10000): FaithfulWindows). Every other task records its run. channels.json is `self.disk`; Kodi
+    closes after `hours`; `at(t, fn)` runs fn when the rig clock reaches T0 + t (inside a wait, as Kodi
+    goes on). imports.71 (part 2): a failed pass goes through the real loop guard (_passFailed), which
+    writes it and lets the loop go on, as on the box; run() then fails with the first such failure, since
+    these tests expect none (the guard must not hide a mistake in this rig's wiring)."""
 
     def __init__(self, env, channels, client=False, hours=1.0):
         import cqueue
@@ -517,11 +521,18 @@ class LoopRig(object):
         builtin = types.SimpleNamespace(isScanning=lambda: False, isPaused=lambda: False,
                                         isSettingsOpened=lambda: False)
         g = dict(PROPERTIES=env.properties, BUILTIN=builtin, LANGUAGE=STRINGS.__getitem__, CPU_CYCLE=CPU_CYCLE,
-                 DIALOG=types.SimpleNamespace(notificationWait=notification_wait))
+                 DIALOG=types.SimpleNamespace(notificationWait=notification_wait), loopguard_helpers=loopguard_helpers,
+                 xbmc=types.SimpleNamespace(LOGERROR=ERROR))
         for name in ('_start', '_initialize', '_tasks', '_que', '_restart', '_interrupt', '_suspend', '_sleep',
-                     '_isPlaying'):
+                     '_isPlaying', '_passFailed'):
             setattr(svc, name, types.MethodType(compile_method('services.py', 'Service', name, **g), svc))
         svc._stop = lambda pendingRestart=False: self.ran.append(('_stop', self.t - T0)) or pendingRestart
+        svc.loopFailures, self.caught, guard = loopguard_helpers.Failures(), [], svc._passFailed
+
+        def pass_failed(error):
+            rig.caught.append(error)
+            return guard(error)
+        svc._passFailed = pass_failed
 
         def recorder(name):
             def task(*args, **kwargs):
@@ -553,7 +564,9 @@ class LoopRig(object):
         self._events.sort(key=lambda event: event[0])
 
     def run(self):
-        return self.service._start()
+        stopped = self.service._start()
+        if self.caught: raise self.caught[0]
+        return stopped
 
 
 @pytest.mark.parametrize('client', [False, True])

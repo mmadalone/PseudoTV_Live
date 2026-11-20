@@ -31,6 +31,7 @@ import rulestate_helpers # madteevee (imports fork, imports.65): channel player 
 import livesubs_helpers # madteevee (imports fork, imports.67): LiveTV subtitles follow the channel
 import replayend_helpers # madteevee (imports fork, imports.70): LiveTV replays frozen at their end move on
 from logger import notice # madteevee (imports fork, imports.70): the replay-end watcher's lines that Kodi's log always gets
+import loopguard_helpers # madteevee (imports fork, imports.71): which failures of the service's loops reach Kodi's log
 
 class Player(xbmc.Player):
     # imports.16: pendingItem / playingItem live as instance attrs (set in
@@ -1882,6 +1883,8 @@ class Monitor(xbmc.Monitor):
         self.jsonRPC = service.jsonRPC
         self.player  = Player(self,service)
         self.rollbackSwitch = SETTINGS.getSettingBool('Rollback_Watched') # madteevee (imports fork, imports.60): see _chkRollbackSwitch
+        # madteevee (imports fork, imports.71): _tickFailed's memory, this loop's own
+        self.tickFailures   = loopguard_helpers.Failures()
 
         
     def log(self, msg, level=xbmc.LOGDEBUG):
@@ -1898,27 +1901,46 @@ class Monitor(xbmc.Monitor):
         if not self.isRunning:
             self.isRunning = True
             while not self.abortRequested():
-                if   self.service._shutdown(0.5): break
-                elif self.player.isPlayingPseudoTV():
-                    self.idleTime = BUILTIN.getIdle()
-                    self.isIdle   = bool(self.idleTime) | self.idleTime > OSD_TIMER
-                    self.log('_chkIdle, isIdle = %s, idleTime = %s'%(self.isIdle, self.idleTime))
-                    if self.isIdle: self.player._onIdle()
-                else:
-                    # imports.47: not-playing branch now drives the transition supervisor
-                    # (watchdog stall-recovery + loop-breaker cooldown). _chkTransition is
-                    # a fast no-op when no transition is pending — safe to call every tick.
-                    # Keeps the second _shutdown wait so shutdown stays responsive and the
-                    # not-playing loop cadence stays ~1s (matches pre-imports.47 timing).
-                    # madteevee (imports fork, imports.67): LiveTV plays in this branch; a subtitle
-                    # toggle fires no player event, so it is read on this tick (fast no-op otherwise).
-                    self.player._chkLiveSubtitles()
-                    self.player._chkTransition()
-                    # madteevee (imports fork, imports.70): a LiveTV replay frozen at its end moves on.
-                    self.player._chkReplayEnd()
+                try:
+                    if   self.service._shutdown(0.5): break
+                    elif self.player.isPlayingPseudoTV():
+                        self.idleTime = BUILTIN.getIdle()
+                        self.isIdle   = bool(self.idleTime) | self.idleTime > OSD_TIMER
+                        self.log('_chkIdle, isIdle = %s, idleTime = %s'%(self.isIdle, self.idleTime))
+                        if self.isIdle: self.player._onIdle()
+                    else:
+                        # imports.47: not-playing branch now drives the transition supervisor
+                        # (watchdog stall-recovery + loop-breaker cooldown). _chkTransition is
+                        # a fast no-op when no transition is pending — safe to call every tick.
+                        # Keeps the second _shutdown wait so shutdown stays responsive and the
+                        # not-playing loop cadence stays ~1s (matches pre-imports.47 timing).
+                        # madteevee (imports fork, imports.67): LiveTV plays in this branch; a subtitle
+                        # toggle fires no player event, so it is read on this tick (fast no-op otherwise).
+                        self.player._chkLiveSubtitles()
+                        self.player._chkTransition()
+                        # madteevee (imports fork, imports.70): a LiveTV replay frozen at its end moves on.
+                        self.player._chkReplayEnd()
+                        if self.service._shutdown(0.5): break
+                except Exception as e:
+                    # madteevee (imports fork, imports.71): one failed tick no longer ends this thread
+                    # (_tickFailed). Then the tick's own 0.5 s wait, so a failing tick can't turn without
+                    # one; should that wait itself fail, the thread ends, as before.
+                    self._tickFailed(e)
                     if self.service._shutdown(0.5): break
             self.isRunning = False
             self.log("_chkIdle, shutdown!")
+
+
+    def _tickFailed(self, error):
+        # madteevee (imports fork, imports.71): a tick of _chkIdle failed. Its exception used to end
+        # this thread for the rest of the session (chkIdle starts it at each service start, and
+        # isRunning then stays True), and with it the idle check, the LiveTV subtitle memory
+        # (imports.67), the transition supervisor (imports.47) and the replay-end watcher
+        # (imports.70). Written by the main loop's rule (Service._passFailed): each distinct error
+        # once per session, at ERROR with its traceback; this loop keeps a memory of its own.
+        if self.tickFailures.first(loopguard_helpers.error_key(error)):
+            self.log('_chkIdle, a tick failed; the idle loop goes on (each different error is written once per'
+                     ' session): %s'%(loopguard_helpers.describe(error)), xbmc.LOGERROR)
 
 
     def onNotification(self, sender, method, data):
@@ -1994,9 +2016,16 @@ class Service(object):
     pendingInterrupt = PROPERTIES.setPendingInterrupt(False)
     pendingShutdown  = PROPERTIES.setPendingShutdown(False)
     pendingRestart   = PROPERTIES.setPendingRestart(False)
+    # madteevee (imports fork, imports.71): the Kodi-restart marker (_kodiRestart) goes with the request.
+    # This body runs once per interpreter: when Kodi starts this service script (at its own start, or
+    # after an add-on update, a reinstall or a disable and enable), whose modules then read their data
+    # paths and files anew. A marker left over from the old interpreter, its reason gone, would make a
+    # later 'Force background service to reload' pause the service with an old note.
+    PROPERTIES.setPendingKodiRestart('')
     jsonQue          = set(SETTINGS.getCacheSetting('jsonQue') or [])
     postQue          = set(SETTINGS.getCacheSetting('postQue') or [])
     logoQue          = set(SETTINGS.getCacheSetting('logoQue') or [])
+    kodiRestartNoted = '' # madteevee (imports fork, imports.71): the Kodi-restart reason last shown (_kodiRestart)
 
     def __init__(self):
         self.jsonRPC     = JSONRPC(service=self)
@@ -2007,7 +2036,9 @@ class Service(object):
         self.settings    = SETTINGS.getCurrentSettings()
         self.isClient    = SETTINGS.getSettingBool('Enable_Client')
         self.priorityQUE = CustomQueue(priority=True, service=self)
-    
+        # madteevee (imports fork, imports.71): _passFailed's memory, kept across restarts
+        self.loopFailures = loopguard_helpers.Failures()
+
 
     def __del__(self):
         try:
@@ -2066,8 +2097,39 @@ class Service(object):
             self.pendingRestart = pendingRestart
             self.log('_restart, pendingRestart = %s'%(self.pendingRestart))
         return self.pendingRestart
-         
-        
+
+
+    def _kodiRestart(self) -> bool: #service paused until Kodi restarts
+        # madteevee (imports fork, imports.71): a restored channel backup (Backup.recoverChannels,
+        # 'restore') or a moved data folder (Tasks.setUserPath, 'folder') sets this marker next to
+        # pendingRestart, because only a Kodi restart finishes either. A restart of the service alone
+        # keeps this interpreter's modules, whose data paths were fixed when they were imported
+        # (variables.py, cache.py), and the timers it keeps in Window(10000) properties
+        # (Tasks._chkEpochTimer): it would go on with the old folder, and the work a Kodi start runs at
+        # once, such as the library walk that ends by building channels, would wait for its next turn
+        # (Library_Walk_Interval). Before imports.71 the service restarted itself every 20-30 s, doing
+        # nothing, until Kodi was restarted. Now it stays paused, as the modules that check pendingRestart
+        # do (their _interrupt reads it; the imports thread still wakes, and its sync stops at its first
+        # check), and says once what to do. The marker ends with Kodi (Window(10000)'s properties do), or
+        # when a new interpreter imports this module (the class body).
+        reason = PROPERTIES.getPendingKodiRestart()
+        if not reason: return False
+        # Sets this object's own pendingInterrupt at once, which Service._sleep reads without asking
+        # again (Discovery's waits end on it). The shared Window property it writes too can be set back
+        # by another writer (each PROPERTIES.interruptActivity() ends by writing it False); no module
+        # relies on it alone: each stand-in service also reads pendingRestart, which stays set.
+        self._interrupt()
+        if reason != self.kodiRestartNoted:
+            self.kodiRestartNoted = reason
+            # A line Kodi's log always gets (logger.notice), once per reason: on a box that runs without
+            # the add-on's debug logging, the pause and why must still show there (the note is 4 s).
+            notice('Service: _kodiRestart, paused until Kodi restarts (%s)'%(reason))
+            note = {'restore':30910, 'folder':30911}.get(reason)
+            # shown even with 'Notifications During Playback' off: it answers what the user just did
+            if note: DIALOG.notificationDialog(LANGUAGE(note), show=True)
+        return True
+
+
     def _interrupt(self) -> bool: #tasks break
         # Same self-referential bug class as _suspend below: ORing against PROPERTIES
         # .isPendingInterrupt() — the property this method writes via setPendingInterrupt
@@ -2118,13 +2180,41 @@ class Service(object):
         if DIALOG.notificationWait('%s...'%(LANGUAGE(32054)),wait=15):
             if self.player.isPlayingPseudoTV(): self.player.onAVStarted()
             while not self.monitor.abortRequested():
-                self.isScanning = BUILTIN.isScanning()
-                self.isPaused   = BUILTIN.isPaused()
-                self.isPlaying  = self.player.isPlaying()
-                if    self._shutdown() and self._interrupt() and self._sleep(): break
-                elif  self._restart()  and self._interrupt() and self._sleep(): break
-                else: self._tasks()
+                # madteevee (imports fork, imports.71): one failed pass no longer ends the service. Its
+                # exception went up to service.py, which logged it, showed 'Something Went Wrong' and
+                # ended the script, and Kodi never starts a stopped service script again
+                # (xbmc/addons/Service.cpp:37-52; the interpreter stays up for the other threads,
+                # interfaces/python/PythonInvoker.cpp:382-407): the queue stood still while the
+                # dashboard answered (2026-06-05, 2026-10-04 for 3 days 17 h, 2026-11-07). Now the
+                # failure is written once (_passFailed) and the loop waits its normal interval, then
+                # goes on. Exception only: SystemExit and the like still end it, and Kodi closing ends
+                # the wait at once. A request that only a Kodi restart finishes pauses the loop
+                # instead of restarting the service (_kodiRestart).
+                try:
+                    self.isScanning = BUILTIN.isScanning()
+                    self.isPaused   = BUILTIN.isPaused()
+                    self.isPlaying  = self.player.isPlaying()
+                    if    self._shutdown() and self._interrupt() and self._sleep(): break
+                    elif  self._restart() and self._kodiRestart(): pass #paused until Kodi restarts
+                    elif  self.pendingRestart and self._interrupt() and self._sleep(): break
+                    else: self._tasks()
+                except Exception as e:
+                    self._passFailed(e)
+                    if self._shutdown(): break
             return self._stop(self.pendingRestart)
+
+
+    def _passFailed(self, error):
+        # madteevee (imports fork, imports.71): a pass of the main loop (_start) failed. Each distinct
+        # error (loopguard_helpers.error_key: its class and the add-on line it came from, not its
+        # message) is written once per session at ERROR, with its traceback: logger.log adds it, as
+        # this runs inside the except, and writes ERROR lines with debug logging off unless
+        # Debug_Level asks for fatal lines only. A repeat writes nothing, so an error that comes
+        # back every pass can't fill the log (the user's decision, 2026-11-20: each different error
+        # once). The memory is kept across service restarts, like the session's log.
+        if self.loopFailures.first(loopguard_helpers.error_key(error)):
+            self.log('_start, a pass of the main loop failed; the service goes on (each different error is written once'
+                     ' per session): %s'%(loopguard_helpers.describe(error)), xbmc.LOGERROR)
 
 
     def _stop(self, pendingRestart: bool=False):
@@ -2137,4 +2227,23 @@ class Service(object):
                     except Exception: pass
                     self.log('_stop, closing %s...'%(thread.name))
             PROPERTIES.setInstanceID() #clrTrash
+        # madteevee (imports fork, imports.71): a restart request is taken here, once. Its property
+        # (Utility Menu 'Force background service to reload') was cleared only by this class's body
+        # when service.py imported it, and service.py restarts this same object, so _restart() read
+        # True again at once: the service restarted every 20-30 s, doing nothing, until Kodi was
+        # restarted. Cleared after the threads above were told to stop, so each of them saw it (a
+        # Timer thread's _que -> _run -> _interrupt during the joins still reads the restart). Left
+        # set when the request asks for a Kodi restart too (_kodiRestart): the restarted run pauses.
+        if pendingRestart and not PROPERTIES.getPendingKodiRestart():
+            self.pendingRestart = PROPERTIES.setPendingRestart(False)
+            # The threads told to stop above include the 15 s timer of a settings save's refresh
+            # (Monitor._onSettingsChanged), and the Utility Menu button that leads to this reload is such
+            # a save: Kodi saves the add-on's settings when a settings button closes its window
+            # (xbmc/addons/settings/AddonSettings.cpp:213-218, addons/gui/GUIDialogAddonSettings.cpp:
+            # 381-399). Nothing else would run that refresh (Discovery's saves no longer repeat it every
+            # few minutes; _run no longer reads Enable_Executor): re-armed, so the restarted run reads the
+            # settings as after a save. Never the end of the service: a failure here is written and the
+            # restart goes on.
+            try: self.monitor._onSettingsChanged()
+            except Exception as e: self.log('_stop, the settings refresh was not re-armed: %s'%(e), xbmc.LOGERROR)
         return pendingRestart

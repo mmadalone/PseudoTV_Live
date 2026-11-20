@@ -1912,7 +1912,10 @@ def test_the_rig_logs_at_kodis_levels(rig):
 def test_only_the_watcher_writes_always_on_lines():
     """A12. logger.notice has one caller in the add-on, Player.notice, and Player.notice only the
     watcher's methods. Its lines carry ids, seconds and times only: no exception text (an error is
-    an ERROR line through log), no title, label, plot, file or path."""
+    an ERROR line through log), no title, label, plot, file or path. imports.71 (a deliberate edit, the
+    fix stage of its review): one more caller, Service._kodiRestart, one line per pause reason that
+    carries the reason word alone ('restore' or 'folder'), so a service paused until a Kodi restart
+    shows in a log written without the add-on's debug logging."""
     owner = _owner_map()
     lib = os.path.join(ADDON, 'resources', 'lib')
     for name in sorted(os.listdir(lib)):
@@ -1922,7 +1925,10 @@ def test_only_the_watcher_writes_always_on_lines():
         assert not [c for c in ast.walk(tree) if isinstance(c, ast.Call) and ast.unparse(c.func).endswith('notice')], name
         assert name == 'logger.py' or 'import notice' not in text, name
     calls = [c for c in ast.walk(S_TREE) if isinstance(c, ast.Call)]
-    assert [owner(c) for c in calls if ast.unparse(c.func) == 'notice'] == [('Player', 'notice')]
+    assert [owner(c) for c in calls if ast.unparse(c.func) == 'notice'] == [('Player', 'notice'),
+                                                                           ('Service', '_kodiRestart')]
+    pause = [c for c in calls if ast.unparse(c.func) == 'notice' and owner(c) == ('Service', '_kodiRestart')][0]
+    assert {n.id for n in ast.walk(pause) if isinstance(n, ast.Name)} == {'notice', 'reason'}
     mine = [c for c in calls if ast.unparse(c.func) == 'self.notice']
     assert sorted({owner(c)[1] for c in mine}) == ['_chkReplayEnd', '_lookupReplayEnd', '_moveReplayEnd', '_replayEndOpen',
                                                    '_runReplayEnd']

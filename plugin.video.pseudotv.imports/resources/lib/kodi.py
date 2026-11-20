@@ -779,6 +779,21 @@ class Properties(object):
         return value
 
 
+    def setPendingKodiRestart(self, reason):
+        # madteevee (imports fork, imports.71): a change that only a Kodi restart finishes, by reason:
+        # 'restore' (Backup.recoverChannels) or 'folder' (Tasks.setUserPath). Set before
+        # setPendingRestart, so whoever sees that request sees this too. Every module still pauses on
+        # pendingRestart; the service's main loop pauses with them instead of restarting the service,
+        # and says once what to do (Service._kodiRestart). Nothing clears it: Window(10000)'s
+        # properties end with Kodi.
+        return self.setEXTProperty('%s.pendingKodiRestart'%(ADDON_ID),reason)
+
+
+    def getPendingKodiRestart(self):
+        # madteevee (imports fork, imports.71): the reason setPendingKodiRestart gave, or ''.
+        return self.getEXTProperty('%s.pendingKodiRestart'%(ADDON_ID),'')
+
+
     @contextmanager
     def chkRunning(self, key):
         if not self.isRunning(key):

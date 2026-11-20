@@ -1353,6 +1353,11 @@ class Tasks(object):
         dia = DIALOG.progressDialog(message='%s\n%s'%(LANGUAGE(32050),old))
         with PROPERTIES.interruptActivity():
             FileAccess.copyFolder(old, new, dia)
+        # madteevee (imports fork, imports.71): only a Kodi restart finishes the move: this
+        # interpreter's data paths were fixed when variables.py was imported. The service pauses until
+        # then and says so once (Service._kodiRestart). The marker first, so whoever sees the
+        # request sees it too.
+        PROPERTIES.setPendingKodiRestart('folder')
         PROPERTIES.setPendingRestart()
         DIALOG.progressDialog(100, dia)
 

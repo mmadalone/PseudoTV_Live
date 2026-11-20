@@ -237,6 +237,14 @@ BITOR_REVIEWED = {
     'cqueue.py': [],
     'pool.py': [],
     'variables.py': [],
+    # imports.71 (the loop guards and restart requests): none in the new
+    # loopguard_helpers.py, nor in kodi.py and backup.py. services.py's one
+    # '|' is upstream's, in Monitor._chkIdle (a bool and an int, then a
+    # compare), whose body imports.71 only wraps: reviewed, left as it is.
+    'loopguard_helpers.py': [],
+    'kodi.py': [],
+    'backup.py': [],
+    'services.py': ['self.isIdle   = bool(self.idleTime) | self.idleTime > OSD_TIMER'],
 }
 
 
