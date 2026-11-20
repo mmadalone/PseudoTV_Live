@@ -73,7 +73,9 @@ class Cache(object):
         self.cache = _Cache(service=self.service)
         self.cache.enable_mem_cache = mem_cache
         # disable_cache is True if explicitly passed OR addon settings say so
-        self.disable_cache          = (disable_cache or REAL_SETTINGS.getSettingBool('Disable_Cache'))
+        # madteevee (imports fork, imports.71): through Globals._readSetting, which survives Kodi's
+        # in-place reload of REAL_SETTINGS after a settings save (a typed getter raises then).
+        self.disable_cache          = (disable_cache or Globals._readSetting('getSettingBool','Disable_Cache'))
         self.log('__init__, mem_cache = %s, disable_cache = %s' % (mem_cache, disable_cache))
 
 
@@ -162,7 +164,8 @@ class _Cache(object):
     def _getFreeMEM():
         try:              free = int("".join(re.findall(r"\d", BUILTIN.getInfoLabel('FreeMemory','System'))))
         except Exception: free = 1024 #1GB
-        return floor(free * (REAL_SETTINGS.getSettingInt('Cache_MEM_Limit') / 100)) * 1024 * 1024
+        # madteevee (imports fork, imports.71): through Globals._readSetting (see Cache.__init__).
+        return floor(free * (Globals._readSetting('getSettingInt','Cache_MEM_Limit') / 100)) * 1024 * 1024
         
         
         

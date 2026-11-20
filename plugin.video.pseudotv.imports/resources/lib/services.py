@@ -1962,6 +1962,9 @@ class Monitor(xbmc.Monitor):
             
     def _updateServiceSettings(self):
         self.log('_updateServiceSettings')
+        # madteevee (imports fork, imports.71): the queue's Enable_Executor follows a save here; _run
+        # no longer reads it (cqueue.CustomQueue._chkExecutor). First, so a failure below can't skip it.
+        self.service.priorityQUE._chkExecutor()
         self.service.channels = self.service.tasks.getChannels()
         self.service.settings = self.service.tasks.chkSettingsChange(self.service.settings) #check for settings change, take action if needed
         

@@ -32,7 +32,11 @@ class LlNode(object):
 class CustomQueue(object):
     futures  = set()
     min_heap = []
-   
+    # madteevee (imports fork, imports.71): Enable_Executor as last read by _chkExecutor; until a
+    # read has succeeded (executorRead), its settings.xml default.
+    useExecutor  = True
+    executorRead = False
+
     def __init__(self, fifo: bool=False, lifo: bool=False, priority: bool=False, delay: bool=False, timer: bool=False, service=None):
         self.service     = service
         self.fifo        = fifo
@@ -45,7 +49,7 @@ class CustomQueue(object):
         self.nodes       = set()
         self.type        = self._getType()
         self.itemCount   = defaultdict(int)
-        self.useExecutor = REAL_SETTINGS.getSettingBool('Enable_Executor')
+        self._chkExecutor() # madteevee (imports fork, imports.71): useExecutor, read once here
         self.executor    = ThreadPoolExecutor(max_workers=THREAD_COUNT)
         self.popThread   = Thread(target=self._start)
         self.wrkThread   = Thread(target=self._worker)
@@ -72,9 +76,31 @@ class CustomQueue(object):
         self.itemCount = defaultdict(int)
 
         
+    def _chkExecutor(self, retry: bool=False):
+        # madteevee (imports fork, imports.71): Enable_Executor is read here: when the queue is made,
+        # after each settings save (Monitor._updateServiceSettings) and, with retry=True, by a periodic
+        # refresh until a read has succeeded (executorRead); no longer on every _run.
+        # _run read it about every 5 s with a typed getter on REAL_SETTINGS, the add-on's oldest
+        # live xbmcaddon.Addon: the one Kodi reloads in place after every save of the add-on's
+        # settings, on the saver's thread with Python's lock released
+        # (xbmc/addons/AddonManager.cpp:214-225). While it re-parses settings.xml its typed getters
+        # raise TypeError('Invalid setting type') (Addon.cpp:286-315); raised on the main loop's
+        # thread, that ended the service on 2026-06-05, 2026-10-04 and 2026-11-07. SETTINGS reads
+        # through a new handle, which Kodi never reloads in place; a failed read is None
+        # (Settings._getSetting writes it at ERROR) and keeps the last good value.
+        if retry and self.executorRead: return self.useExecutor
+        state = SETTINGS.getSettingBool('Enable_Executor')
+        if state is None: return self.useExecutor
+        self.executorRead = True
+        if state != self.useExecutor:
+            self.useExecutor = state
+            self.log('_chkExecutor, useExecutor = %s'%(state))
+        return self.useExecutor
+
+
     def _run(self):
         self.log("_run")
-        self.useExecutor = REAL_SETTINGS.getSettingBool('Enable_Executor')
+        # madteevee (imports fork, imports.71): no settings read here; useExecutor is kept by _chkExecutor.
         if self.useExecutor:
             if self.wrkThread.is_alive():
                 try:

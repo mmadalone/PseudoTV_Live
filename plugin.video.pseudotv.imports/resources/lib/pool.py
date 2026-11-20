@@ -27,7 +27,9 @@ class ExecutorPool:
     _executor = ThreadPoolExecutor(max_workers=THREAD_COUNT)
     
     def __init__(self):
-        self.useExecutor = REAL_SETTINGS.getSettingBool('Enable_Executor')
+        # madteevee (imports fork, imports.71): through Globals._readSetting, which survives Kodi's
+        # in-place reload of REAL_SETTINGS after a settings save (a typed getter raises then).
+        self.useExecutor = Globals._readSetting('getSettingBool','Enable_Executor')
 
 
     def __del__(self):
@@ -121,7 +123,8 @@ def debounceit(wait=SERVICE_INTERVAL):
 def killit(method):
     @wraps(method)
     def wrapper(wait=None, *args, **kwargs):
-        if wait is None: wait = REAL_SETTINGS.getSettingInt('RPC_Wait')
+        # madteevee (imports fork, imports.71): through Globals._readSetting (see ExecutorPool.__init__).
+        if wait is None: wait = Globals._readSetting('getSettingInt','RPC_Wait')
         timeout  = float(wait) if wait >= 0 else None
         response = {'result': None, 'success': False, 'error': ''}
         def __run():

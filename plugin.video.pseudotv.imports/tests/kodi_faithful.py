@@ -32,12 +32,32 @@ instead (the pattern of imports70_sync_rig.py: one shared module, no test in it)
   - compile_method / compile_function / lib_constant: one real method, one real top-level function
     (logger.log / logger.notice, for the rigs' log chain), or one constant, out of a library file.
 
+imports.71: the add-on's settings, as Kodi 21.3 keeps them. The service ended on 2026-06-05,
+2026-10-04 and 2026-11-07 with TypeError('Invalid setting type') from a typed getter on REAL_SETTINGS:
+every save of the add-on's settings makes Kodi rebuild the add-on's oldest live xbmcaddon.Addon in
+place, and while it re-parses settings.xml its typed getters raise. The repo-root xbmcaddon stub can't
+show that: its typed getters never raise (a missing id reads 0 or False), its handles share one dict
+(or none), and it knows no settings.xml type, no default and no reload.
+  - SETTING_TYPES: {id: (type, default text)} from the add-on's real resources/settings.xml (115
+    settings, 18 of them strings; the commented-out ones are not settings, as for Kodi's parser).
+  - FaithfulAddon: one xbmcaddon.Addon object, with its own settings loaded on first use and Kodi's
+    rules for an undefined id, a wrong type and the two phases of the in-place reload.
+  - FaithfulAddons: xbmcaddon.Addon itself: every call builds a NEW handle; a save rewrites the user
+    file, reloads only the oldest live handle, then queues onSettingsChanged, which deliver() runs
+    inside a rig's wait on the thread that made the monitor.
+  - install_settings: xbmcaddon.Addon and REAL_SETTINGS, for one test (the test passes the stub in).
+
 Nothing here imports Kodi or a Kodi stub; the only files read are the add-on's own sources.
 """
 import ast
+import contextlib
 import math
 import os
+import sys
+import threading
 import types
+import weakref
+import xml.etree.ElementTree as ET
 
 HERE      = os.path.dirname(os.path.abspath(__file__))
 ADDON_LIB = os.path.join(os.path.dirname(HERE), 'resources', 'lib')
@@ -380,3 +400,348 @@ class FaithfulService(object):
     def log(self, msg, level=KODI_LOG['LOGDEBUG']):
         self.monitor.standstill('Service.log')
         self.logged.append((msg, level))
+
+
+# ================================================================ imports.71: the add-on's settings
+
+ADDON_ID     = 'plugin.video.pseudotv.imports'
+SETTINGS_XML = os.path.join(os.path.dirname(ADDON_LIB), 'settings.xml')
+
+# The typed getter Kodi's Python binding answers for each settings.xml type: GetSettingValue wants the
+# setting's own type (xbmc/addons/Addon.cpp:420-435). A path or an addon setting is a CSettingString
+# (xbmc/settings/SettingPath.h:17, SettingAddon.h:19); an action (Setting.h:506-519) or a list setting
+# (Setting.h:181) has no typed getter. The setters follow the getters (Addon.cpp:487-515).
+TYPED_GETTER = {'boolean': 'getSettingBool', 'integer': 'getSettingInt', 'number': 'getSettingNumber',
+                'string': 'getSettingString', 'path': 'getSettingString', 'addon': 'getSettingString'}
+GETTERS      = ('getSettingBool', 'getSettingInt', 'getSettingNumber', 'getSettingString')
+
+
+def setting_types(path=SETTINGS_XML):
+    """{id: (type, default text)} of every <setting> in the add-on's resources/settings.xml, read as
+    Kodi reads it: comments are skipped (the commented-out Backup_Channels / Recover_Backup are not
+    settings), and a missing or empty <default> is ''."""
+    found = {}
+    for node in ET.parse(path).iter('setting'):  # noqa: S314 -- the add-on's own resources/settings.xml
+        default = node.find('default')
+        found[node.get('id')] = (node.get('type'), (default.text or '') if default is not None else '')
+    return found
+
+
+SETTING_TYPES = setting_types()
+
+
+def _from_text(kind, text):
+    """What a typed getter returns for `text` (the user file's form), or None when Kodi's FromString
+    would refuse it (the setting then keeps its value)."""
+    if kind == 'boolean': return {'true': True, 'false': False}.get(str(text).lower())
+    if kind in ('integer', 'number'):
+        try: return int(text) if kind == 'integer' else float(text)
+        except (TypeError, ValueError): return None
+    return text
+
+
+def _to_text(value):
+    """A value as Kodi writes it to the user file (CSetting*::ToString)."""
+    if isinstance(value, bool): return 'true' if value else 'false'
+    if isinstance(value, float): return '%f' % value
+    return str(value)
+
+
+class FaithfulAddon(object):
+    """One xbmcaddon.Addon object of the add-on, as Kodi 21.3 keeps it: a CAddon of its own with
+    settings of its own (xbmc/addons/AddonManager.cpp:630-655; interfaces/legacy/Addon.cpp:54-77),
+    loaded on the first settings access, a parse of settings.xml and the user file (Addon.cpp:267-322),
+    and never again unless Kodi reloads this very object after a save (FaithfulAddons).
+      phase   None, or the reload phase it is in: 'A' from CSettingsManager::Clear to the end of
+              CAddonSettings::Initialize (Addon.cpp:286-308): every typed getter raises
+              TypeError('Invalid setting type') after Kodi's own ERROR line, getSetting returns '';
+              'B' from there until the user file is read (Addon.cpp:315-319): the settings.xml
+              defaults, without an error.
+      calls   every getter and setter call on it, (method, id), in order.
+      number  its place in construction order (1: the first one built).
+    Kodi's rules: a typed getter for an undefined id or of the wrong type writes 'EXCEPTION: Invalid
+    setting type' and raises TypeError (Addon.cpp:420-435; legacy Addon.cpp:94-128;
+    PythonSwig.cpp.template:221-224); getSetting returns '' for an undefined id (Addon.cpp:408-418);
+    setSetting takes text and adds an undefined id (Addon.cpp:465-485); a typed setter of the wrong type
+    raises the same way and saves nothing (Addon.cpp:487-515; legacy Addon.cpp:143-196); every setter
+    then saves (CAddon::SaveSettings, Addon.cpp:375-406), changed or not."""
+
+    def __init__(self, registry, number):
+        self._registry, self.number = registry, number
+        self.phase, self.calls = None, []
+        self._values, self._kinds = None, {}       # {id: text} once loaded; ids its setters added
+        self._broken, self._saveable = False, False
+
+    def __repr__(self):
+        return '<FaithfulAddon #%d%s>' % (self.number, '' if self.phase is None else ' phase ' + self.phase)
+
+    # --- loading ------------------------------------------------------------------------------------
+    def _load(self):
+        """Kodi's LoadSettings(false): True once the definitions are in. The first call parses (the user
+        file too); a handle whose definitions failed stays without settings (m_loadSettingsFailed,
+        Addon.cpp:274-279, 295-312)."""
+        if self._values is not None: return True
+        if self._broken: return False
+        return self._registry._read(self)
+
+    def _kind(self, key):
+        return SETTING_TYPES.get(key, (None, ''))[0] or self._kinds.get(key)
+
+    # --- getters ------------------------------------------------------------------------------------
+    def _typed(self, method, key):
+        self.calls.append((method, key))
+        if self.phase == 'A' or not self._load(): return self._registry._wrong_type()
+        kind = self._kind(key)
+        if TYPED_GETTER.get(kind) != method: return self._registry._wrong_type()
+        default = SETTING_TYPES.get(key, (None, ''))[1]
+        value = _from_text(kind, default if self.phase == 'B' else self._values.get(key, default))
+        return _from_text(kind, default) if value is None else value
+
+    def getSettingBool(self, id):
+        return self._typed('getSettingBool', id)
+
+    def getSettingInt(self, id):
+        return self._typed('getSettingInt', id)
+
+    def getSettingNumber(self, id):
+        return self._typed('getSettingNumber', id)
+
+    def getSettingString(self, id):
+        return self._typed('getSettingString', id)
+
+    def getSetting(self, id):
+        self.calls.append(('getSetting', id))
+        if self.phase == 'A' or not self._load(): return ''
+        default = SETTING_TYPES.get(id, (None, ''))[1]
+        return default if self.phase == 'B' else self._values.get(id, default)
+
+    def getSettings(self):
+        """xbmcaddon.Settings over this handle's own settings object (legacy Addon.cpp:84-87): its
+        getters need the settings loaded, so they raise in both reload phases (research F11)."""
+        self.calls.append(('getSettings', None))
+        handle = self
+
+        class Settings(object):
+            def _get(self, method, key):
+                kind = {'getBool': 'boolean', 'getInt': 'integer', 'getNumber': 'number', 'getString': 'string'}[method]
+                if handle.phase is not None:
+                    return handle._registry._wrong_type('Invalid setting type "%s" for "%s"' % (kind, key))
+                return handle._typed(TYPED_GETTER[kind], key)
+
+            def getBool(self, key): return self._get('getBool', key)
+
+            def getInt(self, key): return self._get('getInt', key)
+
+            def getNumber(self, key): return self._get('getNumber', key)
+
+            def getString(self, key): return self._get('getString', key)
+        return Settings()
+
+    # --- setters ------------------------------------------------------------------------------------
+    def setSetting(self, id, value):
+        # Kodi's binding converts the value before the call (interfaces/python/swig.cpp:105-141).
+        if isinstance(value, bytes): value = value.decode('utf-8')
+        if not isinstance(value, str):
+            return self._registry._wrong_type('argument "value" for method "setSetting" must be unicode or str')
+        self.calls.append(('setSetting', id))
+        if self._load():                                         # CAddon::UpdateSetting
+            kind = self._kind(id)
+            if kind is None:
+                self._kinds[id] = 'string'                       # an undefined id is added
+                self._values[id] = value
+            else:
+                parsed = _from_text(kind, value)
+                if parsed is not None: self._values[id] = _to_text(parsed)
+        self._save()
+
+    def _typed_set(self, method, id, value, kinds):
+        if not isinstance(value, kinds) or (kinds == (int,) and isinstance(value, bool)):
+            raise TypeError('%s: value must be %s, not %s' % (method, kinds[0].__name__, type(value).__name__))
+        self.calls.append((method, id))
+        if not self._load(): return self._registry._wrong_type()
+        kind = self._kind(id)
+        if kind is None: self._kinds[id] = {'setSettingBool': 'boolean', 'setSettingInt': 'integer',
+                                            'setSettingNumber': 'number', 'setSettingString': 'string'}[method]
+        elif TYPED_GETTER.get(kind) != 'get' + method[3:]: return self._registry._wrong_type()
+        self._values[id] = _to_text(value)
+        self._save()
+        return True
+
+    def setSettingBool(self, id, value):
+        return self._typed_set('setSettingBool', id, value, (bool,))
+
+    def setSettingInt(self, id, value):
+        return self._typed_set('setSettingInt', id, value, (int,))
+
+    def setSettingNumber(self, id, value):
+        return self._typed_set('setSettingNumber', id, value, (int, float))
+
+    def setSettingString(self, id, value):
+        return self._typed_set('setSettingString', id, value, (str,))
+
+    def _save(self):
+        return self._registry._save(self)
+
+    # --- the rest of the object, minimal ------------------------------------------------------------
+    def getAddonInfo(self, key):
+        return {'id': self._registry.addon_id, 'name': self._registry.addon_id}.get(key, '')
+
+    def getLocalizedString(self, number):
+        return ''
+
+
+class FaithfulAddons(object):
+    """xbmcaddon.Addon for the add-on, as Kodi 21.3 runs it.
+      Addon(id)   builds a NEW FaithfulAddon on every call (AddonManager.cpp:630-655: CAddonBuilder::
+                  Generate; GetRunningInstance() is null for a Python add-on) and registers it last
+                  (AddToUpdateableAddons, AddonManager.cpp:183-187). Python freeing the object
+                  unregisters it (~Addon, legacy Addon.cpp:74-77): the registry keeps weak references.
+                  Another id: Kodi's 'Unknown addon id' (RuntimeError); so does every call while
+                  `refuse_new` is set.
+      disk        the user settings file, {id: text}. A save rewrites it from the writer's values.
+      saves       [(writer number, ids whose text changed)], one entry per save, changed or not.
+      built       handles built; parses: settings.xml parses (first loads and reloads).
+      kodi_log    the lines Kodi itself writes, (text, level): 'EXCEPTION: Invalid setting type' for
+                  every failed typed call, even one Python catches (PythonSwig.cpp.template:221-224).
+      events      'disk', 'reload #n', 'callbacks queued': each save's steps, in order.
+      on_reload   optional, called with 'A' then 'B' while the reloaded handle is in that phase, on the
+                  saver's thread (the setter has released Python's lock there: legacy Addon.cpp:132).
+    A save (CAddon::SaveSettings, Addon.cpp:375-406): the file is rewritten, then the OLDEST live handle
+    alone is rebuilt in place (CAddonMgr::ReloadSettings, AddonManager.cpp:214-225; LoadSettings(true),
+    Addon.cpp:267-322), then one onSettingsChanged is queued per monitor() (XBPython.cpp:324-333).
+    deliver() is Kodi inside a wait: it runs the callbacks queued for monitors the calling thread made
+    (python/CallbackHandler.cpp:33-45; legacy CallbackHandler.cpp:64-110) and logs an exception one
+    raises instead of passing it on (legacy CallbackHandler.cpp:97-104).
+    Switches: torn_next_load (the next load reads a half-written user file: Kodi logs 'failed to load
+    addon settings', the handle serves the defaults silently and its saves are skipped, Addon.cpp:
+    346-367, 377-378); fail_definitions (settings.xml can't be read: the handle stays without
+    settings, typed getters raise and getSetting returns '' for good, Addon.cpp:274-279, 295-312)."""
+
+    def __init__(self, user=None, addon_id=ADDON_ID, kodi_log=None):
+        self.addon_id = addon_id
+        self.disk = dict(user or {})
+        self.saves, self.events = [], []
+        self.kodi_log = [] if kodi_log is None else kodi_log
+        self.built = self.parses = 0
+        self.on_reload = None
+        self.torn_next_load = self.fail_definitions = self.refuse_new = False
+        self._handles, self._monitors, self._queued = [], [], []
+
+    def log(self, text, level=KODI_LOG['LOGERROR']):
+        self.kodi_log.append((text, level))
+
+    def Addon(self, id=None):
+        if self.refuse_new or (id is not None and id != self.addon_id):
+            self.log("EXCEPTION: Unknown addon id '%s'." % (id,))
+            raise RuntimeError("Unknown addon id '%s'." % (id,))
+        self.built += 1
+        handle = FaithfulAddon(self, self.built)
+        self._handles.append(weakref.ref(handle))
+        return handle
+
+    def live(self):
+        """The handles Python still holds, oldest first (Kodi's m_updateableAddons)."""
+        return [h for h in (ref() for ref in self._handles) if h is not None]
+
+    def first(self):
+        """The handle a save rebuilds: the oldest live one, or None."""
+        live = self.live()
+        return live[0] if live else None
+
+    @contextlib.contextmanager
+    def hold(self, phase, handle=None):
+        """Keep `handle` (default: the oldest live one) in reload phase 'A' or 'B' while the code under
+        test runs: the deterministic way to put a read inside Kodi's window."""
+        target = self.first() if handle is None else handle
+        old, target.phase = target.phase, phase
+        try: yield target
+        finally: target.phase = old
+
+    def kodi_errors(self, text='EXCEPTION: Invalid setting type'):
+        return [line for line, _level in self.kodi_log if line == text]
+
+    # --- what Kodi does ---------------------------------------------------------------------------
+    def _wrong_type(self, text='Invalid setting type'):
+        self.log('EXCEPTION: %s' % text)
+        raise TypeError(text)
+
+    def _read(self, handle):
+        """One full load of `handle`: the definitions, then the user file."""
+        self.parses += 1
+        if self.fail_definitions:
+            handle._broken, handle._values = True, None
+            self.log('CAddon[%s]: failed to initialize addon settings' % self.addon_id)
+            return False
+        if self.torn_next_load:
+            self.torn_next_load = False
+            handle._values, handle._saveable = {}, False
+            self.log('CAddon[%s]: failed to load addon settings from <the user file>' % self.addon_id)
+        else:
+            handle._values, handle._saveable = dict(self.disk), True
+        return True
+
+    def _save(self, writer):
+        if writer._values is None or not writer._saveable: return False   # HasSettingsToSave
+        old, self.disk = self.disk, dict(writer._values)
+        changed = sorted(k for k in set(old).union(self.disk) if old.get(k) != self.disk.get(k))
+        self.saves.append((writer.number, changed))
+        self.events.append('disk')
+        target = self.first()
+        if target is not None: self._reload(target)
+        self.events.append('callbacks queued')
+        self._queued.extend(self._monitors)
+        return True
+
+    def _reload(self, handle):
+        self.events.append('reload #%d' % handle.number)
+        if handle._broken: return                                          # LoadSettings: false at once
+        if handle._values is None:                                         # never loaded: a first load
+            self._read(handle)
+            return
+        held = handle.phase
+        try:
+            handle.phase = 'A'
+            if self.on_reload is not None: self.on_reload('A')
+            if self.fail_definitions:
+                self._read(handle)
+                return
+            handle.phase = 'B'
+            if self.on_reload is not None: self.on_reload('B')
+            self._read(handle)
+        finally:
+            handle.phase = held
+
+    # --- onSettingsChanged ------------------------------------------------------------------------
+    def monitor(self, obj):
+        """Register `obj` as an xbmc.Monitor made on this thread; returns it."""
+        self._monitors.append((obj, threading.get_ident()))
+        return obj
+
+    def pending(self):
+        return len(self._queued)
+
+    def deliver(self):
+        """Kodi inside a wait on the calling thread: the queued onSettingsChanged of the monitors this
+        thread made run now; an exception one raises is written to the log, never passed on. Returns how
+        many ran."""
+        ident, ran = threading.get_ident(), 0
+        for entry in list(self._queued):
+            if entry[1] != ident: continue
+            self._queued.remove(entry)
+            ran += 1
+            try: entry[0].onSettingsChanged()
+            except Exception as e:  # Kodi's CallbackHandler catches it (the add-on's code never sees it)
+                self.log('EXCEPTION Thrown (PythonToCppException) : %s: %s' % (type(e).__name__, e))
+        return ran
+
+
+def install_settings(monkeypatch, registry, xbmcaddon_module, real_settings):
+    """For one imports.71 test: xbmcaddon.Addon builds `registry`'s handles, and REAL_SETTINGS is
+    `real_settings` in every loaded resources/lib module that has the name (the star imports copy it
+    into most of them). monkeypatch undoes both afterwards. The test passes the stub module in: this
+    module imports no Kodi stub."""
+    monkeypatch.setattr(xbmcaddon_module, 'Addon', registry.Addon)
+    for module in list(sys.modules.values()):
+        path = getattr(module, '__file__', None)
+        if path and os.path.abspath(path).startswith(ADDON_LIB + os.sep) and hasattr(module, 'REAL_SETTINGS'):
+            monkeypatch.setattr(module, 'REAL_SETTINGS', real_settings)

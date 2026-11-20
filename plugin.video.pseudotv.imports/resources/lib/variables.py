@@ -59,6 +59,25 @@ class Globals:
         return xbmcgui.Window(10000).clearProperty('%s.%s'%(ADDON_ID, key))
 
     @staticmethod
+    def _readSetting(getter, key):
+        # madteevee (imports fork, imports.71): one typed read of this add-on's setting `key`
+        # (getter: 'getSettingBool', 'getSettingInt', 'getSettingNumber' or 'getSettingString') for
+        # code below kodi.py, where its SETTINGS can't be used: cache.py and pool.py, which kodi.py
+        # imports, and whose Cache objects kodi.py builds while it is being imported.
+        # REAL_SETTINGS answers first, as before (no new parse). It is the add-on's oldest live
+        # xbmcaddon.Addon, the one Kodi reloads in place after every save of the add-on's settings
+        # (xbmc/addons/Addon.cpp:375-406, AddonManager.cpp:214-225); while it re-parses settings.xml
+        # its typed getters raise TypeError('Invalid setting type') (Addon.cpp:286-315). A new handle
+        # is never the one Kodi reloads, and building it waits on the add-on manager's lock until
+        # that reload is done (AddonManager.cpp:185, 216, 635), so it reads the saved value. A wrong
+        # id or type fails on the new handle too and raises as before. Kodi writes 'EXCEPTION:
+        # Invalid setting type' at ERROR for each failed typed call
+        # (interfaces/python/PythonSwig.cpp.template:221-224): twice for such a mistake, once and
+        # without a traceback for a reload caught here.
+        try: return getattr(REAL_SETTINGS, getter)(key)
+        except TypeError: return getattr(xbmcaddon.Addon(ADDON_ID), getter)(key)
+
+    @staticmethod
     def _encodePlot(plot, text):
         return '%s [COLOR item="%s"][/COLOR]'%(plot,FileAccess._encodeString(text))
         

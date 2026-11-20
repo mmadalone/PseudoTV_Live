@@ -230,6 +230,13 @@ BITOR_REVIEWED = {
     # imports.70 (the replay-end watcher): none. Its BUSY condition's '|' is
     # Kodi's OR inside a string, not an operator.
     'replayend_helpers.py': [],
+    # imports.71 (settings reads that survive Kodi's settings reload): none in
+    # the three files it changes whole methods of. cache.py and services.py
+    # keep their pre-existing '|' lines; their changed methods are checked in
+    # test_imports71_settings_reads.py.
+    'cqueue.py': [],
+    'pool.py': [],
+    'variables.py': [],
 }
 
 
