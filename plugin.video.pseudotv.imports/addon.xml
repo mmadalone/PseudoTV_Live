@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<addon id="plugin.video.pseudotv.imports" version="0.8.0+imports.70" name="PseudoTV Live (imports)" provider-name="Lunatixz, mmadalone">
+<addon id="plugin.video.pseudotv.imports" version="0.8.0+imports.71" name="PseudoTV Live (imports)" provider-name="Lunatixz, mmadalone">
     <requires>
         <import addon="xbmc.python" version="3.0.1"/>
         <import addon="script.module.six" version="1.0.0"/>
@@ -81,13 +81,13 @@
         <source>https://github.com/PseudoTV/PseudoTV_Live</source>
         <forum>https://forum.kodi.tv/showthread.php?tid=355549</forum>
         <disclaimer lang="en_GB">BETA PROJECT; SUBJECT TO BUGS</disclaimer>
-        <news>v0.8.0+imports.70
+        <news>v0.8.0+imports.71
+- Fixed: the background service no longer stops by itself while the add-on's settings are being saved (three times since June). If one round of its work fails, Kodi's log gets the error once and the service carries on.
+- Changed: the add-on no longer saves its settings every few minutes; "ZeroConf Status" shows Online or Offline, no longer "Listening". "Force background service to reload" restarts the service once. After restoring a channel backup or moving the data folder, the add-on asks you to restart Kodi and waits.
+v0.8.0+imports.70
 - Fixed: a LiveTV replay started while its show was on air no longer freezes at its end: the next show plays (or live TV), as after other replays, or playback stops when "Play next programme automatically" is off.
 - Fixed: once Movistar+'s own guide file is 36 hours old, upcoming Movistar+ shows follow your guide's names and times where it lists them, and keep replay only where both list them the same; Movistar+ then syncs at each automatic sync, about hourly, until it writes a new file. The red dashboard message now shows from 36 hours (was 4 days).
-- Fixed: episode numbers in your guide's titles ("Valle Salvaje T4 E103") are read again. After a guide address change, upcoming shows take the new guide's descriptions. A playlist that comes back empty no longer counts as a failed sync.
-v0.8.0+imports.69
-- Fixed: saving an import in the web dashboard no longer makes it "never synced". It keeps its last sync time, its error and retry state (unless you change its address) and its list of deleted channels, and a sync that is running can't undo the Save. A Save that changes an import starts its sync right away (after any sync or channel build that is running); a Save that changes nothing does nothing.
-- Fixed: "Re-discover deleted channels" works, Delete import takes the import's channels out of Kodi, and unticking Enabled hides its channels from the TV until you tick it again. An existing import's Identifier can't be changed.</news>
+- Fixed: episode numbers in your guide's titles ("Valle Salvaje T4 E103") are read again. After a guide address change, upcoming shows take the new guide's descriptions. A playlist that comes back empty no longer counts as a failed sync.</news>
         <reuselanguageinvoker>true</reuselanguageinvoker>
         <assets>
             <icon>resources/images/icon.png</icon>

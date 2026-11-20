@@ -1707,7 +1707,10 @@ def test_a_full_move_writes_these_lines_with_debug_off():
          ' opening live channel 47', FakeXbmc.LOGINFO, MEGA_DUE),
         (head + 'replay end: broadcast 90210: live channel 47: started (Kodi switched to it)',
          FakeXbmc.LOGINFO, MEGA_DUE + rh.WATCH_POLL)]
-    assert FakeXbmc.LOGINFO == 1 and PREFIX == 'plugin.video.pseudotv.imports-0.8.0+imports.70-'
+    # imports.71 (a deliberate edit): the prefix carries addon.xml's version, whatever the release (the version
+    # itself is pinned by its release's docs test), where this pinned imports.70's.
+    assert FakeXbmc.LOGINFO == 1 and PREFIX == 'plugin.video.pseudotv.imports-%s-' % ADDON_VERSION
+    assert ADDON_VERSION.startswith('0.8.0+imports.') and ADDON_VERSION.rpartition('.')[2].isdigit()
 
 
 def test_the_lines_of_a_move_to_the_next_show():
@@ -2894,5 +2897,6 @@ def test_getPVRBroadcastTimes_survives_errors(rpc, reply):
 def test_the_addon_news_fits_kodis_limit():
     news = ET.parse(os.path.join(ADDON, 'addon.xml')).getroot().find('.//news').text
     assert len(news) <= 1500
-    latest = news.split('v0.8.0+imports.69')[0]
-    assert latest.startswith('v0.8.0+imports.70') and 'freezes at its end' in latest
+    # imports.71 (a deliberate edit): imports.70's block no longer leads the news; it is still there.
+    block = news.split('v0.8.0+imports.70', 1)[1].split('v0.8.0+imports.', 1)[0]
+    assert 'freezes at its end' in block
