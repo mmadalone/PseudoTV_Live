@@ -64,3 +64,22 @@ def log(event, level=xbmc.LOGDEBUG):
         event = '%s-%s-%s' % (ADDON_ID, ADDON_VERSION, event)
         if level >= DEBUG_LEVEL:
             xbmc.log(event, level)
+
+
+def notice(event):
+    """
+    madteevee (imports fork, imports.70): one line in Kodi's log whatever the add-on's
+    Debug_Enable / Debug_Level settings say.
+
+    log() writes INFO and WARNING lines only with the add-on's debug logging on, so on a box that
+    runs without it a feature that acts by itself leaves no trace: on 2026-11-19 the replay-end
+    watcher did nothing on the TV and no line said why. xbmc.LOGINFO is the level Kodi writes at
+    its normal log level (it replaced LOGNOTICE in Kodi 19). Kodi asks add-ons to log sparingly:
+    this is for the few lines per event that someone will look for afterwards, never for a line
+    per tick or per request. Same prefix as log(); no traceback (an error still goes through
+    log(..., xbmc.LOGERROR)); it reads no setting.
+
+    Args:
+        event (str): The message. Ids, counts and times only: never a file path or a web address.
+    """
+    xbmc.log('%s-%s-%s' % (ADDON_ID, ADDON_VERSION, event), xbmc.LOGINFO)

@@ -26,9 +26,11 @@
 # Kodi and passes the facts in; every decision is made here and tested
 # without Kodi stubs.
 #
-# Why: Movistar+ serves a show that is still on air as a growing live stream
-# (its window opens a minute or two before the guide start and closes about
-# ten minutes after the guide end); a finished show comes as a recording.
+# Why: Movistar+ serves a show that is still on air as a live stream with its
+# own window, which need not match the guide entry (2026-11-15: an end about
+# ten minutes after the guide end; 2026-11-19: a 69-minute stream inside a
+# 3 h 05 guide entry, ending a minute before the guide end, and one declared
+# an hour past its guide end); a finished show comes as a recording.
 # inputstream.adaptive never ends the last period of a live stream ("Assume
 # that if the period is the last, it never ends"), even after the provider
 # turned it into a recording, so Kodi never sees the end: the player stalls
@@ -41,12 +43,15 @@
 #     the one on air (programme)? A finished show's replay is a recording
 #     that ends by itself: left to Kodi;
 #   * detect (stall_step): position and length stood still for STALL_S at
-#     the end of the stream, after the guide end, nothing paused or seeking;
+#     the end of the stream, nothing paused or seeking. The guide's end time
+#     plays no part (the user's rule of 2026-11-19: 20 s after it freezes);
 #     the move waits for full-screen video and no recent key press (ready);
 #   * move on as Kodi does at a natural end: the replay's own Kodi flag
-#     (AUTOPLAY_PROPERTY, autoplay_on) says whether Kodi would go on; then the
-#     next guide entry (next_broadcast: Kodi's GetNextAutoplayItem rule) or the
-#     live channel, else a stop (after_open picks the fallback).
+#     (AUTOPLAY_PROPERTY, autoplay_on) says whether Kodi would go on; then
+#     the live channel while the guide still lists the show as on air
+#     (on_air), else the next guide entry (next_broadcast: Kodi's
+#     GetNextAutoplayItem rule) or the live channel; a stop when the flag is
+#     off or nothing opens (after_open picks the fallback).
 import clock_helpers
 import restart_helpers
 
@@ -63,9 +68,6 @@ POS_EPS     = 0.25
 # s: "at its end" means length - position <= this (observed: 1 s;
 # inputstream.adaptive stops at the start of the last segment).
 END_SLACK_S = 10.0
-# s after the show's guide end: schedule slop. The real gate is the stream's
-# frozen length; viewers behind live only freeze after the window closed.
-END_GRACE_S = 60.0
 # s: ticks come 1-1.5 s apart. A longer gap (a busy box, a suspend, a clock
 # change) or a clock going back starts the count again.
 TICK_GAP_S  = 5.0
@@ -149,13 +151,16 @@ def ready(window, idle):
     return bool(window) and idle is not None and idle >= QUIET_S
 
 
-def stall_step(track, sample, end, now):
+def stall_step(track, sample, now):
     """One tick -> (the new track, due). Never changes `track`.
     sample: pos / total (the player's position and length in s, None when unknown), busy (BUSY),
-    window (ACT_WINDOW), idle (s since the last key press). end: the show's guide end (epoch).
+    window (ACT_WINDOW), idle (s since the last key press).
     Due once position and length stood still (POS_EPS) at the end of the stream (END_SLACK_S) for
-    STALL_S, END_GRACE_S after the guide end, at most MAX_FIRES times RETRY_S apart per pass; when
-    otherwise due but not ready(), it waits ('deferred') and is due the moment the viewer is back."""
+    STALL_S, at most MAX_FIRES times RETRY_S apart per pass; when otherwise due but not ready(), it
+    waits ('deferred') and is due the moment the viewer is back. The stream alone decides: the
+    guide's end time plays no part (imports.70's first build also waited for it + 60 s; the user's
+    rule of 2026-11-19 is 20 s after it freezes). Where to go is the move's question (on_air,
+    next_broadcast)."""
     t      = dict(track)
     sample = sample if isinstance(sample, dict) else {}
     last, last_pos, last_total = t.get('tick'), t.get('pos'), t.get('total')
@@ -172,8 +177,7 @@ def stall_step(track, sample, end, now):
         return t, False
     if t.get('since') is None: t['since'] = last                  # when the stuck values were first seen
     fires, fired_at = t.get('fires') or 0, t.get('fired_at')
-    due = (end is not None and now >= end + END_GRACE_S
-           and total > 0 and total - pos <= END_SLACK_S
+    due = (total > 0 and total - pos <= END_SLACK_S
            and now - t['since'] >= STALL_S
            and fires < MAX_FIRES
            and (fires == 0 or (fired_at is not None and now - fired_at >= RETRY_S)))
@@ -191,14 +195,25 @@ def autoplay_on(value):
     return isinstance(value, str) and value.strip().lower() == 'true'
 
 
+def on_air(end, now):
+    """The guide still lists the watched show as on air at `now`: its guide end (epoch, from the
+    lookup) has not come. A stream's window need not match its guide entry (2026-11-19: one ended
+    a minute before the guide end, one was declared an hour past it), so a replay can freeze while
+    its show is on air; the move then goes to the live channel. An unusable end counts as over."""
+    end = _num(end)
+    return end is not None and now < end
+
+
 def next_broadcast(broadcasts, start, end, now):
-    """PVR.GetBroadcasts rows of the channel (broadcastid, starttime, endtime) -> the entry Kodi
-    plays after the replay of [start, end) at a natural end ({'broadcastid','start','end'}), or
-    None for the live channel. Kodi's GetNextAutoplayItem (PVRPlaybackState.cpp): the entries in
-    start order, the first one with exactly that start and end that isn't the last, then the one
-    after it; no match (the guide changed) or the last entry -> live. One deliberate difference:
-    an entry that hasn't started at `now` -> live too ('vod' catch-up reports even future entries
-    as playable)."""
+    """PVR.GetBroadcasts rows of the channel (broadcastid, starttime, endtime) -> the entry to play
+    after the frozen replay of [start, end) ({'broadcastid','start','end'}), or None for the live
+    channel. While the guide still lists that show as on air (on_air) -> live, whatever the rows
+    say (the user's rule of 2026-11-19). Once it is over, Kodi's GetNextAutoplayItem
+    (PVRPlaybackState.cpp): the entries in start order, the first one with exactly that start and
+    end that isn't the last, then the one after it; no match (the guide changed) or the last entry
+    -> live. One more deliberate difference from Kodi: an entry that hasn't started at `now` ->
+    live too ('vod' catch-up reports even future entries as playable)."""
+    if on_air(end, now): return None
     rows = []
     for row in broadcasts or []:
         if not isinstance(row, dict): continue
@@ -221,7 +236,35 @@ def after_open(kind, outcome):
     from its outcome (services.Player._replayEndOpen: 'not_opened' or a
     restart_helpers.watch_outcome result): 'live' (try the live channel once), 'stop' (end the
     frozen replay, as its natural end would) or None (done: it started, the viewer took over, it
-    went without an error, or Kodi is closing)."""
+    went without an error, or Kodi is closing). On Kodi 21 'retune' never comes: no playback error
+    reaches Python (FORK_NOTES, Limits)."""
     if kind == 'broadcast' and outcome in ('not_opened', 'refused', 'retune'): return 'live'
     if kind == 'channel' and outcome in ('not_opened', 'refused'): return 'stop'
     return None
+
+
+def target_text(target):
+    """('broadcast', id) / ('channel', id) in plain text for a log line."""
+    kind, value = target
+    return ('the next show, broadcast %s' if kind == 'broadcast' else 'live channel %s') % (value,)
+
+
+# imports.70: services.Player._replayEndOpen's result words in plain text, for its log line.
+# 'started' is Kodi reporting the target as the playing item, which it does before the stream is
+# open; 'gave_up' is also how a start that failed arrives on Kodi 21 (a stop: no playback error
+# reaches Python).
+OUTCOME_NOTES = {'started':    'Kodi switched to it',
+                 'other':      'something else plays now; left alone',
+                 'refused':    'it did not start; the frozen replay still plays',
+                 'retune':     'it failed with a playback error',
+                 'failed':     'it did not start and nothing plays',
+                 'gave_up':    ('left alone: playback stopped (a Stop key or a failed start), a key was pressed,'
+                                ' or still loading after 30 s'),
+                 'not_opened': 'Kodi refused the request',
+                 'shutdown':   'Kodi is closing'}
+
+
+def outcome_note(outcome):
+    """'word (what it means)'; the bare word when unknown."""
+    note = OUTCOME_NOTES.get(outcome)
+    return '%s (%s)' % (outcome, note) if note else '%s' % (outcome,)

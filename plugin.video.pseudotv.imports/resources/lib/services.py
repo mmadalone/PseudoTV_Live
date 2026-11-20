@@ -30,6 +30,7 @@ import onnext_helpers    # madteevee (imports fork, imports.64): Up next drawn o
 import rulestate_helpers # madteevee (imports fork, imports.65): channel player rules = settings + the tuned channel's rules
 import livesubs_helpers # madteevee (imports fork, imports.67): LiveTV subtitles follow the channel
 import replayend_helpers # madteevee (imports fork, imports.70): LiveTV replays frozen at their end move on
+from logger import notice # madteevee (imports fork, imports.70): the replay-end watcher's lines that Kodi's log always gets
 
 class Player(xbmc.Player):
     # imports.16: pendingItem / playingItem live as instance attrs (set in
@@ -163,6 +164,13 @@ class Player(xbmc.Player):
 
     def log(self, msg, level=xbmc.LOGDEBUG):
         return log('%s: %s'%(self.__class__.__name__,msg),level)
+
+
+    def notice(self, msg):
+        # madteevee (imports fork, imports.70): a line Kodi's log always gets (logger.notice), for
+        # the replay-end watcher only: what it watches and what it did must be readable on a box
+        # that runs without the add-on's debug logging (the 2026-11-19 TV test left no line).
+        return notice('%s: %s'%(self.__class__.__name__,msg))
 
 
     def onPlayBackStarted(self):
@@ -1591,7 +1599,7 @@ class Player(xbmc.Player):
 
     # madteevee (imports fork, imports.70): LiveTV replays frozen at their end move on. A replay
     # opened while its show is on air (the RESTART pop-up, the guide's 'Play programme', Kodi's own
-    # next show) is a growing live stream on Movistar+; inputstream.adaptive never ends its last
+    # next show) is a live stream on Movistar+; inputstream.adaptive never ends its last
     # period, so Kodi stalls on the last second and never plays the next show (its "Play next
     # programme automatically" runs only on a natural end). Every decision is in replayend_helpers
     # (tested without Kodi); these methods only read Kodi and act. They never read the playing
@@ -1621,16 +1629,21 @@ class Player(xbmc.Player):
                 return
             facts = self._replayEndFacts
             if not facts or facts.get('epoch') != epoch: return   # a finished show, or the lookup still runs
-            new, due = replayend_helpers.stall_step(track, self._replayEndSample(), facts.get('end'), now)
+            # imports.70 (the repair after the 2026-11-19 TV test): the stream alone decides; due 20 s
+            # after it stood still at its end, with no wait for the guide's end time. Where to go is
+            # the move's choice (on_air, next_broadcast), so these lines report the standstill only.
+            new, due = replayend_helpers.stall_step(track, self._replayEndSample(), now)
             # A newer playback that started during the reads: the sample may be its own.
             if self._play_epoch != epoch: return
             self._replayEndTrack = new
             if new.get('deferred') and not track.get('deferred'):
-                self.log('replay end: broadcast %s stands still at its end; waiting for full-screen video and no key press'
-                         %(facts.get('broadcastid')), xbmc.LOGINFO)
+                self.notice('replay end: broadcast %s is frozen at its end (%d of %d s); waiting for full-screen video'
+                            ' with no menu open and %d s without a key press'
+                            %(facts.get('broadcastid'), new['pos'], new['total'], replayend_helpers.QUIET_S))
             if due:
-                self.log('replay end: broadcast %s stood still at %d of %d s, %d s after its show ended (%s UTC): moving on'
-                         %(facts.get('broadcastid'), new['pos'], new['total'], now - facts.get('end'), facts.get('endtime')), xbmc.LOGINFO)
+                self.notice('replay end: broadcast %s stood still for %d s at %d of %d s: moving on (attempt %d of %d)'
+                            %(facts.get('broadcastid'), now - new['since'], new['pos'], new['total'], new['fires'],
+                              replayend_helpers.MAX_FIRES))
                 self._moveReplayEnd(dict(facts), epoch)
         except Exception as e:
             self._replayEndTrack = {'epoch': epoch, 'failed': True}
@@ -1644,9 +1657,14 @@ class Player(xbmc.Player):
         # imports.70: the tick's Kodi reads (replayend_helpers.stall_step's sample), never logged.
         # Kodi is read directly, not through BUILTIN.getInfoBool, which logs every call at debug
         # level. getTime / getTotalTime are the OSD's own values ('1:40:53 of 1:40:54'); both are
-        # None when the player can't say (nothing plays any more).
-        try: pos, total = self.getTime(), self.getTotalTime()
-        except Exception: pos, total = None, None
+        # None when the player can't say. isPlaying() is asked first: with nothing playing (a
+        # replay that just ended, before Kodi's PVR flag follows) the two getters raise and Kodi
+        # itself writes an ERROR line ('EXCEPTION: Kodi is not playing any media file') for each
+        # call, once a second here.
+        pos, total = None, None
+        if self.isPlaying():
+            try: pos, total = self.getTime(), self.getTotalTime()
+            except Exception: pos, total = None, None
         return {'pos'   : pos,
                 'total' : total,
                 'busy'  : xbmc.getCondVisibility(replayend_helpers.BUSY),
@@ -1665,16 +1683,19 @@ class Player(xbmc.Player):
             bid = replayend_helpers.playing_broadcast(self.jsonRPC.getPlayerItemRef())
             if self._play_epoch != epoch: return
             if bid is None:
-                self.log('replay end: no guide entry plays; nothing to watch', xbmc.LOGINFO)
+                self.notice('replay end: not watching: Kodi reports no guide entry playing')
                 return
             facts = replayend_helpers.programme(self.jsonRPC.getPVRChannelsNow(), bid, clock_helpers.now(), Globals._decodePlot)
             if self._play_epoch != epoch: return
             if facts is None:
-                self.log('replay end: broadcast %s is not a LiveTV show on air: left to Kodi'%(bid), xbmc.LOGINFO)
+                # imports.70: the line says what was checked, no more: whether a replay opened after its
+                # guide end while its stream's window is still open freezes too is not measured
+                # (FORK_NOTES, Limits).
+                self.notice('replay end: not watching broadcast %s: not a LiveTV show on air now: left to Kodi'%(bid))
                 return
             self._replayEndFacts = dict(facts, epoch=epoch)
-            self.log('replay end: watching broadcast %s on channel %s, show ends %s UTC'
-                     %(bid, facts['channelid'], facts['endtime']), xbmc.LOGINFO)
+            self.notice('replay end: watching broadcast %s on channel %s; its guide entry ends %s UTC'
+                        %(bid, facts['channelid'], facts['endtime']))
         except Exception as e:
             # imports.70: ERROR, once per playback (one lookup per playback): see _chkReplayEnd.
             self.log('_lookupReplayEnd, failed: %s'%(e), xbmc.LOGERROR)
@@ -1687,7 +1708,8 @@ class Player(xbmc.Player):
         # a restart (or an earlier move still watching) running now wins, and the tick's second
         # attempt comes RETRY_S later.
         if not self._restart_lock.acquire(False):
-            self.log('replay end: a restart or an earlier move is running; not moving on now', xbmc.LOGINFO)
+            self.notice('replay end: broadcast %s: not moving on now: a restart or an earlier move is still running'
+                        %(facts.get('broadcastid')))
             return
         try: self._runReplayEnd(facts, epoch)
         except Exception as e: self.log('_moveReplayEnd, failed! %s'%(e), xbmc.LOGERROR)
@@ -1696,11 +1718,13 @@ class Player(xbmc.Player):
 
     def _runReplayEnd(self, facts, epoch):
         # imports.70: what Kodi does at a natural end (CPVRPlaybackState::OnPlaybackEnded). The
-        # replay's own flag decides between going on and a stop; going on plays the next guide
-        # entry (Kodi's rule, replayend_helpers.next_broadcast) or the live channel, with one try
-        # of live when the next show won't open, and a stop of the frozen replay when live won't
-        # either (after_open). At most 2 opens and 1 stop; the playback number is checked at every
-        # step, and full screen with no key press right before acting.
+        # replay's own flag decides between going on and a stop. Going on plays the live channel
+        # while the guide still lists the show as on air (replayend_helpers.on_air: a stream's
+        # window need not match its guide entry, 2026-11-19), else the next guide entry (Kodi's
+        # rule, replayend_helpers.next_broadcast) or the live channel; one try of live when the next
+        # show won't open, and a stop of the frozen replay when the live channel won't
+        # (after_open). At most 2 opens and 1 stop; the playback number is checked at every step,
+        # and right before acting full screen, no key press and what plays (frozen(), read last).
         bid, cid = facts['broadcastid'], facts['channelid']
 
         def frozen():
@@ -1720,51 +1744,71 @@ class Player(xbmc.Player):
         if self.service._aborted(): return
         item = frozen()
         if item is None:
-            self.log('replay end: broadcast %s no longer plays; nothing to do'%(bid), xbmc.LOGINFO)
+            self.notice('replay end: broadcast %s: not moving on: it no longer plays'%(bid))
             return
         before   = (item.get('type'), bid)
         autoplay = replayend_helpers.autoplay_on(self._replayEndAutoplay())
-        target   = ('channel', cid)
+        # imports.70 (the repair after the 2026-11-19 TV test): the target is chosen with the clock
+        # read after the guide read, the moment of the choice: the live channel while the guide
+        # lists the show as on air, else the next entry (or live); `why` goes into the log line.
+        target, why = ('channel', cid), ''
         if autoplay:
-            nxt = replayend_helpers.next_broadcast(self.jsonRPC.getPVRBroadcastTimes(cid), facts['start'], facts['end'],
-                                                   clock_helpers.now())
-            if nxt: target = ('broadcast', nxt['broadcastid'])
+            rows = self.jsonRPC.getPVRBroadcastTimes(cid)
+            now  = clock_helpers.now()                      # after the read: the moment of the choice
+            nxt  = replayend_helpers.next_broadcast(rows, facts['start'], facts['end'], now)
+            if nxt: target, why = ('broadcast', nxt['broadcastid']), 'its guide entry is over'
+            elif replayend_helpers.on_air(facts['end'], now):
+                why = 'the guide lists its show as on air until %s UTC'%(facts['endtime'])
+            else:
+                why = 'its guide entry is over and no next entry has started (or the guide changed)'
         # The last check, right before acting (the tick's was a moment ago, before these reads).
         if not can_act():
-            self.log('replay end: broadcast %s: not in full-screen video, a key was pressed or another video plays;'
-                     ' not moving on now'%(bid), xbmc.LOGINFO)
+            self.notice('replay end: broadcast %s: not moving on now: not in full-screen video, a key was pressed or'
+                        ' another video plays'%(bid))
+            return
+        # imports.70 (the repair, from the Kodi check): then what plays, read fresh. Kodi swaps its
+        # playing item at once, but the playback number moves only when the service's main thread
+        # runs the callback (between its 100 ms wait slices), and the flag and guide reads above come
+        # in between: a zap made then without a key press (a phone app, JSON-RPC) is left alone,
+        # neither stopped (the flag, read from the new item, says off) nor opened over.
+        if frozen() is None:
+            self.notice('replay end: broadcast %s: not moving on: it no longer plays'%(bid))
             return
         if not autoplay:
             # imports.70: Kodi leaves the flag off when "Play next programme automatically" was off
             # at the replay's start, and also for the guide menu's "Play only this programme"
             # (offered while the setting is on): either way Kodi would stop at a natural end.
-            self.log('replay end: broadcast %s: Kodi would stop at its end (no epg_playlist_item: "Play next programme'
-                     ' automatically" was off when it started, or "Play only this programme" opened it): stopping'
-                     %(bid), xbmc.LOGINFO)
+            self.notice('replay end: broadcast %s: stopping, as Kodi does at the end of a replay without its next-show'
+                        ' flag ("Play next programme automatically" was off when it started, or "Play only this'
+                        ' programme" opened it)'%(bid))
             self.stop()
             return
-        self.log('replay end: broadcast %s: playing %s %s'%(bid, target[0], target[1]), xbmc.LOGINFO)
+        # imports.70: written before Player.Open, so a move that blocks there (a PIN or "play
+        # recording?" question of Kodi's) still leaves its decision in the log.
+        self.notice('replay end: broadcast %s: %s: opening %s'%(bid, why, replayend_helpers.target_text(target)))
         outcome = self._replayEndOpen(target, before)
         step    = replayend_helpers.after_open(target[0], outcome)
         if step == 'live':
-            # After 'retune' the next show failed with an error: the playback number moved on with
-            # it, nothing plays and no key was pressed (watch_outcome). Otherwise the frozen replay
-            # still plays: the same checks as before the first open.
+            # The frozen replay still plays (the next show was refused, or Kodi said no): the same
+            # checks as before the first open. 'retune', a start that failed with an error, would
+            # skip them, the error having ended the playback; Kodi 21 never reports one: a failed
+            # start arrives as a stop ('gave_up') and ends the move (FORK_NOTES, Limits).
             if outcome != 'retune' and (frozen() is None or not can_act()):
-                self.log('replay end: broadcast %s: the next show did not open; not trying the live channel now'
-                         %(bid), xbmc.LOGINFO)
+                self.notice('replay end: broadcast %s: the next show did not open; not trying the live channel now'
+                            ' (it no longer plays, not in full-screen video, or a key was pressed)'%(bid))
                 return
             outcome = self._replayEndOpen(('channel', cid), before)
             step    = replayend_helpers.after_open('channel', outcome)
         if step == 'stop' and frozen() is not None:
             # imports.70: this stop acts too, so it waits like the first open and the flag-off stop:
             # never under the guide, a menu or a key press; the tick's second attempt comes RETRY_S
-            # later.
+            # later. The live channel may have been the first and only target (the guide still
+            # listed the show as on air): stopping when nothing opens is the 2026-11-15 decision.
             if not can_act():
-                self.log('replay end: broadcast %s: the live channel did not open either; not in full-screen video or a'
-                         ' key was pressed: not stopping now'%(bid), xbmc.LOGINFO)
+                self.notice('replay end: broadcast %s: the live channel did not open; not stopping now (not in'
+                            ' full-screen video, or a key was pressed)'%(bid))
                 return
-            self.log('replay end: broadcast %s: the live channel did not open either: stopping'%(bid), xbmc.LOGINFO)
+            self.notice('replay end: broadcast %s: the live channel did not open: stopping'%(bid))
             self.stop()
 
 
@@ -1775,22 +1819,30 @@ class Player(xbmc.Player):
         # ('channel', id). Kodi doesn't tell Python that an open was refused, so the result is read
         # from the player (restart_helpers.watch_outcome), timed from when Player.Open returned.
         # Returns 'not_opened' (Player.Open said no), a watch_outcome result, or 'shutdown'.
+        # 'started' means Kodi reports the target as the playing item, which it does before the new
+        # stream is open. Each result is written to Kodi's log with the frozen replay's id
+        # (before[1]) and a few words of what it means (replayend_helpers.outcome_note).
         kind, value = target
         # imports.70: the key and event counters are read before Player.Open, the clock after it.
-        # playerOpen waits RPC_Delay after Kodi's reply, and Kodi may fail the open meanwhile: read
-        # after it, that error would be missed ('failed', so no try of live, instead of 'retune').
-        # The key check stays exact: the idle time only grows while no key is pressed.
+        # playerOpen waits RPC_Delay after Kodi's reply, and a stop in that second (on Kodi 21 also a
+        # start that failed) must be seen at once. The key check stays exact: the idle time only
+        # grows while no key is pressed.
         idle0, stops, errors = BUILTIN.getIdle(), self._play_stops, self._play_errors
         if not self.jsonRPC.playerOpen({'item':{('broadcastid' if kind == 'broadcast' else 'channelid'):value}}):
-            self.log('replay end: Player.Open refused %s %s'%(kind, value), xbmc.LOGINFO)
+            self.notice('replay end: broadcast %s: %s: %s'%(before[1], replayend_helpers.target_text(target),
+                                                          replayend_helpers.outcome_note('not_opened')))
             return 'not_opened'
         t0 = clock_helpers.now()
         while not self.service._shutdown(restart_helpers.WATCH_POLL):
             playing = self.isPlaying()
             item    = self.jsonRPC.getPlayerItemRef() if playing else {}
+            # imports.70: the live channel has started when Player.GetItem reports it. Pvr.IsPlayingTv
+            # isn't asked: Kodi refreshes that flag about twice a second (CPVRGUIInfo), after the item
+            # (2026-11-19: about 1 s later), and a check in between read the started channel as
+            # 'other'. A replay target keeps Pvr.IsPlayingEpgTag: it is true before and after (a
+            # replay follows a replay), and it tells a guide entry's id from any other item's.
             if kind == 'broadcast': hit = xbmc.getCondVisibility('Pvr.IsPlayingEpgTag') and item.get('id') == value
-            else:                   hit = (xbmc.getCondVisibility('Pvr.IsPlayingTv') and item.get('type') == 'channel'
-                                           and item.get('id') == value)
+            else:                   hit = item.get('type') == 'channel' and item.get('id') == value
             outcome = restart_helpers.watch_outcome({'elapsed':    clock_helpers.now() - t0,
                                                      'replay':     playing and hit,
                                                      'unchanged':  playing and (item.get('type'), item.get('id')) == before,
@@ -1802,7 +1854,8 @@ class Player(xbmc.Player):
                                                      'errored':    self._play_errors != errors,
                                                      'can_retune': kind == 'broadcast'})
             if outcome == 'wait': continue
-            self.log('replay end: %s %s: %s'%(kind, value, outcome), xbmc.LOGINFO)
+            self.notice('replay end: broadcast %s: %s: %s'%(before[1], replayend_helpers.target_text(target),
+                                                          replayend_helpers.outcome_note(outcome)))
             return outcome
         return 'shutdown'
 

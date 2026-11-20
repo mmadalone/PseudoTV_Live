@@ -29,7 +29,8 @@ instead (the pattern of imports70_sync_rig.py: one shared module, no test in it)
     themselves and can't drift from it again.
   - positive_wait: the same refusal for a rig's simpler wait fake.
   - KODI_LOG: Kodi's log levels (the repo-root xbmc stub still has Kodi 18's numbers).
-  - compile_method / lib_constant: one real method, or one constant, out of a library file.
+  - compile_method / compile_function / lib_constant: one real method, one real top-level function
+    (logger.log / logger.notice, for the rigs' log chain), or one constant, out of a library file.
 
 Nothing here imports Kodi or a Kodi stub; the only files read are the add-on's own sources.
 """
@@ -294,14 +295,22 @@ def method_node(filename, cls, name):
     return None
 
 
-def compile_method(filename, cls, name, **globals_):
-    """The real method `cls.name` of resources/lib/<filename> as a plain function (decorators
-    dropped) that sees only the given globals. Its code object carries the file's real path and
-    line numbers, so a failure points at the add-on's own line."""
-    key = (filename, cls, name)
+def function_node(filename, name):
+    """The top-level def `name` in resources/lib/<filename>, or None."""
+    for node in lib_source(filename)[1].body:
+        if isinstance(node, ast.FunctionDef) and node.name == name: return node
+    return None
+
+
+def _compiled(filename, key, found, what, globals_):
+    """`found` (a def of resources/lib/<filename>) compiled once under `key`, run in a namespace of
+    only `globals_`: the plain function (decorators dropped). Its code object carries the file's
+    real path and line numbers, so a failure points at the add-on's own line. A method's def binds
+    no global in Python (it runs in the class body), so for a method (key[1], its class) the name
+    is set back to what `globals_` gave it, or removed: Player.log calls the module's log (the
+    logger's), never itself."""
     if key not in _CODE:
-        found = method_node(filename, cls, name)
-        if found is None: raise AssertionError('%s: %s.%s not found' % (filename, cls, name))
+        if found is None: raise AssertionError('%s: %s not found' % (filename, what))
         node = ast.parse(ast.get_source_segment(lib_source(filename)[0], found)).body[0]
         node.decorator_list = []
         ast.increment_lineno(node, found.lineno - 1)
@@ -309,7 +318,29 @@ def compile_method(filename, cls, name, **globals_):
         _CODE[key] = compile(ast.Module(body=[node], type_ignores=[]), os.path.join(ADDON_LIB, filename), 'exec')
     namespace = dict(globals_)
     exec(_CODE[key], namespace)  # noqa: S102
-    return namespace[name]
+    function, name = namespace[key[-1]], key[-1]
+    if key[1] is not None:
+        if name in globals_: namespace[name] = globals_[name]
+        else: del namespace[name]
+    return function
+
+
+def compile_method(filename, cls, name, **globals_):
+    """The real method `cls.name` of resources/lib/<filename> as a plain function (decorators
+    dropped) that sees only the given globals."""
+    key = (filename, cls, name)
+    found = method_node(filename, cls, name) if key not in _CODE else None
+    return _compiled(filename, key, found, '%s.%s' % (cls, name), globals_)
+
+
+def compile_function(filename, name, **globals_):
+    """imports.70 (the repair): the real top-level function `name` of resources/lib/<filename>
+    (logger.log, logger.notice) as a plain function that sees only the given globals, so a rig's
+    log lines go through the add-on's own logger with Kodi's levels (KODI_LOG) and the rig's
+    settings, not through the repo-root stubs."""
+    key = (filename, None, name)
+    found = function_node(filename, name) if key not in _CODE else None
+    return _compiled(filename, key, found, name, globals_)
 
 
 def lib_constant(filename, name):

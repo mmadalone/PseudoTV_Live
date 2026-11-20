@@ -3,27 +3,37 @@
 
 On 2026-11-15 a replay of a Mega show, opened with the RESTART pop-up while the
 show was still on air, froze on its last second (1:40:53 of 1:40:54) for
-1 h 26 min. Movistar+ serves a show still on air as a growing live stream (in
-6 of 6 measured cases its window opens a minute or two before the guide start
-and closes about ten minutes after the guide end); inputstream.adaptive never
-ends the last period of a live stream, so Kodi only logs "stream stalled" and
-its "Play next programme automatically", which runs on a natural end, never
-fires. The add-on now notices the freeze and does what Kodi does at a natural
-end.
+1 h 26 min. Movistar+ serves a show still on air as a live stream whose window
+need not match the guide entry (2026-11-15: 6 of 6 measured opened a minute or
+two before the guide start and closed about ten minutes after the guide end;
+2026-11-19: a 69-minute stream inside a 3 h 05 guide entry, ending a minute
+before the guide end); inputstream.adaptive never ends the last period of a
+live stream, so Kodi only logs "stream stalled" and its "Play next programme
+automatically", which runs on a natural end, never fires. The add-on now
+notices the freeze and does what Kodi does at a natural end.
 
 replayend_helpers holds every decision and imports only clock_helpers and
 restart_helpers, so it runs here without Kodi stubs:
   - playing_broadcast / programme: the lookup (is the playing replay's show the
     one on air?);
   - new_track / stall_step / ready: the tick's count (position and length
-    still for 20 s at the end of the stream, after the guide end, nothing
-    paused or seeking; it waits for full-screen video and no key press);
-  - autoplay_on / next_broadcast / after_open: the move (Kodi's own flag,
-    Kodi's next-show rule, the fallbacks).
+    still for 20 s at the end of the stream, nothing paused or seeking; it
+    waits for full-screen video and no key press);
+  - autoplay_on / on_air / next_broadcast / after_open: the move (Kodi's own
+    flag; the live channel while the guide lists the show as on air, else
+    Kodi's next-show rule; the fallbacks);
+  - target_text / outcome_note: the wording of the move's log lines.
+
+The repair after the TV test of 2026-11-19 (the user's rule): due 20 s after the
+stream froze, with no wait for the guide's end time (the first build also
+required the guide end + 60 s, END_GRACE_S, now gone), and the target chosen at
+the move: live while the guide lists the show as on air, else the next entry.
+Its tests (H1-H6) run the frozen Mega replay of that evening, embedded below.
 The Kodi side (services.py) is tested in test_imports70_replay_end.py.
 """
 import ast
 import calendar
+import inspect
 import json
 import os
 import time
@@ -116,11 +126,28 @@ def test_module_does_no_io_and_reads_no_clock():
     assert {c for c in called if c.startswith('restart_helpers.')} == {'restart_helpers.custom_chid'}
 
 
+# imports.70 (the repair): the one table, the log lines' notes on each result word. Text only,
+# and no line of the module writes to it.
+READ_ONLY_TABLES = ('OUTCOME_NOTES',)
+
+
 def test_module_has_no_shared_state_and_no_mutable_defaults():
     tree = _tree()
     for node in tree.body:
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = [ast.unparse(t) for t in (node.targets if isinstance(node, ast.Assign) else [node.target])]
+            if targets[0] in READ_ONLY_TABLES:
+                assert isinstance(node.value, ast.Dict), ast.unparse(node)
+                assert all(isinstance(v, ast.Constant) and isinstance(v.value, str)
+                           for v in node.value.keys + node.value.values), ast.unparse(node)
+                continue
             assert isinstance(node.value, ast.Constant), ast.unparse(node)
+    for name in READ_ONLY_TABLES:
+        used = [n for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id == name]
+        assert len(used) == 2 and [isinstance(n.ctx, ast.Store) for n in used].count(True) == 1, name
+        parents = {c: p for p in ast.walk(tree) for c in ast.iter_child_nodes(p)}
+        reads = [parents[n] for n in used if isinstance(n.ctx, ast.Load)]
+        assert [ast.unparse(r) for r in reads] == ['%s.get' % name], name       # only ever looked up
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef):
             defaults = node.args.defaults + [d for d in node.args.kw_defaults if d is not None]
@@ -128,17 +155,20 @@ def test_module_has_no_shared_state_and_no_mutable_defaults():
 
 
 def test_public_api_is_the_planned_one():
+    """imports.70 (the repair): END_GRACE_S is gone (no wait for the guide end); on_air decides
+    live or next at the move; target_text / OUTCOME_NOTES / outcome_note word the log lines."""
     public = {name for name in vars(rh) if not name.startswith('_')}
     assert public == {'clock_helpers', 'restart_helpers',
-                      'ARM_DELAY_S', 'STALL_S', 'POS_EPS', 'END_SLACK_S', 'END_GRACE_S', 'TICK_GAP_S', 'QUIET_S',
+                      'ARM_DELAY_S', 'STALL_S', 'POS_EPS', 'END_SLACK_S', 'TICK_GAP_S', 'QUIET_S',
                       'REARM_S', 'MAX_FIRES', 'RETRY_S', 'BUSY', 'ACT_WINDOW', 'AUTOPLAY_PROPERTY',
                       'playing_broadcast', 'programme', 'new_track', 'ready', 'stall_step', 'autoplay_on',
-                      'next_broadcast', 'after_open'}
+                      'on_air', 'next_broadcast', 'after_open', 'target_text', 'OUTCOME_NOTES', 'outcome_note'}
+    assert not hasattr(rh, 'END_GRACE_S')
 
 
 def test_constants_are_the_planned_ones():
-    assert (rh.ARM_DELAY_S, rh.STALL_S, rh.POS_EPS, rh.END_SLACK_S, rh.END_GRACE_S, rh.TICK_GAP_S) == \
-        (5.0, 20.0, 0.25, 10.0, 60.0, 5.0)
+    assert (rh.ARM_DELAY_S, rh.STALL_S, rh.POS_EPS, rh.END_SLACK_S, rh.TICK_GAP_S) == \
+        (5.0, 20.0, 0.25, 10.0, 5.0)
     assert (rh.QUIET_S, rh.REARM_S, rh.MAX_FIRES, rh.RETRY_S) == (10, 60.0, 2, 60.0)
     # 20 s is four of Kodi's 5 s caching timers: normal buffering never counts as a freeze.
     assert rh.STALL_S >= 4 * 5
@@ -262,14 +292,14 @@ def sample(pos, total, **kw):
     return out
 
 
-def run(ticks, end=E, track=None):
+def run(ticks, track=None):
     """Feeds [(now, sample)] through stall_step -> (the last track, the times it was due)."""
     if track is None: track = rh.new_track(1, ticks[0][0] - 1)
     dues = []
     for now, s in ticks:
         kept = json.dumps(track, sort_keys=True)
         track_in = track
-        track, due = rh.stall_step(track_in, s, end, now)
+        track, due = rh.stall_step(track_in, s, now)
         assert json.dumps(track_in, sort_keys=True) == kept and track is not track_in     # never changed in place
         if due: dues.append(now)
     return track, dues
@@ -335,32 +365,28 @@ def test_a_growing_length_with_the_position_stuck_never_fires():
     assert run(ticks)[1] == []
 
 
+# Two anchors for the boundary tests: well before the frozen show's guide end and well after it.
+# The guide end is no gate (imports.70, the repair), so each boundary holds at both.
+ANCHORS = pytest.mark.parametrize('t0', [S + 600, E + 900], ids=['during-the-show', 'after-the-show'])
+
+
+@ANCHORS
 @pytest.mark.parametrize('left, fires', [(1.0, True), (10.0, True), (10.01, False), (11.0, False), (300.0, False)])
-def test_only_at_the_end_of_the_stream(left, fires):
-    ticks = held(E + 900, 40, 6054.0 - left, 6054.0)
+def test_only_at_the_end_of_the_stream(left, fires, t0):
+    ticks = held(t0, 40, 6054.0 - left, 6054.0)
     assert bool(run(ticks)[1]) is fires
 
 
-@pytest.mark.parametrize('frozen_from, first_due', [
-    (E - 300, E + 60),            # the window closed early, before the guide end: waits for end + 60
-    (E + 30, E + 60),             # stood still since end + 30: end + 60 is later than its 20 s
-    (E + 50, E + 70),             # stood still since end + 50: its 20 s come after end + 60
-])
-def test_never_before_the_guide_end_and_a_minute(frozen_from, first_due):
-    ticks = held(frozen_from, first_due - frozen_from + 5, 3000.0, 3001.0)
-    assert run(ticks)[1][:1] == [first_due]
-
-
-def test_the_grace_boundary():
-    """end + 59 s waits, end + 60 s acts."""
-    track, dues = run(held(E, 59, 3000.0, 3001.0))
-    assert dues == []
-    _, dues = run([(E + 60, sample(3000.0, 3001.0))], track=track)
-    assert dues == [E + 60]
-
-
-def test_without_the_guide_end_never():
-    assert run(held(E + 900, 100, 3000.0, 3001.0), end=None)[1] == []
+@pytest.mark.parametrize('frozen_from', [E - 3600, E - 300, E - 21, E - 20, E - 1, E, E + 30, E + 50, E + 3600],
+                         ids=['an-hour-before', '5-min-before', '21-s-before', '20-s-before', '1-s-before', 'at-the-end',
+                              '30-s-after', '50-s-after', 'an-hour-after'])
+def test_the_guide_end_is_no_gate(frozen_from):
+    """imports.70 (the repair after the 2026-11-19 TV test; the user's rule): due exactly 20 s after
+    the stream stood still, wherever that is from the guide end. The first build waited for the
+    guide end + 60 s as well (END_GRACE_S): on 2026-11-19 the Mega stream froze 28 s before its
+    guide end, and that rule would only have acted after 88 s of frozen picture."""
+    ticks = held(frozen_from, 25, 3000.0, 3001.0)
+    assert run(ticks)[1][:1] == [frozen_from + rh.STALL_S]
 
 
 def test_pause_and_seeks_start_the_count_again():
@@ -409,9 +435,9 @@ def test_a_one_way_step_back_starts_the_count_again(step):
     assert run(ticks)[1][:1] == [t0 + 16 + rh.STALL_S]
 
 
+@ANCHORS
 @pytest.mark.parametrize('held_for, fires', [(19.9, False), (20.0, True)])
-def test_the_twenty_second_boundary(held_for, fires):
-    t0 = E + 900
+def test_the_twenty_second_boundary(held_for, fires, t0):
     ticks = [(t0, sample(3000.0, 3001.0)), (t0 + 1, sample(3000.0, 3001.0)), (t0 + held_for, sample(3000.0, 3001.0))]
     ticks[2:2] = [(t0 + s, sample(3000.0, 3001.0)) for s in range(2, int(held_for))]
     assert bool(run(ticks)[1]) is fires
@@ -437,7 +463,7 @@ def test_a_zero_length_never_fires():
 def test_no_sample_at_all_never_fires():
     track = rh.new_track(1, E)
     for i in range(40):
-        track, due = rh.stall_step(track, None, E, E + 900 + i)
+        track, due = rh.stall_step(track, None, E + 900 + i)
         assert due is False
 
 
@@ -459,8 +485,8 @@ def test_not_deferred_before_it_is_due():
     assert track['deferred'] is False
 
 
-def test_the_second_attempt_needs_a_minute():
-    t0 = E + 900
+@ANCHORS
+def test_the_second_attempt_needs_a_minute(t0):
     track, dues = run(held(t0, 20 + 59, 3000.0, 3001.0))
     assert dues == [t0 + 20]
     track, dues = run([(t0 + 20 + 59.9, sample(3000.0, 3001.0)), (t0 + 80, sample(3000.0, 3001.0))], track=track)
@@ -516,6 +542,31 @@ def test_the_track_keeps_its_own_fields():
     assert (track['epoch'], track['seen'], track['lookup']) == (9, E - 5, True)
 
 
+def test_stall_step_takes_no_guide_time():
+    """H1. imports.70 (the repair): the guide end left the freeze detection; only the move reads the
+    guide (on_air, next_broadcast)."""
+    assert list(inspect.signature(rh.stall_step).parameters) == ['track', 'sample', 'now']
+    text = ast.unparse([n for n in _tree().body if isinstance(n, ast.FunctionDef) and n.name == 'stall_step'][0])
+    assert 'end' not in [n.id for n in ast.walk(ast.parse(text)) if isinstance(n, ast.Name)]
+
+
+def test_limit_a_freeze_far_from_the_declared_length_never_moves_on():
+    """H5, a known limit (FORK_NOTES): a stream that stops growing well short of the length it
+    declared (a Telecinco-type window, 2026-11-19: 10620 s declared, an hour past the guide end;
+    how it ends is unmeasured) is not at its end: 10 minutes at 8000 of 10620 s are never due."""
+    track, dues = run(held(E + 900, 600, 8000.0, 10620.0))
+    assert dues == [] and track['fires'] == 0 and track['deferred'] is False
+
+
+def test_the_telecinco_live_edge_never_fires():
+    """H6. 2026-11-19, Telecinco (the recording, 17:49:43-17:51:58): a seek to the end was clamped
+    to the live edge, where the position moves at 1x (6662 -> 6799 s) under a fixed declared
+    length of 10620 s. A moving position is never a freeze."""
+    t0 = calendar.timegm((2026, 11, 19, 16, 49, 43))
+    ticks = [(t0 + i, sample(6662.0 + i, 10620.0)) for i in range(138)]
+    assert run(ticks)[1] == []
+
+
 # ================================================================ autoplay_on
 
 
@@ -528,11 +579,84 @@ def test_autoplay_on(value, expected):
     assert rh.autoplay_on(value) is expected
 
 
+# ================================================================ on_air
+
+
+@pytest.mark.parametrize('end, now, expected', [
+    (E, S, True), (E, E - 3600, True), (E, E - 1, True), (E, E - 0.001, True),
+    (E, E, False), (E, E + 0.001, False), (E, E + 3600, False),
+    (float(E), E - 1, True), (float(E), E, False),
+    (None, E - 1, False), (True, 0, False), (str(E), E - 1, False), ([E], E - 1, False),
+], ids=['at-its-start', 'an-hour-before', '1-s-before', '1-ms-before', 'at-the-end', '1-ms-after', 'an-hour-after',
+        'float-before', 'float-at-the-end', 'no-end', 'bool-end', 'text-end', 'list-end'])
+def test_on_air(end, now, expected):
+    """imports.70 (the repair): the guide still lists the frozen show as on air while now < its
+    guide end (the end the lookup read). An unusable end counts as over: then Kodi's next-show rule
+    decides, which can't match it either (live)."""
+    assert rh.on_air(end, now) is expected
+
+
 # ================================================================ next_broadcast
 
 
 def guide(*shows):
     return [entry(bid, start, end) for bid, start, end in shows]
+
+
+class Unread(object):
+    """PVR.GetBroadcasts rows that must not be looked at."""
+
+    def __iter__(self):
+        raise AssertionError('the guide rows were read')
+
+
+@pytest.mark.parametrize('now', [S, S + 1, E - 600, E - 1, E - 0.001])
+def test_while_the_show_is_on_air_the_live_channel_whatever_the_rows_say(now):
+    """imports.70 (the repair; the user's rule of 2026-11-19): a replay frozen while the guide still
+    lists its show as on air goes to the live channel, before any row is looked at; even a next entry
+    that has started already (an overlap) is not played then."""
+    assert rh.next_broadcast(Unread(), S, E, now) is None
+    rows = guide((BID, S, E), (NEXT_BID, S + 1, E + 3000))
+    assert rh.next_broadcast(rows, S, E, now) is None
+
+
+def move_target(rows, start, end, now, flag='true'):
+    """What the move opens, as services.Player._runReplayEnd chooses it from the helpers: 'stop'
+    (Kodi's flag off), 'live' or the next show's broadcast id."""
+    if not rh.autoplay_on(flag): return 'stop'
+    nxt = rh.next_broadcast(rows, start, end, now)
+    return nxt['broadcastid'] if nxt else 'live'
+
+
+MOVE_TARGETS = [
+    # (case, rows, now, Kodi's flag, target)
+    ('flag off, during the show', 'unread', E - 30, '', 'stop'),
+    ('flag off, at the end', 'next', E, '', 'stop'),
+    ('flag off, after the end', 'next', E + 300, 'false', 'stop'),
+    ('on air', 'unread', E - 30, 'true', 'live'),
+    ('on air, a second before the end', 'unread', E - 1, 'true', 'live'),
+    ('at the end, next started', 'next', E, 'true', NEXT_BID),
+    ('at the end, next a second later', 'next+1', E, 'true', 'live'),
+    ('over, next started', 'next', E + 300, 'true', NEXT_BID),
+    ('over, no match', 'changed', E + 300, 'true', 'live'),
+    ('over, the last entry', 'last', E + 300, 'true', 'live'),
+    ('over, no guide', 'none', E + 300, 'true', 'live'),
+    ('on air, the next entry overlaps', 'overlap', E - 30, 'true', 'live'),
+    ('over, the next entry overlapped', 'overlap', E, 'true', NEXT_BID),
+]
+ROWS = {'unread': Unread, 'next': lambda: guide((BID, S, E), (NEXT_BID, E, E + 3000)),
+        'next+1': lambda: guide((BID, S, E), (NEXT_BID, E + 1, E + 3000)),
+        'changed': lambda: guide((BID, S, E + 60), (NEXT_BID, E + 60, E + 3000)),
+        'last': lambda: guide((BID - 1, S - 3600, S), (BID, S, E)), 'none': lambda: [],
+        'overlap': lambda: guide((BID, S, E), (NEXT_BID, E - 600, E + 3000))}
+
+
+@pytest.mark.parametrize('case, rows, now, flag, expected', MOVE_TARGETS, ids=[c[0] for c in MOVE_TARGETS])
+def test_the_move_target(case, rows, now, flag, expected):
+    """H4. Where the move goes, by the guide at the moment of the move: Kodi's flag off -> stop;
+    the guide lists the show as on air -> live, rows unread; it is over -> Kodi's next-show rule
+    (the next entry when it has started, else live)."""
+    assert move_target(ROWS[rows](), S, E, now, flag) == expected
 
 
 def test_next_broadcast_is_the_entry_after_the_frozen_show():
@@ -615,19 +739,139 @@ def test_after_open(kind, outcome, expected):
     assert rh.after_open(kind, outcome) == expected
 
 
+# ================================================================ the log lines' wording (imports.70, the repair)
+
+
+def test_target_text():
+    assert rh.target_text(('broadcast', NEXT_BID)) == 'the next show, broadcast %s' % NEXT_BID
+    assert rh.target_text(('channel', CID)) == 'live channel %s' % CID
+
+
+def _returned(node):
+    """The words a `return` hands back: a text, or either side of `a if test else b`."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str): return {node.value}
+    if isinstance(node, ast.IfExp): return _returned(node.body).union(_returned(node.orelse))
+    return set()
+
+
+def _watch_outcome_words():
+    """Every word restart_helpers.watch_outcome returns, read from its source."""
+    with open(os.path.join(ADDON_LIB, 'restart_helpers.py'), encoding='utf-8') as f: tree = ast.parse(f.read())
+    node = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'watch_outcome'][0]
+    returns = [r for r in ast.walk(node) if isinstance(r, ast.Return)]
+    assert all(_returned(r.value) for r in returns)                     # every return hands back a word
+    return set().union(*[_returned(r.value) for r in returns])
+
+
+def test_every_result_word_has_its_note():
+    """services.Player._replayEndOpen returns 'not_opened', a watch_outcome word (never 'wait': it
+    polls on) or 'shutdown'; each one has its few words for the log line, and nothing else does."""
+    words = _watch_outcome_words()
+    assert 'wait' in words and 'started' in words
+    assert set(rh.OUTCOME_NOTES) == (words - {'wait'}).union({'not_opened', 'shutdown'})
+
+
+@pytest.mark.parametrize('word', sorted(rh.OUTCOME_NOTES))
+def test_outcome_note(word):
+    note = rh.OUTCOME_NOTES[word]
+    assert rh.outcome_note(word) == '%s (%s)' % (word, note)
+    assert note and note == note.strip() and '%' not in note and '://' not in note
+
+
+def test_outcome_note_of_an_unknown_word_is_the_word():
+    assert rh.outcome_note('wait') == 'wait' and rh.outcome_note(None) == 'None' and rh.outcome_note('') == ''
+
+
+def test_the_notes_say_what_the_watch_does():
+    """The notes quote the watch's own rule (restart_helpers): it gives up after WATCH_TIMEOUT s."""
+    import restart_helpers
+    assert 'after %d s' % restart_helpers.WATCH_TIMEOUT in rh.OUTCOME_NOTES['gave_up']
+
+
 # ================================================================ the 2026-11-15 case, chained
 
 
 def test_the_2026_11_15_case_through_the_helpers():
     """The lookup 5 s after the RESTART finds the show on air; the freeze is due once; Kodi's
-    flag was set; the next guide entry has started: the next show."""
+    flag was set; at the move the guide entry is over and the next one has started: the next
+    show."""
     t_open = S + 600
     channels = [row(cid=12, bid=5, start=S - 60, end=E + 60), row()]
     facts = rh.programme(channels, rh.playing_broadcast({'type': 'unknown', 'id': BID}), t_open + rh.ARM_DELAY_S, decode)
     assert facts['channelid'] == CID
     stuck = t_open + 6053
-    _, dues = run(timeline(growing(t_open), t_open + rh.ARM_DELAY_S, stuck + 30), end=facts['end'])
+    _, dues = run(timeline(growing(t_open), t_open + rh.ARM_DELAY_S, stuck + 30))
     assert dues == [stuck + 20]
-    assert rh.autoplay_on('true')
+    assert rh.autoplay_on('true') and not rh.on_air(facts['end'], dues[0])
     rows = guide((BID, S, E), (NEXT_BID, E, E + 3600), (NEXT_BID + 1, E + 3600, E + 7200))
     assert rh.next_broadcast(rows, facts['start'], facts['end'], dues[0])['broadcastid'] == NEXT_BID
+
+
+# ================================================================ the 2026-11-19 case (the TV test)
+# imports.70 (the repair). The values below are copied from the TV test's 1 Hz recording (read-only
+# JSON-RPC, 2026-11-19), so the test reads no file:
+#   ~/.claude/plans/never-synced/replay-end-build/tvtest-2026-11-19/monitor.log
+# Mega, broadcast 883321 (guide 13:55:00-17:00:00 UTC, the next entry 17:00:00-18:45:00), channel
+# 424. The recorder sampled about twice a second: series 1 is the first sample of each second
+# (lines 963-1005, odd), series 2 the second (lines 964-1006, even). Every sample: not paused, not
+# seeking, full-screen video, no dialog, Kodi idle for 10 s or more (b = 00000100101); then the
+# freeze, lines 1007-1516: 510 identical samples from 17:59:32 to 18:03:46, 4133.5 of 4134.0 s
+# (b = 10000100101: Player.Caching on, the rest the same), until the live channel was opened by hand.
+MEGA_BASE = calendar.timegm((2026, 11, 19, 16, 59, 0))          # 17:59:00 local
+MEGA_GUIDE_END = calendar.timegm((2026, 11, 19, 17, 0, 0))     # 18:00:00 local = MEGA_BASE + 60
+MEGA_MOVING = {
+    1: [(10, 4112.5, 4140.0), (11, 4113.3, 4140.0), (12, 4114.3, 4140.0), (13, 4115.4, 4140.0),
+        (14, 4116.3, 4140.0), (15, 4117.3, 4140.0), (16, 4118.2, 4134.0), (17, 4119.4, 4134.0),
+        (18, 4120.4, 4134.0), (19, 4121.5, 4134.0), (20, 4122.3, 4134.0), (21, 4123.3, 4134.0),
+        (22, 4124.4, 4134.0), (23, 4125.2, 4134.0), (24, 4126.3, 4134.0), (25, 4127.3, 4134.0),
+        (26, 4128.3, 4134.0), (27, 4129.3, 4134.0), (28, 4130.3, 4134.0), (29, 4131.3, 4134.0),
+        (30, 4132.3, 4134.0), (31, 4133.3, 4134.0)],
+    2: [(10, 4112.5, 4140.0), (11, 4113.6, 4140.0), (12, 4114.3, 4140.0), (13, 4115.4, 4140.0),
+        (14, 4116.4, 4140.0), (15, 4117.4, 4140.0), (16, 4118.6, 4134.0), (17, 4119.5, 4134.0),
+        (18, 4120.7, 4134.0), (19, 4121.5, 4134.0), (20, 4122.3, 4134.0), (21, 4123.3, 4134.0),
+        (22, 4124.4, 4134.0), (23, 4125.4, 4134.0), (24, 4126.5, 4134.0), (25, 4127.5, 4134.0),
+        (26, 4128.5, 4134.0), (27, 4129.5, 4134.0), (28, 4130.5, 4134.0), (29, 4131.5, 4134.0),
+        (30, 4132.5, 4134.0), (31, 4133.5, 4134.0)],
+}
+MEGA_FROZEN = [(s, 4133.5, 4134.0) for s in range(32, 287)]
+# the recorder's booleans -> the tick's sample: busy (bits 2-5 off), window (6 on, 7-8 off), idle (11 on)
+MEGA_SAMPLE = {'busy': False, 'window': True, 'idle': 10}
+
+
+def mega_ticks(series):
+    return [(MEGA_BASE + s, dict(MEGA_SAMPLE, pos=pos, total=total)) for s, pos, total in MEGA_MOVING[series] + MEGA_FROZEN]
+
+
+def mega_rows(guide_end):
+    """PVR.GetBroadcasts of channel 424 around it: the Mega entry, then the next one from its end."""
+    start = calendar.timegm((2026, 11, 19, 13, 55, 0))
+    return guide((883321, start, guide_end), (883322, guide_end, guide_end + 6300))
+
+
+@pytest.mark.parametrize('series', [1, 2])
+def test_the_mega_recording_fires_twenty_seconds_after_the_freeze_before_the_guide_end(series):
+    """H2. The TV test of 2026-11-19, sample by sample: due 20 s after the position first stood
+    still (17:59:31, the first sample within 0.25 s of 4133.5), at 17:59:51, nine seconds before the
+    guide end; the second attempt a minute later. At the move the guide still lists the show as on
+    air: the live channel. The first build's rule (guide end + 60 s) would have waited until
+    18:01:00 (the README of that evening), and then hung (FORK_NOTES)."""
+    track, dues = run(mega_ticks(series))
+    assert dues == [MEGA_BASE + 51, MEGA_BASE + 111]
+    assert dues[0] < MEGA_GUIDE_END == MEGA_BASE + 60
+    assert (track['pos'], track['total'], track['fires']) == (4133.5, 4134.0, rh.MAX_FIRES)
+    start = calendar.timegm((2026, 11, 19, 13, 55, 0))
+    assert rh.on_air(MEGA_GUIDE_END, dues[0])
+    assert move_target(mega_rows(MEGA_GUIDE_END), start, MEGA_GUIDE_END, dues[0]) == 'live'
+    assert move_target(mega_rows(MEGA_GUIDE_END), start, MEGA_GUIDE_END, dues[1]) == 883322     # the second attempt
+
+
+@pytest.mark.parametrize('series', [1, 2])
+def test_the_same_freeze_five_minutes_after_the_guide_end_means_the_next_show(series):
+    """H3. The same samples with the guide end 300 s before the first frozen one (a viewer further
+    behind live): the same fire time, and the move plays the next entry."""
+    guide_end = MEGA_BASE + 32 - 300
+    _, dues = run(mega_ticks(series))
+    assert dues[:1] == [MEGA_BASE + 51]
+    start = calendar.timegm((2026, 11, 19, 13, 55, 0))
+    assert not rh.on_air(guide_end, dues[0])
+    assert move_target(mega_rows(guide_end), start, guide_end, dues[0]) == 883322
