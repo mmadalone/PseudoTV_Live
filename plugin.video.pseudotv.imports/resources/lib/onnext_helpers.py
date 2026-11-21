@@ -50,7 +50,7 @@ ART_ASPECT          = 1         # ControlImage aspectRatio: scale (fills the ins
 NAMES               = ('frame', 'art', 'shadow', 'text') # the controls, bottom to top
 SETTLE_WAIT         = 0.15      # seconds for Kodi to draw a few frames of newly made controls before they show
 BASE_W, BASE_H      = 1920, 1080 # the grid positions are given in (the Move tool's and the old window's)
-TEXT_W, TEXT_H      = 960, 70   # text box (onnext.xml)
+TEXT_W, TEXT_H      = 960, 70   # the text labels: onnext.xml's text box size (imports.72: labels, which cut a too-wide line instead of wrapping it)
 TEXT_GAP            = 140       # text top below the card top (onnext.xml posy)
 SHADOW_OFFSET       = 1         # Kodi draws a font shadow 1 px right and down (GUIFont.cpp)
 FRAME_COLOR         = '0xFF01416b'
@@ -164,9 +164,12 @@ def grid(width, height):
 
 def layout(x, y, fx=1.0, fy=1.0):
     """Each control's rectangle (x, y, w, h), as onnext.xml drew them: the 5 px
-    frame, the artwork inside it, the text 140 px below the card top and its
-    shadow 1 px right and down (where Kodi draws a font shadow). `x`, `y` are in
-    the 1920x1080 grid; `fx`, `fy` (grid()) move them to the skin's grid."""
+    frame, the artwork inside it, the text label 140 px below the card top and
+    its shadow label 1 px right and down (where Kodi draws a font shadow).
+    madteevee (imports fork, imports.72): labels, not text boxes, in the same
+    rectangles: each line keeps its own row and only a too-wide line is cut
+    with "...". `x`, `y` are in the 1920x1080 grid; `fx`, `fy` (grid()) move
+    them to the skin's grid."""
     x, y = int(round(x * fx)), int(round(y * fy))
     bx, by = int(round(CARD_BORDER * fx)), int(round(CARD_BORDER * fy))
     cw, ch = int(round(CARD_W * fx)), int(round(CARD_H * fy))

@@ -245,6 +245,9 @@ BITOR_REVIEWED = {
     'kodi.py': [],
     'backup.py': [],
     'services.py': ['self.isIdle   = bool(self.idleTime) | self.idleTime > OSD_TIMER'],
+    # imports.72 (the Up next card's labels): none in the two files it changes.
+    'overlay.py': [],
+    'onnext_helpers.py': [],
 }
 
 

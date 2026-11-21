@@ -14,6 +14,12 @@ glue tests) the real Overlay class, Background.onInit and Player._onIdle are
 compiled out of the source and run against fakes. The reference formulas of
 16bf2e04 (before this change) are quoted verbatim below; the tests prove the
 new code gives the same numbers and the same text.
+
+imports.72 (deliberate edits): the card's text and its shadow are labels, so
+the rig offers xbmcgui.ControlLabel (and keeps ControlTextBox: xbmcgui has
+both), its fake controls are strict per kind (a label has no setText), the
+pins name labels and read .label, and the end-of-show screen's controls are
+typed from background.xml. test_imports72_upnext_lines.py draws the text.
 """
 import ast
 import binascii
@@ -26,10 +32,12 @@ import os
 import threading
 import time
 import types
+import xml.etree.ElementTree as ET
 
 import pytest
 
 import globals as globals_mod
+import kodi_faithful as kf
 import onnext_helpers as oh
 from kodi_faithful import positive_wait
 
@@ -245,18 +253,59 @@ def test_hide_reason(kwargs, reason):
 
 # ================================================================ the Overlay rig (real class, fake Kodi)
 
+# imports.72 (a deliberate edit): the fakes are strict per kind, as Kodi's Python controls are. A call the
+# real xbmcgui class lacks (a ControlLabel has no setText) raises AttributeError, as in Kodi, and is recorded
+# (kodi_faithful.refuse_control_call): the test fails even where the code swallows the error, where
+# Overlay.toggleOnNext would silently never show the card and Background.onInit would close the screen. So
+# does a real call this fake doesn't implement. A control made through the rig's xbmcgui has its constructor's
+# arguments bound by name in .call (kodi_faithful.bind_control); a label shows .label, a text box .text. The
+# arguments must be of the types Kodi's binding takes (an int position or size: a float raises TypeError there,
+# and the card would never show), also for setPosition (kodi_faithful.check_types).
+FAKE_CALLS = frozenset(('setVisible', 'setPosition', 'setVisibleCondition', 'setAnimations', 'setImage',
+                        'setColorDiffuse', 'setText', 'setLabel'))
+
+
 class FakeControl(object):
     def __init__(self, kind, *args, **kwargs):
-        self.kind, self.args, self.kwargs = kind, args, kwargs
-        self.visible, self.condition, self.anims = True, None, None
-        self.image = args[4] if kind == 'image' else None
+        self.kind, self.args, self.kwargs, self.call = kind, args, kwargs, None
+        self.visible, self.condition, self.anims, self.position = True, None, None, None
+        self.image = self.label = None
         self.text, self.diffuse, self.calls = '', None, []
+
+    @classmethod
+    def made(cls, kind):
+        """The rig's xbmcgui.Control<kind>: the arguments bound as Kodi's binding takes them."""
+        def make(*args, **kwargs):
+            control = cls(kind, *args, **kwargs)
+            control.call = kf.bind_control(kind, args, kwargs)
+            if kind == 'image': control.image = control.call['filename']
+            if kind == 'label': control.label = control.call['label']
+            return control
+        return make
+
+    def __getattribute__(self, name):
+        if name in FAKE_CALLS:
+            kind = object.__getattribute__(self, 'kind')
+            if not kf.control_has(kind, name): kf.refuse_control_call(kind, name)
+        return object.__getattribute__(self, name)
+
+    def __getattr__(self, name):                                     # only for what the fake doesn't have
+        # Python comes here too when __getattribute__ refused a call (already recorded there)
+        if name.startswith('_') or name in FAKE_CALLS: raise AttributeError(name)
+        kind = object.__getattribute__(self, 'kind')
+        if not kf.control_has(kind, name): kf.refuse_control_call(kind, name)
+        kf.record('the rig\'s fake %s control has no %s(): extend it' % (kind, name))
+        raise AttributeError(name)
 
     def setVisible(self, state):
         self.calls.append(('setVisible', state))
         self.visible = state
 
-    def setPosition(self, x, y): self.position = (x, y)
+    def setPosition(self, x, y):
+        # Control.setPosition(long x, long y) (interfaces/legacy/Control.h:401): ints, as Kodi's binding takes them
+        kind = object.__getattribute__(self, 'kind')
+        kf.check_types('xbmcgui.%s.setPosition()' % kf.CONTROL_CLASSES.get(kind, kind), (('x', kf.LONG, x), ('y', kf.LONG, y)))
+        self.position = (x, y)
     def setVisibleCondition(self, cond, allowHiddenFocus=False): self.condition = cond
     def setAnimations(self, anims): self.anims = anims
     def setImage(self, image, useCache=True): self.image = image
@@ -265,6 +314,12 @@ class FakeControl(object):
     def setText(self, text):
         self.calls.append(('setText', text))
         self.text = text
+
+    def setLabel(self, label='', font=None, textColor=None, disabledColor=None, shadowColor=None, focusedColor=None,
+                 label2=''):
+        # ControlLabel.setLabel (interfaces/legacy/Control.cpp:1027-1036): only the text counts, the rest is ignored
+        self.calls.append(('setLabel', label))
+        self.label = label
 
 
 class FakeWindow(object):
@@ -283,7 +338,9 @@ class FakeWindow(object):
 
 
 class Rig(object):
-    def __init__(self, mode=2, nitem=None, region='%H:%M:%S', labels=None, position='', size=(1920, 1080)):
+    # imports.72 (a deliberate edit): `source`, another overlay.py text to take the Overlay class from (the
+    # proof in test_imports72_upnext_lines.py runs the lines quoted from 39956387 through this rig).
+    def __init__(self, mode=2, nitem=None, region='%H:%M:%S', labels=None, position='', size=(1920, 1080), source=None):
         self.clock, self.advance, self.idle, self.stop, self.playing = 0.0, True, 10, False, True
         self.on_next, self.on_wait, self.waits, self.levels, self.thread_error = None, None, [], [], None
         self.region, self.labels = region, dict(labels or {})
@@ -301,8 +358,9 @@ class Rig(object):
             isPlayingPseudoTV=lambda: self.playing, toggleInfo=lambda *a: self.calls['info'].append(a),
             getRemainingTime=lambda: 600.4)
         ns = self.namespace()
-        cls = _class(O_TREE, 'Overlay')
-        prop = [n for n in O_TREE.body if isinstance(n, ast.Assign) and [ast.unparse(t) for t in n.targets] == ['ONNEXT_RUNNING']]
+        tree = O_TREE if source is None else ast.parse(source, feature_version=(3, 8))
+        cls = _class(tree, 'Overlay')
+        prop = [n for n in tree.body if isinstance(n, ast.Assign) and [ast.unparse(t) for t in n.targets] == ['ONNEXT_RUNNING']]
         exec(compile(ast.Module(body=prop + [cls], type_ignores=[]), 'overlay.py', 'exec'), ns)
         self.ns = ns
         self.overlay = ns['Overlay'](player=self.player)
@@ -326,9 +384,10 @@ class Rig(object):
             BUILTIN=types.SimpleNamespace(getIdle=lambda: rig.idle, getInfoLabel=lambda key, param='ListItem', default='': rig.labels.get(key, '')),
             xbmc=types.SimpleNamespace(LOGDEBUG=0, LOGERROR=4, getRegion=lambda key: rig.region if key == 'time' else '',
                                        playSFX=lambda path: rig.calls['sfx'].append(path)),
+            # imports.72 (a deliberate edit): ControlLabel too, and every control's arguments bound as Kodi binds them
             xbmcgui=types.SimpleNamespace(Window=lambda wid: rig.windows.setdefault(wid, FakeWindow()),
-                                          ControlImage=lambda *a, **k: FakeControl('image', *a, **k),
-                                          ControlTextBox=lambda *a, **k: FakeControl('textbox', *a, **k)),
+                                          ControlImage=FakeControl.made('image'), ControlTextBox=FakeControl.made('textbox'),
+                                          ControlLabel=FakeControl.made('label')),
             onnext_helpers=oh, LANGUAGE=lambda i: STRINGS[i], Globals=types.SimpleNamespace(_getThumb=lambda item: item.get('art', {}).get('thumb', '')),
             FANART_COLOR='/media/fanart.jpg', MEDIA_LOC='/media', BING_WAV='/media/sfx/bing.wav', ONNEXT_TIMER=15, OSD_TIMER=5,
             floor=math.floor, binascii=binascii, FileAccess=types.SimpleNamespace(dumpJSON=lambda d: json.dumps(d, sort_keys=True)),
@@ -395,14 +454,15 @@ def test_mode2_draws_four_controls_in_order_once(madrid):
     rig.overlay.toggleOnNext(True)
     try:
         x, y = 213, 657
+        # imports.72 (a deliberate edit): the text and its shadow are labels, their label text '' at first
         assert rig.by_kind() == [('image', (x, y, 240, 135, ' ')), ('image', (x + 5, y + 5, 230, 125, ' ')),
-                                 ('textbox', (x + 1, y + 141, 960, 70, 'font27', '0xFF696969')),
-                                 ('textbox', (x, y + 140, 960, 70, 'font27', '0xFFFFFFFF'))]
+                                 ('label', (x + 1, y + 141, 960, 70, '', 'font27', '0xFF696969')),
+                                 ('label', (x, y + 140, 960, 70, '', 'font27', '0xFFFFFFFF'))]
         frame, art, shadow, text = rig.video.controls
         assert frame.kwargs == {'aspectRatio': 0} and art.kwargs == {'aspectRatio': 1}   # art fills the frame (scale)
         assert frame.image == '/media/onnext_frame.png' and frame.diffuse == '0xFF01416b'
         assert art.image == '/art/bravo.jpg'
-        assert shadow.text == text.text == TEXT
+        assert shadow.label == text.label == TEXT
         for c in rig.video.controls:
             assert c.condition == oh.condition(PROP) and c.anims == oh.animations(x, y) and c.visible
         assert rig.prop == 'true' and rig.calls['sfx'] == ['/media/sfx/bing.wav']
@@ -473,8 +533,8 @@ def test_mode1_shows_text_and_shadow_only(madrid):
     rig.advance = False
     rig.overlay.toggleOnNext(True)
     try:
-        assert [c.kind for c in rig.video.controls] == ['textbox', 'textbox']
-        assert [c.text for c in rig.video.controls] == [TEXT, TEXT] and all(c.visible for c in rig.video.controls)
+        assert [c.kind for c in rig.video.controls] == ['label', 'label']   # imports.72 (a deliberate edit): labels
+        assert [c.label for c in rig.video.controls] == [TEXT, TEXT] and all(c.visible for c in rig.video.controls)
         assert rig.prop == 'true' and rig.calls['sfx'] == []
     finally:
         rig.finish()
@@ -521,7 +581,7 @@ def test_kodis_label_is_used_when_the_guide_has_no_start():
     rig.advance = False
     rig.overlay.toggleOnNext(True)
     try:
-        assert rig.video.controls[-1].text.endswith('[B]@ 22:29: Johnny Bravo[/B]')
+        assert rig.video.controls[-1].label.endswith('[B]@ 22:29: Johnny Bravo[/B]')   # imports.72: .label
         assert rig.video.controls[1].image == '/media/fanart.jpg'   # no artwork: the add-on's fanart
     finally:
         rig.finish()
@@ -532,7 +592,7 @@ def test_kodis_12_hour_format_is_followed(madrid):
     rig.advance = False
     rig.overlay.toggleOnNext(True)
     try:
-        assert '@ 04:19 PM: Johnny Bravo' in rig.video.controls[-1].text
+        assert '@ 04:19 PM: Johnny Bravo' in rig.video.controls[-1].label   # imports.72: .label
     finally:
         rig.finish()
 
@@ -564,7 +624,7 @@ def test_a_second_pass_reuses_the_controls(madrid):
     try:
         assert len(rig.video.added) == 4 and len(rig.video.controls) == 4
         assert rig.video.controls[1].image == '/art/dexter.jpg'
-        assert rig.video.controls[-1].text.endswith('[B]@ 16:49: Dexter[/B]')
+        assert rig.video.controls[-1].label.endswith('[B]@ 16:49: Dexter[/B]')   # imports.72: .label
         assert rig.prop == 'true' and len(rig.calls['sfx']) == 2 and len(rig.threads) == 2
         assert rig.threads[1].is_alive()
     finally:
@@ -601,7 +661,7 @@ def test_the_next_programme_is_read_when_shown(madrid):
                               'nitem': {'start': NEXT_START, 'id': 99}}
     rig.overlay.toggleOnNext(True)
     try:
-        assert rig.video.controls[-1].text.startswith("[B]You're Watching:[/B] Ed, Edd n Eddy on Cartoon Cartoons")
+        assert rig.video.controls[-1].label.startswith("[B]You're Watching:[/B] Ed, Edd n Eddy on Cartoon Cartoons")   # imports.72: .label
         assert rig.calls['next'][0][1] == {'start': NEXT_START, 'id': 99}
     finally:
         rig.finish()
@@ -645,13 +705,20 @@ def test_open_makes_the_controls_before_the_first_show(madrid, mode):
     rig = Rig(mode=mode)
     rig.advance = False
     rig.overlay.open()
-    assert [c.kind for c in rig.video.added] == ['image', 'image', 'textbox', 'textbox'] and rig.prop == 'false'
+    assert [c.kind for c in rig.video.added] == ['image', 'image', 'label', 'label'] and rig.prop == 'false'   # imports.72: labels
     assert rig.threads == [] and rig.calls['next'] == []
+    assert [c.label for c in rig.video.controls[2:]] == ['', '']          # imports.72: made empty, filled when shown
     rig.overlay.toggleOnNext(True)
     try:
         assert len(rig.video.added) == 4 and rig.prop == 'true'
         assert oh.SETTLE_WAIT not in [w for w, _p, _n in rig.waits]  # nothing new: no wait
         assert [c.visible for c in rig.video.controls] == ([False, False, True, True] if mode == 1 else [True] * 4)
+        # imports.72: the TV's way (services.py toggleOverlay -> open(), then the card): the shadow label and the
+        # text label both get the card's text, once, with setLabel
+        shadow, text = rig.video.controls[2:]
+        assert (shadow.call['textColor'], text.call['textColor']) == ('0xFF696969', '0xFFFFFFFF')
+        for c in (shadow, text):
+            assert c.label == TEXT and [call for call in c.calls if call[0] in ('setLabel', 'setText')] == [('setLabel', TEXT)]
     finally:
         rig.finish()
 
@@ -893,13 +960,31 @@ def test_mode_off_never_shows():
 
 # ================================================================ the end-of-show screen
 
-def _background(rig_labels=None, nitem=None, region='%H:%M:%S'):
-    controls = collections.defaultdict(lambda: FakeControl('xml'))
+# imports.72 (a deliberate edit): the window's controls are typed from background.xml, as Kodi's
+# Window.getControl hands back the class of the control's type (interfaces/legacy/Window.cpp:243-375); a
+# missing id raises there (:267) and here. Each fake is strict (FakeControl): 40003 is a label, so setText on
+# it fails the test.
+BACKGROUND_XML = os.path.join(ADDON, 'resources', 'skins', 'default', '1080i', ADDON_ID + '.background.xml')
+
+
+def _xml_control_types(path=BACKGROUND_XML):
+    """{id: type} of every <control> with an id in the window file."""
+    root = ET.parse(path).getroot()  # noqa: S314 -- the add-on's own window file
+    return dict((int(c.get('id')), c.get('type')) for c in root.iter('control') if c.get('id'))
+
+
+def _background(rig_labels=None, nitem=None, region='%H:%M:%S', citem=None, fitem=None):
+    kinds, controls = _xml_control_types(), {}
     calls = {'close': 0, 'logs': []}
     labels = dict(rig_labels or {})
-    view = types.SimpleNamespace(citem={'name': 'Cartoon Cartoons', 'logo': '/logo.png'}, fitem={'label': 'Korra'},
+
+    def get_control(cid):
+        if cid not in kinds: raise RuntimeError('Non-Existent Control %d' % cid)
+        return controls.setdefault(cid, FakeControl(kinds[cid]))
+    view = types.SimpleNamespace(citem={'name': 'Cartoon Cartoons', 'logo': '/logo.png'} if citem is None else citem,
+                                 fitem={'label': 'Korra'} if fitem is None else fitem,
                                  nitem={'start': NEXT_START, 'showlabel': 'Johnny Bravo'} if nitem is None else nitem,
-                                 getControl=lambda cid: controls[cid], log=lambda msg, level=0: calls['logs'].append(msg),
+                                 getControl=get_control, log=lambda msg, level=0: calls['logs'].append(msg),
                                  close=lambda: calls.__setitem__('close', calls['close'] + 1))
     fn = _function(OVERLAY, O_TREE, 'Background', 'onInit',
                    BUILTIN=types.SimpleNamespace(getInfoLabel=lambda key, param='ListItem', default='': labels.get(key, '')),
@@ -912,18 +997,18 @@ def _background(rig_labels=None, nitem=None, region='%H:%M:%S'):
 
 def test_background_uses_kodis_clock_format(madrid):
     controls, calls = _background()
-    assert controls[40003].text == TEXT and calls['close'] == 0, calls['logs']
+    assert controls[40003].label == TEXT and calls['close'] == 0, calls['logs']   # imports.72: a label
     assert controls[40004].image == '/thumb.jpg' and controls[40001].position == (213, 657)
 
 
 def test_background_12_hour(madrid):
     controls, calls = _background(region='%I:%M:%S %p')
-    assert '@ 04:19 PM: Johnny Bravo' in controls[40003].text
+    assert '@ 04:19 PM: Johnny Bravo' in controls[40003].label   # imports.72: .label
 
 
 def test_background_kodi_label_fallback():
     controls, calls = _background({'NextStartTime': '22:29'}, nitem={'showlabel': 'Johnny Bravo'})
-    assert controls[40003].text.endswith('[B]@ 22:29: Johnny Bravo[/B]')
+    assert controls[40003].label.endswith('[B]@ 22:29: Johnny Bravo[/B]')   # imports.72: .label
 
 
 def test_background_without_any_time_returns_like_before():

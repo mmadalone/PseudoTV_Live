@@ -104,7 +104,7 @@
             <control type="group" id="40001">
                 <posx>130</posx>
                 <posy>735</posy>
-                <width>960/</width>
+                <width>960</width>
                 <itemgap>15</itemgap>
                 <orientation>vertical</orientation>
                 <control type="image" id="40004">
@@ -117,16 +117,17 @@
                     <bordertexture border="5" infill="false" colordiffuse="FF01416b">colors/white.png</bordertexture>
                     <visible>Control.IsVisible(40001)</visible>
                 </control>
-                <control type="textbox" id="40003">
+                <!-- madteevee (imports fork, imports.72): a label, not a text box. A label shows each [CR] line on its
+                     own, one font line apart, and cuts only a too-wide line with "..."; the text box wrapped a long
+                     first line and its 70 px then clipped the Next line away. No scroll setting (on a label it means
+                     a marquee instead of the cut) and no wrapmultiline (it would wrap again). -->
+                <control type="label" id="40003">
                     <height>70</height>
-                    <width>960/</width>
+                    <width>960</width>
                     <posy>140</posy>
                     <font>font27</font>
-                    <scroll>true</scroll>
                     <textcolor>white</textcolor>
                     <shadowcolor>dimgray</shadowcolor>
-                    <scrolltime>600</scrolltime>
-                    <autoscroll delay="5000" time="1000">false</autoscroll>
                     <label/>
                     <visible>Control.IsVisible(40001)</visible>
                 </control>

@@ -84,7 +84,11 @@ class Background(xbmcgui.WindowXMLDialog):
                                                   ('Visible'    , 'effect=zoom start=80 end=100 center=%s,%s delay=160 tween=back time=240 reversible=false'%(onNextX, onNextY)),
                                                   ('Visible'    , 'effect=fade end=100 time=240 reversible=false')])
             self.getControl(40002).setImage(LOGO_COLOR if logo.endswith('wlogo.png') else logo)
-            self.getControl(40003).setText(onnext_helpers.card_text(LANGUAGE(32104),LANGUAGE(32116),nowTitle,chname,nextTime,nextTitle))
+            # madteevee (imports fork, imports.72): 40003 is a label now (background.xml), so it is filled with
+            # setLabel (a label has no setText: the error would close this screen, see the except below). A label
+            # shows each [CR] line on its own and cuts a too-wide line with "..."; the text box wrapped a long first
+            # line and its 70 px then clipped the Next line away.
+            self.getControl(40003).setLabel(onnext_helpers.card_text(LANGUAGE(32104),LANGUAGE(32116),nowTitle,chname,nextTime,nextTitle))
             self.getControl(40004).setImage(Globals._getThumb(self.nitem))
         except Exception as e:
             self.log("onInit, failed! %s"%(e), xbmc.LOGERROR)
@@ -363,8 +367,12 @@ class Overlay(object):
             # the frame's middle is see-through; the art fills it (scale) like the old border hugged it
             if   name == 'frame': control = xbmcgui.ControlImage(*rect[name], ' ', aspectRatio=onnext_helpers.FRAME_ASPECT)
             elif name == 'art':   control = xbmcgui.ControlImage(*rect[name], ' ', aspectRatio=onnext_helpers.ART_ASPECT)
-            elif name == 'shadow': control = xbmcgui.ControlTextBox(*rect[name], onnext_helpers.TEXT_FONT, onnext_helpers.SHADOW_COLOR)
-            else:                  control = xbmcgui.ControlTextBox(*rect[name], onnext_helpers.TEXT_FONT, onnext_helpers.TEXT_COLOR)
+            # madteevee (imports fork, imports.72): the text and its shadow are labels ('' is the label text, the 5th
+            # argument). A label draws each [CR] line one font line apart and cuts only a too-wide line with "...".
+            # The text box wrapped a first line wider than 960 px, and its 70 px then clipped the Next line away
+            # (2026-11-21). Python labels have no shadow setting, so the dim-grey copy 1 px right and down stays.
+            elif name == 'shadow': control = xbmcgui.ControlLabel(*rect[name], '', onnext_helpers.TEXT_FONT, onnext_helpers.SHADOW_COLOR)
+            else:                  control = xbmcgui.ControlLabel(*rect[name], '', onnext_helpers.TEXT_FONT, onnext_helpers.TEXT_COLOR)
             self._addControl(control)
             if not self._hasControl(control): continue
             control.setVisibleCondition(onnext_helpers.condition(ONNEXT_RUNNING))
@@ -393,7 +401,7 @@ class Overlay(object):
             for name, control in list(self._onNextControls.items()):
                 if name not in names: self._setVisible(control, False) # mode 1 after mode 2 (a settings change)
                 elif name == 'art':   control.setImage((Globals._getThumb(nitem) or FANART_COLOR))
-                elif name in ('shadow','text'): control.setText(text)
+                elif name in ('shadow','text'): control.setLabel(text) # madteevee (imports fork, imports.72): labels (no setText)
             for name in names:
                 if name in self._onNextControls: self._setVisible(self._onNextControls[name], True)
             if not self._onNextControls: return self.log('toggleOnNext, no controls, not shown', xbmc.LOGERROR)
