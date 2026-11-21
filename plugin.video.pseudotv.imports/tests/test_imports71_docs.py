@@ -50,31 +50,37 @@ def _entry():
 def _section():
     text = _read(ROOT, 'FORK_NOTES.md')
     start = text.index(SECTION)
-    return text[start:text.index('**Maintenance posture**', start)]
+    # imports.72 (a deliberate edit): the section ends where the next one begins (imports.72's follows it now)
+    return text[start:text.index('\n**', start + len(SECTION))]
 
 
 def test_one_version_everywhere():
-    assert _addon().get('version') == VERSION
-    assert _news().startswith('v%s\n' % VERSION)
-    assert changelog_helpers.latestEntry(_read(ADDON, 'changelog.txt')).startswith('v.%s\n' % VERSION)
+    # imports.72 (a deliberate edit): imports.71 is no longer the newest release. Its entry and its news block are
+    # still there, after the newer ones; the add-on's version is pinned by the newest release's docs test.
+    version = _addon().get('version')
+    assert version.startswith('0.8.0+imports.') and int(version.rpartition('.')[2]) > 71
+    assert 'v%s\n' % VERSION in _news() and not _news().startswith('v%s\n' % VERSION)
+    text = _read(ADDON, 'changelog.txt')
+    assert text.count('\nv.%s\n' % VERSION) == 1 and not changelog_helpers.latestEntry(text).startswith('v.%s\n' % VERSION)
 
 
 def test_the_news_fits_kodis_limit_and_says_what_changed():
-    """V1. Kodi shows at most 1,500 characters; the imports.71 block leads, imports.70's follows, the imports.69
-    block is gone."""
+    """V1. Kodi shows at most 1,500 characters. imports.72 (a deliberate edit): imports.72's block leads, the imports.71
+    block follows, imports.70's left the news."""
     news = _news()
     assert len(news) <= 1500
     assert [line for line in news.splitlines() if line.startswith('v0.8.0+imports.')] == [
-        'v0.8.0+imports.71', 'v0.8.0+imports.70']
-    block = news.split('v0.8.0+imports.70')[0]
+        'v0.8.0+imports.72', 'v0.8.0+imports.71']
+    block = news.split('v0.8.0+imports.71\n', 1)[1]
     for words in ('no longer stops by itself', 'Listening', 'Force background service to reload', 'restart Kodi'):
         assert words in block, words
 
 
 def test_the_pop_up_says_what_you_will_notice():
     """V2. The plan's 'What you'll notice', in plain words, above the engineering notes; within the pop-up's
-    limit (test_imports55 holds it at 2,500)."""
-    popup = changelog_helpers.latestEntry(_read(ADDON, 'changelog.txt'))
+    limit (test_imports55 holds it at 2,500). imports.72 (a deliberate edit): the pop-up part of imports.71's entry,
+    no longer the newest."""
+    popup = _entry().split('--- engineering notes ---', 1)[0]
     assert len(popup) < 2500 and popup.count('\nv.') == 0
     for words in ('no longer stops by itself', 'three times', 'Something Went Wrong', 'each different error once',
                   'no longer saves its settings every few minutes', '"Listening"', 'Online or Offline',
@@ -91,8 +97,9 @@ def test_no_reminder_line_is_promised():
     2026-11-20), and the code writes none. The pop-up and the news never mention one; the engineering notes
     and the FORK_NOTES section only to say there are none ('no reminder lines'), and the FORK_NOTES
     Decisions bullet says so."""
-    popup = changelog_helpers.latestEntry(_read(ADDON, 'changelog.txt'))
-    for name, text in (('pop-up', popup), ('news', _news().split('v0.8.0+imports.70')[0])):
+    # imports.72 (a deliberate edit): imports.71's pop-up part and news block, no longer the newest
+    popup = _entry().split('--- engineering notes ---', 1)[0]
+    for name, text in (('pop-up', popup), ('news', _news().split('v0.8.0+imports.71\n', 1)[1])):
         assert 'reminder' not in text.lower() and 'every 10 minutes' not in text, name
     notes = _entry().split('--- engineering notes ---\n', 1)[1]
     for name, text in (('engineering notes', notes), ('FORK_NOTES', _section())):

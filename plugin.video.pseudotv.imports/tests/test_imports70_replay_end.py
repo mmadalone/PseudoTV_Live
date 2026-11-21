@@ -2897,6 +2897,10 @@ def test_getPVRBroadcastTimes_survives_errors(rpc, reply):
 def test_the_addon_news_fits_kodis_limit():
     news = ET.parse(os.path.join(ADDON, 'addon.xml')).getroot().find('.//news').text
     assert len(news) <= 1500
-    # imports.71 (a deliberate edit): imports.70's block no longer leads the news; it is still there.
-    block = news.split('v0.8.0+imports.70', 1)[1].split('v0.8.0+imports.', 1)[0]
-    assert 'freezes at its end' in block
+    # imports.71 (a deliberate edit): imports.70's block no longer leads the news.
+    # imports.72 (a deliberate edit): imports.70's block left the news (Kodi's 1,500 characters); its changelog entry
+    # keeps saying it.
+    assert 'v0.8.0+imports.70' not in news
+    with open(os.path.join(ADDON, 'changelog.txt'), encoding='utf-8') as fh: text = fh.read()
+    entry = text[text.index('\nv.0.8.0+imports.70\n'):text.index('\nv.0.8.0+imports.69\n')]
+    assert 'no longer stays frozen on its last second' in entry.split('--- engineering notes ---')[0]
